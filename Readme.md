@@ -22,7 +22,7 @@
 <!-- 👁 Visitor Counter -->
 
 <p align="center">
-  <img src="https://komarev.com/ghpvc/?username=VivaanNetworkDev&style=flat-square" />
+  <img src="https://komarev.com/ghpvc/?username=SkyBotsDeveloper&style=flat-square" />
 </p>
 
 <h1 align="center">
@@ -41,11 +41,11 @@
 
 
 <p align="center">
-  <a href="https://github.com/VivaanNetworkDev/VivaanXmusic3.0/stargazers"><img src="https://img.shields.io/github/stars/VivaanNetworkDev/VivaanXmusic3.0?style=flat-square"/></a>
-  <a href="https://github.com/VivaanNetworkDev/VivaanXmusic3.0/network/members"><img src="https://img.shields.io/github/forks/VivaanNetworkDev/VivaanXmusic3.0?style=flat-square"/></a>
-  <a href="https://github.com/VivaanNetworkDev/VivaanXmusic3.0/issues"><img src="https://img.shields.io/github/issues/VivaanNetworkDev/VivaanXmusic3.0?style=flat-square"/></a>
-  <a href="https://github.com/VivaanNetworkDev/VivaanXmusic3.0/commits/main"><img src="https://img.shields.io/github/last-commit/VivaanNetworkDev/VivaanXmusic3.0?style=flat-square"/></a>
-  <a href="https://github.com/VivaanNetworkDev/VivaanXmusic3.0/actions"><img src="https://img.shields.io/badge/CI-Status-grey?style=flat-square"/></a>
+  <a href="https://github.com/SkyBotsDeveloper/VivaanXmusic3.0/stargazers"><img src="https://img.shields.io/github/stars/SkyBotsDeveloper/VivaanXmusic3.0?style=flat-square"/></a>
+  <a href="https://github.com/SkyBotsDeveloper/VivaanXmusic3.0/network/members"><img src="https://img.shields.io/github/forks/SkyBotsDeveloper/VivaanXmusic3.0?style=flat-square"/></a>
+  <a href="https://github.com/SkyBotsDeveloper/VivaanXmusic3.0/issues"><img src="https://img.shields.io/github/issues/SkyBotsDeveloper/VivaanXmusic3.0?style=flat-square"/></a>
+  <a href="https://github.com/SkyBotsDeveloper/VivaanXmusic3.0/commits/main"><img src="https://img.shields.io/github/last-commit/SkyBotsDeveloper/VivaanXmusic3.0?style=flat-square"/></a>
+  <a href="https://github.com/SkyBotsDeveloper/VivaanXmusic3.0/actions"><img src="https://img.shields.io/badge/CI-Status-grey?style=flat-square"/></a>
 </p>
 
 ## 🌟 What is VivaanXMusic?
@@ -207,7 +207,7 @@ sudo apt install -y nodejs
 npm install -g npm
 
 ### Step 2: Clone Repo
-git clone https://github.com/VivaanNetworkDev/VivaanXmusic3.0
+git clone https://github.com/SkyBotsDeveloper/VivaanXmusic3.0
 cd VivaanXmusic3.0
 tmux new -s Vivaan
 
@@ -239,7 +239,7 @@ rm -rf VivaanXmusic3.0 # Uninstall the repo
 
 ```bash
 ### Step 1: Clone Repo
-git clone https://github.com/VivaanNetworkDev/VivaanXmusic3.0
+git clone https://github.com/SkyBotsDeveloper/VivaanXmusic3.0
 cd VivaanXmusic3.0
 
 ### Step 2: Create .env File
@@ -271,7 +271,7 @@ docker rmi vivaanxmusic      # Remove image
 | Platform                | Deploy Link                                                                                                                                                                                               |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 🔑 **Generate Session** | <a href="https://t.me/SessionBuilderbot"><img src="https://img.shields.io/badge/Session%20-Generator-blue?style=for-the-badge&logo=telegram"/></a>                                                    |
-| 🌍 **Heroku Deploy**    | <a href="http://dashboard.heroku.com/new?template=https://github.com/VivaanNetworkDev/VivaanXmusic3.0"><img src="https://img.shields.io/badge/Deploy%20to-Heroku-purple?style=for-the-badge&logo=heroku"/></a> |
+| 🌍 **Heroku Deploy**    | <a href="http://dashboard.heroku.com/new?template=https://github.com/SkyBotsDeveloper/VivaanXmusic3.0"><img src="https://img.shields.io/badge/Deploy%20to-Heroku-purple?style=for-the-badge&logo=heroku"/></a> |
 
 
 
@@ -301,4 +301,4 @@ docker rmi vivaanxmusic      # Remove image
 ### 🔖 Credits
 
 * <b> *sᴩᴇᴄɪᴀʟ ᴛʜᴀɴᴋs ᴛᴏ <a href="https://github.com/AnonymousX1025">ᴀɴᴏɴʏ</a> ғᴏʀ <a href="https://github.com/AnonymousX1025/AnonXMusic">ᴀɴᴏɴxᴍᴜsɪᴄ</a>* </b>
-* <b> *ᴄʀᴀғᴛᴇᴅ ᴡɪᴛʜ ᴘᴀssɪᴏɴ ʙʏ <a href="https://github.com/VivaanNetworkDev">ᴠɪᴠᴀᴀɴ ᴅᴇᴠs</a>* </b>
+* <b> *ᴄʀᴀғᴛᴇᴅ ᴡɪᴛʜ ᴘᴀssɪᴏɴ ʙʏ <a href="https://github.com/SkyBotsDeveloper">ᴠɪᴠᴀᴀɴ ᴅᴇᴠs</a>* </b>

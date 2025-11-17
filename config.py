@@ -40,7 +40,7 @@ HEROKU_APP_NAME = getenv("HEROKU_APP_NAME")
 HEROKU_API_KEY = getenv("HEROKU_API_KEY")
 
 # ── Git / updates ──────────────────────────────────────────────────────────────
-UPSTREAM_REPO = getenv("UPSTREAM_REPO", "https://github.com/VivaanNetworkDev/VivaanXmusic3.0")
+UPSTREAM_REPO = getenv("UPSTREAM_REPO", "https://github.com/SkyBotsDeveloper/VivaanXmusic3.0")
 UPSTREAM_BRANCH = getenv("UPSTREAM_BRANCH", "Main")
 GIT_TOKEN = getenv("GIT_TOKEN")  # needed if repo is private
 
