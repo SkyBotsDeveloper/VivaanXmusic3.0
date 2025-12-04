@@ -51,14 +51,14 @@
       "required": true,
       "value": ""
     },
-    "API_URL": {
+    "YTPROXY_URL": {
       "description": "(Optional) URL of a custom API server used for music downloads or other services.",
-      "required": false,
-      "value": ""
+      "required": true,
+      "value": "https://tgapi.xbitcode.com"
     },
-    "API_KEY": {
+    "YT_API_KEY": {
       "description": "(Optional) API Key associated with your custom music download server (used with API_URL).",
-      "required": false,
+      "required": true,
       "value": ""
     },
     "DEEP_API": {
