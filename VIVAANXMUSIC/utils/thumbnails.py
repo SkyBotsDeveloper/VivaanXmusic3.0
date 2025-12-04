@@ -82,7 +82,7 @@ async def get_thumb(videoid, user_id=None):
     - YouTube thumbnail as background (blurred)
     - BOTH circles on RIGHT SIDE
     - BIGGER YouTube thumbnail circle (280px)
-    - SMALLER User DP circle overlapping at corner (170px)
+    - SMALLER User DP circle with proper separation (northwest positioning)
     - Song info on LEFT SIDE with bright white text
     - BIGGER "NOW PLAYING" text at top (attractive)
     - Waveform progress bar (lower position)
@@ -173,15 +173,15 @@ async def get_thumb(videoid, user_id=None):
         # ADD CIRCULAR IMAGES (RIGHT SIDE)
         # ============================================
         # YouTube thumbnail (right side circle) - BIGGER 280x280
-        # Position at right side: x = 1280 - 280 - 50 = 950
+        # Position at right side
         y = changeImageSize(280, 280, circle(youtube_thumb))
         background.paste(y, (950, 150), mask=y)
 
-        # User DP (right side circle overlapping) - SMALLER 170x170
-        # Position so it overlaps at bottom-left of thumbnail circle
-        # Overlapping effect for professional look
+        # User DP (right side circle) - SMALLER 170x170
+        # MOVED NORTHWEST to avoid collision
+        # From (1040, 260) moved to (980, 180) - up and left for better separation
         a = changeImageSize(170, 170, circle(user_dp))
-        background.paste(a, (1040, 260), mask=a)
+        background.paste(a, (980, 180), mask=a)
 
         # ============================================
         # DRAW TEXT AND UI ELEMENTS
