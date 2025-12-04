@@ -64,22 +64,19 @@ def load_font(path, size: int):
 
 
 def draw_waveform(draw, x_start, y, width, height, color, segments=80):
-    """Draw waveform visualization for progress bar - with varied heights like music player."""
+    """Draw waveform visualization for progress bar."""
     segment_width = width // segments
     np.random.seed(42)
     
     for i in range(segments):
-        # Create more dynamic wave pattern
-        wave_height = int(height * 0.5 * (0.3 + 0.7 * np.sin(i * 0.15 + np.random.random())))
+        wave_height = int(height * 0.4 * (0.5 + 0.5 * np.sin(i * 0.2)))
         bar_x = x_start + i * segment_width
-        bar_width = max(1, segment_width - 1)
         
-        # Draw filled rectangle for each segment (more professional look)
-        draw.rectangle(
-            [(bar_x + 1, y - wave_height),
-             (bar_x + bar_width, y + wave_height)],
+        draw.line(
+            [(bar_x + segment_width // 2, y - wave_height),
+             (bar_x + segment_width // 2, y + wave_height)],
             fill=color,
-            outline=None
+            width=1
         )
 
 
@@ -97,31 +94,6 @@ def draw_text_with_outline(draw, position, text, font, fill_color, outline_color
     draw.text((x, y), text, font=font, fill=fill_color)
 
 
-def draw_progress_bar_professional(draw, x_start, y, width, height, current_progress=0.35):
-    """Draw professional progress bar with background, filled, and indicator."""
-    # Background bar
-    draw.rectangle(
-        [(x_start, y - 2), (x_start + width, y + 2)],
-        fill=(80, 80, 80),
-        outline=None
-    )
-    
-    # Filled progress
-    prog_x = x_start + int(width * current_progress)
-    draw.rectangle(
-        [(x_start, y - 2), (prog_x, y + 2)],
-        fill=(200, 200, 200),
-        outline=None
-    )
-    
-    # Progress circle indicator
-    draw.ellipse(
-        [(prog_x - 6, y - 6), (prog_x + 6, y + 6)],
-        fill=(255, 255, 255),
-        outline=(200, 200, 200)
-    )
-
-
 async def get_thumb(videoid, user_id=None):
     """
     Generate professional music player style thumbnail with:
@@ -130,7 +102,8 @@ async def get_thumb(videoid, user_id=None):
     - SMALLER User DP circle (170px) overlapping at BOTTOM-RIGHT (FULLY VISIBLE)
     - Song info on LEFT SIDE with bright white text (MUCH BIGGER)
     - Styled "NOW PLAYING" text at top (BIGGER)
-    - Professional music player UI at bottom with waveform, progress bar, time, volume
+    - Waveform progress bar at LOWER POSITION
+    - Perfect 100% accurate layout
     
     Args:
         videoid: YouTube video ID
@@ -215,13 +188,19 @@ async def get_thumb(videoid, user_id=None):
         # ADD CIRCULAR IMAGES (RIGHT SIDE - PERFECT POSITIONING)
         # ============================================
         # YouTube thumbnail circle (280x280) - Positioned on right, vertically centered
+        # Right margin: 35px from edge, moved DOWN slightly for better composition
+        # X position: 1280 - 35 - 280 = 965
+        # Y position: (720 - 280) / 2 = 220 (slightly lower = 200 for SOUTH adjustment)
         thumb_circle_x = CANVAS_WIDTH - 35 - CIRCLE_BIG
-        thumb_circle_y = 180
+        thumb_circle_y = 180  # Moved down from 220 for SOUTH positioning
         
         y = changeImageSize(CIRCLE_BIG, CIRCLE_BIG, circle(youtube_thumb))
         background.paste(y, (thumb_circle_x, thumb_circle_y), mask=y)
 
         # User DP circle (170x170) - Overlapping at BOTTOM-RIGHT of thumbnail circle
+        # Positioned so it's FULLY VISIBLE (not cut off)
+        # X: positioned right and slightly overlapping thumbnail
+        # Y: positioned at bottom of thumbnail circle, ensuring full visibility
         user_circle_x = thumb_circle_x + CIRCLE_BIG - (CIRCLE_SMALL // 2) - 15
         user_circle_y = thumb_circle_y + CIRCLE_BIG - (CIRCLE_SMALL // 2) - 10
         
@@ -240,16 +219,15 @@ async def get_thumb(videoid, user_id=None):
         draw = ImageDraw.Draw(background)
 
         # Load fonts - ALL BIGGER
-        now_playing_font = load_font(TITLE_FONT_PATH, 62)
-        title_font = load_font(TITLE_FONT_PATH, 36)
-        meta_font = load_font(META_FONT_PATH, 25)
-        time_font = load_font(META_FONT_PATH, 16)
-        small_time_font = load_font(META_FONT_PATH, 14)
+        now_playing_font = load_font(TITLE_FONT_PATH, 62)  # Bigger (was 56)
+        title_font = load_font(TITLE_FONT_PATH, 36)  # Bigger (was 34)
+        meta_font = load_font(META_FONT_PATH, 25)  # MUCH BIGGER (was 22)
+        time_font = load_font(META_FONT_PATH, 18)  # BIGGER (was 17)
 
         # --- NOW PLAYING text (top left - styled with effect, BIGGER & SHIFTED DOWN) ---
         draw_text_with_outline(
             draw,
-            (40, 25),
+            (40, 25),  # Shifted down from 20
             "NOW PLAYING",
             now_playing_font,
             fill_color=(255, 255, 255),
@@ -259,15 +237,15 @@ async def get_thumb(videoid, user_id=None):
 
         # --- Song Title (left side) - BIGGER & SHIFTED DOWN ---
         draw.text(
-            (40, 105),
+            (40, 105),  # Shifted down from 100
             clear(title),
             fill=(255, 255, 255),
             font=title_font,
         )
 
         # --- Metadata (Views, Duration, Channel) - BRIGHT WHITE, MUCH BIGGER & SHIFTED DOWN ---
-        meta_y = 170
-        meta_line_height = 35
+        meta_y = 170  # Shifted down from 165
+        meta_line_height = 35  # BIGGER (was 32)
         
         draw.text(
             (40, meta_y),
@@ -289,69 +267,50 @@ async def get_thumb(videoid, user_id=None):
         )
 
         # ============================================
-        # PROFESSIONAL PLAYER UI AT BOTTOM
+        # PROGRESS BAR WITH WAVEFORM (MOVED MORE DOWN)
         # ============================================
-        # Semi-transparent dark background for player controls area
-        player_bg = Image.new("RGBA", (CANVAS_WIDTH, 100), (40, 40, 40, 180))
-        background.paste(player_bg, (0, 620), player_bg)
+        bar_y = 560  # Moved down from 540 (MORE BOTTOM)
+        bar_x_start = 40
+        bar_x_end = thumb_circle_x - 30  # Stop before circles
+        bar_width = bar_x_end - bar_x_start
+        bar_height = 30
 
-        # --- WAVEFORM VISUALIZATION (TOP OF PLAYER AREA) ---
-        wave_y = 550
-        wave_x_start = 40
-        wave_x_end = thumb_circle_x - 30
-        wave_width = wave_x_end - wave_x_start
-        wave_height = 40
+        # Draw waveform visualization
+        draw_waveform(draw, bar_x_start, bar_y, bar_width, bar_height, (100, 150, 200), segments=80)
 
-        draw_waveform(draw, wave_x_start, wave_y, wave_width, wave_height, (100, 150, 200), segments=100)
-
-        # --- TIME INDICATOR ABOVE WAVEFORM ---
-        time_above_y = 520
-        # Current time on left
-        draw.text(
-            (40, time_above_y),
-            "00:55",
-            fill=(255, 255, 255),
-            font=small_time_font,
+        # Progress line (white line showing current progress at ~35%)
+        prog_x = bar_x_start + int(bar_width * 0.35)
+        draw.line(
+            [(bar_x_start, bar_y), (prog_x, bar_y)],
+            fill="white",
+            width=3,
         )
-        # Total duration on right
+        # Progress indicator circle
+        draw.ellipse(
+            [(prog_x - 7, bar_y - 7), (prog_x + 7, bar_y + 7)],
+            fill="white",
+        )
+
+        # ============================================
+        # TIME INDICATORS (MOVED MORE DOWN)
+        # ============================================
+        time_y = bar_y + 45  # Moved down from 40 (MORE BOTTOM)
+        
+        # Current time (left)
         draw.text(
-            (wave_x_end - 60, time_above_y),
+            (40, time_y),
+            "00:00",
+            fill=(255, 255, 255),
+            font=time_font,
+        )
+        
+        # Total duration (right)
+        draw.text(
+            (bar_x_end - 80, time_y),
             f"{duration[:23]}",
             fill=(255, 255, 255),
-            font=small_time_font,
+            font=time_font,
         )
-
-        # --- PROGRESS BAR ---
-        bar_y = 605
-        draw_progress_bar_professional(draw, wave_x_start, bar_y, wave_width, 4, current_progress=0.35)
-
-        # --- VOLUME INDICATOR (AT BOTTOM) ---
-        volume_y = 655
-        volume_label_x = 40
-        volume_bar_x = 120
-        volume_bar_width = 80
-        
-        # Volume label
-        draw.text(
-            (volume_label_x, volume_y),
-            "Volume:",
-            fill=(220, 220, 220),
-            font=small_time_font,
-        )
-        
-        # Volume bar (5 filled, 3 empty = 62.5%)
-        for i in range(8):
-            bar_x = volume_bar_x + (i * 12)
-            if i < 5:
-                color = (100, 150, 200)  # Filled
-            else:
-                color = (60, 60, 60)  # Empty
-            
-            draw.rectangle(
-                [(bar_x, volume_y + 2), (bar_x + 8, volume_y + 12)],
-                fill=color,
-                outline=(100, 100, 100)
-            )
 
         # ============================================
         # BOT NAME AT TOP RIGHT
