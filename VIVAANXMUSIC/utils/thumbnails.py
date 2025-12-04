@@ -7,7 +7,7 @@ from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 from unidecode import unidecode
 from youtubesearchpython.__future__ import VideosSearch
 from collections import Counter
-from VIVAANXMUSIC import app
+from VivaanXmusic import app
 from config import YOUTUBE_IMG_URL
 from VIVAANXMUSIC.core.dir import CACHE_DIR
 
@@ -57,9 +57,34 @@ def load_font(path, size: int):
         return ImageFont.load_default()
 
 
+def draw_waveform(draw, x_start, y, width, height, color, segments=80):
+    """Draw waveform visualization for progress bar."""
+    segment_width = width // segments
+    np.random.seed(42)  # For consistent visualization
+    
+    for i in range(segments):
+        # Create wave pattern
+        wave_height = int(height * 0.4 * (0.5 + 0.5 * np.sin(i * 0.2)))
+        bar_x = x_start + i * segment_width
+        
+        # Draw vertical bar
+        draw.line(
+            [(bar_x + segment_width // 2, y - wave_height),
+             (bar_x + segment_width // 2, y + wave_height)],
+            fill=color,
+            width=1
+        )
+
+
 async def get_thumb(videoid, user_id=None):
     """
-    Generate Elite Musics thumbnail with YouTube video + User DP.
+    Generate music player style thumbnail with:
+    - YouTube thumbnail as background (blurred)
+    - YouTube thumbnail in left circle
+    - User DP in right circle
+    - Song info on left side
+    - NOW PLAYING text at top
+    - Waveform progress bar
     
     Args:
         videoid: YouTube video ID
@@ -130,86 +155,126 @@ async def get_thumb(videoid, user_id=None):
 
         youtube_thumb = Image.open(f"{CACHE_DIR}/thumb{videoid}.png")
 
-        # Prepare base image with YouTube thumbnail
+        # ============================================
+        # CREATE BACKGROUND (blurred YouTube thumbnail)
+        # ============================================
         image1 = changeImageSize(1280, 720, youtube_thumb)
         image2 = image1.convert("RGBA")
-        background = image2.filter(filter=ImageFilter.BoxBlur(10))
+        background = image2.filter(filter=ImageFilter.BoxBlur(15))
         enhancer = ImageEnhance.Brightness(background)
-        background = enhancer.enhance(0.5)
+        background = enhancer.enhance(0.55)  # Darken slightly for text readability
 
-        # Add circular thumbnails
-        # YouTube thumbnail (left side)
+        # Add dark overlay for better text contrast
+        overlay = Image.new("RGBA", (1280, 720), (0, 0, 0, 80))
+        background = Image.alpha_composite(background, overlay)
+
+        # ============================================
+        # ADD CIRCULAR IMAGES
+        # ============================================
+        # YouTube thumbnail (left side circle) - 200x200
         y = changeImageSize(200, 200, circle(youtube_thumb))
         background.paste(y, (45, 225), mask=y)
 
-        # User DP (right side)
+        # User DP (right side circle) - 200x200
         a = changeImageSize(200, 200, circle(user_dp))
         background.paste(a, (1045, 225), mask=a)
 
-        # Draw text and UI elements
+        # ============================================
+        # DRAW TEXT AND UI ELEMENTS
+        # ============================================
         draw = ImageDraw.Draw(background)
 
-        # Load fonts using constants
-        title_font = load_font(TITLE_FONT_PATH, 30)
-        meta_font = load_font(META_FONT_PATH, 30)
-        brand_font = load_font(TITLE_FONT_PATH, 28)
+        # Load fonts
+        now_playing_font = load_font(TITLE_FONT_PATH, 44)
+        title_font = load_font(TITLE_FONT_PATH, 28)
+        meta_font = load_font(META_FONT_PATH, 20)
+        time_font = load_font(META_FONT_PATH, 18)
 
-        # Brand name at top right - using app.name or fallback to "Elite Musics"
+        # --- NOW PLAYING text (top left with keyboard style) ---
+        draw.text((40, 20), "NOW PLAYING", fill="white", font=now_playing_font)
+
+        # --- Song Title (left side) ---
+        draw.text(
+            (40, 140),
+            clear(title),
+            fill="white",
+            font=title_font,
+        )
+
+        # --- Metadata (Views, Duration, Channel) ---
+        meta_y = 200
+        draw.text(
+            (40, meta_y),
+            f"Views : {views[:23]}",
+            fill=(200, 200, 200),
+            font=meta_font,
+        )
+        draw.text(
+            (40, meta_y + 35),
+            f"Duration : {duration[:23]}",
+            fill=(200, 200, 200),
+            font=meta_font,
+        )
+        draw.text(
+            (40, meta_y + 70),
+            f"Channel : {channel[:30]}",
+            fill=(200, 200, 200),
+            font=meta_font,
+        )
+
+        # ============================================
+        # PROGRESS BAR WITH WAVEFORM
+        # ============================================
+        bar_y = 500
+        bar_x_start = 40
+        bar_width = 1200
+        bar_height = 30
+
+        # Draw waveform visualization
+        draw_waveform(draw, bar_x_start, bar_y, bar_width, bar_height, (100, 150, 200), segments=80)
+
+        # Progress line (white line showing current progress)
+        prog_x = bar_x_start + int(bar_width * 0.35)
+        draw.line(
+            [(bar_x_start, bar_y), (prog_x, bar_y)],
+            fill="white",
+            width=3,
+        )
+        draw.ellipse(
+            [(prog_x - 7, bar_y - 7), (prog_x + 7, bar_y + 7)],
+            fill="white",
+        )
+
+        # ============================================
+        # TIME INDICATORS
+        # ============================================
+        draw.text(
+            (40, bar_y + 35),
+            "00:00",
+            fill=(200, 200, 200),
+            font=time_font,
+        )
+        draw.text(
+            (bar_x_start + bar_width - 80, bar_y + 35),
+            f"{duration[:23]}",
+            fill=(200, 200, 200),
+            font=time_font,
+        )
+
+        # ============================================
+        # BOT NAME AT TOP RIGHT
+        # ============================================
         try:
             brand_name = unidecode(app.name)
         except:
             brand_name = "Elite Musics"
 
-        draw.text((1110, 8), brand_name, fill="white", font=brand_font)
+        brand_font = load_font(TITLE_FONT_PATH, 22)
+        draw.text((1000, 20), brand_name, fill="white", font=brand_font)
 
-        # Channel and views
-        draw.text(
-            (55, 560),
-            f"{channel} | {views[:23]}",
-            (255, 255, 255),
-            font=title_font,
-        )
-
-        # Song title
-        draw.text(
-            (57, 600),
-            clear(title),
-            (255, 255, 255),
-            font=meta_font,
-        )
-
-        # Progress bar (white line)
-        draw.line(
-            [(55, 660), (1220, 660)],
-            fill="white",
-            width=5,
-            joint="curve",
-        )
-
-        # Progress indicator (circle on progress bar)
-        draw.ellipse(
-            [(918, 648), (942, 672)],
-            outline="white",
-            fill="white",
-            width=15,
-        )
-
-        # Time indicators
-        draw.text(
-            (36, 685),
-            "00:00",
-            (255, 255, 255),
-            font=title_font,
-        )
-
-        draw.text(
-            (1185, 685),
-            f"{duration[:23]}",
-            (255, 255, 255),
-            font=title_font,
-        )
-
-        # Cleanup temporary thumbnail
+        # ============================================
+        # CLEANUP AND SAVE
+        # ============================================
         try:
             os.remove(f"{CACHE_DIR}/thumb{videoid}.png")
         except:
