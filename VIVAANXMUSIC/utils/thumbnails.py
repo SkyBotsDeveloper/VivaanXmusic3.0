@@ -16,6 +16,12 @@ from VIVAANXMUSIC.core.dir import CACHE_DIR
 TITLE_FONT_PATH = "VIVAANXMUSIC/assets/thumb/font2.ttf"
 META_FONT_PATH = "VIVAANXMUSIC/assets/thumb/font.ttf"
 
+# Constants
+CANVAS_WIDTH = 1280
+CANVAS_HEIGHT = 720
+CIRCLE_BIG = 280  # Thumbnail circle
+CIRCLE_SMALL = 170  # User DP circle
+
 
 def changeImageSize(maxWidth, maxHeight, image):
     """Resize image while maintaining aspect ratio."""
@@ -60,14 +66,12 @@ def load_font(path, size: int):
 def draw_waveform(draw, x_start, y, width, height, color, segments=80):
     """Draw waveform visualization for progress bar."""
     segment_width = width // segments
-    np.random.seed(42)  # For consistent visualization
+    np.random.seed(42)
     
     for i in range(segments):
-        # Create wave pattern
         wave_height = int(height * 0.4 * (0.5 + 0.5 * np.sin(i * 0.2)))
         bar_x = x_start + i * segment_width
         
-        # Draw vertical bar
         draw.line(
             [(bar_x + segment_width // 2, y - wave_height),
              (bar_x + segment_width // 2, y + wave_height)],
@@ -76,16 +80,29 @@ def draw_waveform(draw, x_start, y, width, height, color, segments=80):
         )
 
 
+def draw_text_with_outline(draw, position, text, font, fill_color, outline_color, outline_width=2):
+    """Draw text with outline effect for better visibility."""
+    x, y = position
+    
+    # Draw outline by drawing text multiple times around the position
+    for adj_x in range(-outline_width, outline_width + 1):
+        for adj_y in range(-outline_width, outline_width + 1):
+            if adj_x != 0 or adj_y != 0:
+                draw.text((x + adj_x, y + adj_y), text, font=font, fill=outline_color)
+    
+    # Draw main text on top
+    draw.text((x, y), text, font=font, fill=fill_color)
+
+
 async def get_thumb(videoid, user_id=None):
     """
-    Generate music player style thumbnail with:
+    Generate professional music player style thumbnail with:
     - YouTube thumbnail as background (blurred)
-    - BOTH circles on RIGHT SIDE
-    - BIGGER YouTube thumbnail circle (280px)
-    - SMALLER User DP circle with proper separation (northwest positioning)
+    - BIGGER YouTube thumbnail circle (280px) on RIGHT, vertically centered
+    - SMALLER User DP circle (170px) overlapping at BOTTOM-RIGHT
     - Song info on LEFT SIDE with bright white text
-    - BIGGER "NOW PLAYING" text at top (attractive)
-    - Waveform progress bar (lower position)
+    - Styled "NOW PLAYING" text at top
+    - Waveform progress bar at bottom
     
     Args:
         videoid: YouTube video ID
@@ -94,7 +111,6 @@ async def get_thumb(videoid, user_id=None):
     Returns:
         Path to generated thumbnail
     """
-    # Default to bot's ID if user_id not provided
     if user_id is None:
         user_id = app.id
     
@@ -140,7 +156,6 @@ async def get_thumb(videoid, user_id=None):
             async for photo in app.get_chat_photos(user_id, 1):
                 sp = await app.download_media(photo.file_id, file_name=f'{user_id}.jpg')
         except:
-            # Fallback to bot's profile picture
             try:
                 async for photo in app.get_chat_photos(app.id, 1):
                     sp = await app.download_media(photo.file_id, file_name=f'{app.id}.jpg')
@@ -151,7 +166,6 @@ async def get_thumb(videoid, user_id=None):
         if sp:
             user_dp = Image.open(sp)
         else:
-            # Create placeholder if no profile picture available
             user_dp = Image.new("RGBA", (200, 200), (100, 100, 100, 255))
 
         youtube_thumb = Image.open(f"{CACHE_DIR}/thumb{videoid}.png")
@@ -159,29 +173,37 @@ async def get_thumb(videoid, user_id=None):
         # ============================================
         # CREATE BACKGROUND (blurred YouTube thumbnail)
         # ============================================
-        image1 = changeImageSize(1280, 720, youtube_thumb)
+        image1 = changeImageSize(CANVAS_WIDTH, CANVAS_HEIGHT, youtube_thumb)
         image2 = image1.convert("RGBA")
         background = image2.filter(filter=ImageFilter.BoxBlur(15))
         enhancer = ImageEnhance.Brightness(background)
-        background = enhancer.enhance(0.55)  # Darken slightly for text readability
+        background = enhancer.enhance(0.55)
 
         # Add dark overlay for better text contrast
-        overlay = Image.new("RGBA", (1280, 720), (0, 0, 0, 80))
+        overlay = Image.new("RGBA", (CANVAS_WIDTH, CANVAS_HEIGHT), (0, 0, 0, 80))
         background = Image.alpha_composite(background, overlay)
 
         # ============================================
-        # ADD CIRCULAR IMAGES (RIGHT SIDE)
+        # ADD CIRCULAR IMAGES (RIGHT SIDE - PROFESSIONAL LAYOUT)
         # ============================================
-        # YouTube thumbnail (right side circle) - BIGGER 280x280
-        # Position at right side
-        y = changeImageSize(280, 280, circle(youtube_thumb))
-        background.paste(y, (950, 150), mask=y)
+        # YouTube thumbnail circle (280x280) - Positioned on right, vertically centered
+        # Right margin: 40px from edge
+        # X position: 1280 - 40 - 280 = 960
+        # Y position: (720 - 280) / 2 = 220
+        thumb_circle_x = CANVAS_WIDTH - 40 - CIRCLE_BIG
+        thumb_circle_y = (CANVAS_HEIGHT - CIRCLE_BIG) // 2
+        
+        y = changeImageSize(CIRCLE_BIG, CIRCLE_BIG, circle(youtube_thumb))
+        background.paste(y, (thumb_circle_x, thumb_circle_y), mask=y)
 
-        # User DP (right side circle) - SMALLER 170x170
-        # MOVED NORTHWEST to avoid collision
-        # From (1040, 260) moved to (980, 180) - up and left for better separation
-        a = changeImageSize(170, 170, circle(user_dp))
-        background.paste(a, (980, 180), mask=a)
+        # User DP circle (170x170) - Overlapping at BOTTOM-RIGHT of thumbnail circle
+        # Position: slightly to right and down from thumbnail circle
+        # This creates the overlapping effect
+        user_circle_x = thumb_circle_x + CIRCLE_BIG - (CIRCLE_SMALL // 2) - 20
+        user_circle_y = thumb_circle_y + CIRCLE_BIG - (CIRCLE_SMALL // 2) - 20
+        
+        a = changeImageSize(CIRCLE_SMALL, CIRCLE_SMALL, circle(user_dp))
+        background.paste(a, (user_circle_x, user_circle_y), mask=a)
 
         # ============================================
         # DRAW TEXT AND UI ELEMENTS
@@ -189,25 +211,34 @@ async def get_thumb(videoid, user_id=None):
         draw = ImageDraw.Draw(background)
 
         # Load fonts
-        # MUCH BIGGER NOW PLAYING
-        now_playing_font = load_font(TITLE_FONT_PATH, 60)
-        title_font = load_font(TITLE_FONT_PATH, 32)
-        meta_font = load_font(META_FONT_PATH, 22)
-        time_font = load_font(META_FONT_PATH, 18)
+        now_playing_font = load_font(TITLE_FONT_PATH, 56)
+        title_font = load_font(TITLE_FONT_PATH, 34)
+        meta_font = load_font(META_FONT_PATH, 20)
+        time_font = load_font(META_FONT_PATH, 16)
 
-        # --- NOW PLAYING text (top left - BIGGER & ATTRACTIVE) ---
-        draw.text((40, 15), "NOW PLAYING", fill="white", font=now_playing_font)
+        # --- NOW PLAYING text (top left - styled with effect) ---
+        draw_text_with_outline(
+            draw,
+            (40, 20),
+            "NOW PLAYING",
+            now_playing_font,
+            fill_color=(255, 255, 255),
+            outline_color=(0, 0, 0),
+            outline_width=1
+        )
 
         # --- Song Title (left side) ---
         draw.text(
             (40, 100),
             clear(title),
-            fill="white",
+            fill=(255, 255, 255),
             font=title_font,
         )
 
         # --- Metadata (Views, Duration, Channel) - BRIGHT WHITE ---
-        meta_y = 160
+        meta_y = 165
+        meta_line_height = 30
+        
         draw.text(
             (40, meta_y),
             f"Views : {views[:23]}",
@@ -215,52 +246,59 @@ async def get_thumb(videoid, user_id=None):
             font=meta_font,
         )
         draw.text(
-            (40, meta_y + 32),
+            (40, meta_y + meta_line_height),
             f"Duration : {duration[:23]}",
             fill=(255, 255, 255),
             font=meta_font,
         )
         draw.text(
-            (40, meta_y + 64),
+            (40, meta_y + (meta_line_height * 2)),
             f"Channel : {channel[:30]}",
             fill=(255, 255, 255),
             font=meta_font,
         )
 
         # ============================================
-        # PROGRESS BAR WITH WAVEFORM (MOVED DOWN)
+        # PROGRESS BAR WITH WAVEFORM (AT BOTTOM)
         # ============================================
-        bar_y = 520  # Moved down from 500
+        bar_y = 540
         bar_x_start = 40
-        bar_width = 900  # Adjusted for left side only
+        bar_x_end = thumb_circle_x - 30  # Stop before circles
+        bar_width = bar_x_end - bar_x_start
         bar_height = 30
 
         # Draw waveform visualization
         draw_waveform(draw, bar_x_start, bar_y, bar_width, bar_height, (100, 150, 200), segments=80)
 
-        # Progress line (white line showing current progress)
+        # Progress line (white line showing current progress at ~35%)
         prog_x = bar_x_start + int(bar_width * 0.35)
         draw.line(
             [(bar_x_start, bar_y), (prog_x, bar_y)],
             fill="white",
             width=3,
         )
+        # Progress indicator circle
         draw.ellipse(
             [(prog_x - 7, bar_y - 7), (prog_x + 7, bar_y + 7)],
             fill="white",
         )
 
         # ============================================
-        # TIME INDICATORS (MOVED DOWN)
+        # TIME INDICATORS (BELOW PROGRESS BAR)
         # ============================================
+        time_y = bar_y + 40
+        
+        # Current time (left)
         draw.text(
-            (40, bar_y + 40),  # Moved down
+            (40, time_y),
             "00:00",
             fill=(255, 255, 255),
             font=time_font,
         )
+        
+        # Total duration (right)
         draw.text(
-            (bar_x_start + bar_width - 80, bar_y + 40),  # Moved down
+            (bar_x_end - 80, time_y),
             f"{duration[:23]}",
             fill=(255, 255, 255),
             font=time_font,
@@ -274,8 +312,8 @@ async def get_thumb(videoid, user_id=None):
         except:
             brand_name = "Elite Musics"
 
-        brand_font = load_font(TITLE_FONT_PATH, 22)
-        draw.text((1000, 20), brand_name, fill="white", font=brand_font)
+        brand_font = load_font(TITLE_FONT_PATH, 20)
+        draw.text((CANVAS_WIDTH - 200, 20), brand_name, fill="white", font=brand_font)
 
         # ============================================
         # CLEANUP AND SAVE
