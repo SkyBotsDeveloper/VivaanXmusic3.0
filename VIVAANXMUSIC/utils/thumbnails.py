@@ -7,7 +7,7 @@ from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 from unidecode import unidecode
 from youtubesearchpython.__future__ import VideosSearch
 from collections import Counter
-from VIVAANXMUSIC import app
+from VivaanXmusic import app
 from config import YOUTUBE_IMG_URL
 from VIVAANXMUSIC.core.dir import CACHE_DIR
 
@@ -80,9 +80,9 @@ async def get_thumb(videoid, user_id=None):
     """
     Generate music player style thumbnail with:
     - YouTube thumbnail as background (blurred)
-    - YouTube thumbnail in left circle
-    - User DP in right circle
-    - Song info on left side
+    - BIGGER YouTube thumbnail circle on left side (280px)
+    - SMALLER User DP circle overlapping at corner (170px)
+    - Song info on left side with bright white text
     - NOW PLAYING text at top
     - Waveform progress bar
     
@@ -171,13 +171,16 @@ async def get_thumb(videoid, user_id=None):
         # ============================================
         # ADD CIRCULAR IMAGES
         # ============================================
-        # YouTube thumbnail (left side circle) - 200x200
-        y = changeImageSize(200, 200, circle(youtube_thumb))
-        background.paste(y, (45, 225), mask=y)
+        # YouTube thumbnail (left side circle) - BIGGER 280x280
+        y = changeImageSize(280, 280, circle(youtube_thumb))
+        background.paste(y, (50, 200), mask=y)
 
-        # User DP (right side circle) - 200x200
-        a = changeImageSize(200, 200, circle(user_dp))
-        background.paste(a, (1045, 225), mask=a)
+        # User DP (right side circle overlapping) - SMALLER 170x170
+        # Position so it overlaps at the corner of thumbnail circle
+        # Thumbnail circle center is at (50+140, 200+140) = (190, 340)
+        # User circle should overlap at bottom-right, so center at ~(280, 350)
+        a = changeImageSize(170, 170, circle(user_dp))
+        background.paste(a, (230, 300), mask=a)
 
         # ============================================
         # DRAW TEXT AND UI ELEMENTS
@@ -201,24 +204,24 @@ async def get_thumb(videoid, user_id=None):
             font=title_font,
         )
 
-        # --- Metadata (Views, Duration, Channel) ---
+        # --- Metadata (Views, Duration, Channel) - BRIGHT WHITE ---
         meta_y = 200
         draw.text(
             (40, meta_y),
             f"Views : {views[:23]}",
-            fill=(200, 200, 200),
+            fill=(255, 255, 255),  # Pure white instead of (200, 200, 200)
             font=meta_font,
         )
         draw.text(
             (40, meta_y + 35),
             f"Duration : {duration[:23]}",
-            fill=(200, 200, 200),
+            fill=(255, 255, 255),  # Pure white instead of (200, 200, 200)
             font=meta_font,
         )
         draw.text(
             (40, meta_y + 70),
             f"Channel : {channel[:30]}",
-            fill=(200, 200, 200),
+            fill=(255, 255, 255),  # Pure white instead of (200, 200, 200)
             font=meta_font,
         )
 
@@ -251,13 +254,13 @@ async def get_thumb(videoid, user_id=None):
         draw.text(
             (40, bar_y + 35),
             "00:00",
-            fill=(200, 200, 200),
+            fill=(255, 255, 255),  # Pure white
             font=time_font,
         )
         draw.text(
             (bar_x_start + bar_width - 80, bar_y + 35),
             f"{duration[:23]}",
-            fill=(200, 200, 200),
+            fill=(255, 255, 255),  # Pure white
             font=time_font,
         )
 
