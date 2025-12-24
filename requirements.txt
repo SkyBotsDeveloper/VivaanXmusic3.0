@@ -30,7 +30,7 @@ pyfiglet
 pyshorteners
 python-dotenv
 python-whois
-git+https://github.com/BillaSpace/youtube-search-python.git
+git+https://github.com/certifiedcoders/youtube-search-python.git
 pyyaml
 qrcode
 requests
