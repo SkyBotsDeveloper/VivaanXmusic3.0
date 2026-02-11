@@ -1,5 +1,5 @@
 import asyncio
-from pyrogram import filters, enums, types
+from pyrogram import filters, enums
 from pyrogram.errors import PeerIdInvalid, RPCError, FloodWait
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 
@@ -74,31 +74,14 @@ async def whois_handler(_, message: Message):
             InlineKeyboardButton("📞 ᴘʜᴏɴᴇ", url="tg://settings")
         ]])
 
-        if user.photo:
-            try:
-                photo = await app.download_media(user.photo.big_file_id)
-                await app.edit_message_media(
-                    chat_id=message.chat.id,
-                    message_id=loading.id,
-                    media=types.InputMediaPhoto(media=photo, caption=text, parse_mode=enums.ParseMode.HTML),
-                    reply_markup=buttons
-                )
-            except Exception:
-                await app.edit_message_text(
-                    chat_id=message.chat.id,
-                    message_id=loading.id,
-                    text=text,
-                    parse_mode=enums.ParseMode.HTML,
-                    reply_markup=buttons
-                )
-        else:
-            await app.edit_message_text(
-                chat_id=message.chat.id,
-                message_id=loading.id,
-                text=text,
-                parse_mode=enums.ParseMode.HTML,
-                reply_markup=buttons
-            )
+        # ✅ ONLY TEXT EDIT (NO DP / NO PHOTO)
+        await app.edit_message_text(
+            chat_id=message.chat.id,
+            message_id=loading.id,
+            text=text,
+            parse_mode=enums.ParseMode.HTML,
+            reply_markup=buttons
+        )
 
     except PeerIdInvalid:
         await message.reply("🥀 ɪ ᴄᴏᴜʟᴅɴ'ᴛ ꜰɪɴᴅ ᴛʜᴀᴛ ᴜsᴇʀ.")
