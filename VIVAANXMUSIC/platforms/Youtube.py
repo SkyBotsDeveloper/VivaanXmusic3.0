@@ -23,6 +23,13 @@ from config import YT_API_KEY, YTPROXY_URL as YTPROXY
 
 logger = LOGGER(__name__)
 
+# Worker fallback API (kept configurable through env for production overrides)
+WORKER_FALLBACK_API_URL = os.getenv(
+    "WORKER_FALLBACK_API_URL",
+    "https://youtubenewapi.skybotsdeveloper.workers.dev",
+)
+WORKER_FALLBACK_API_KEY = os.getenv("WORKER_FALLBACK_API_KEY", "itsmesid")
+
 def cookie_txt_file():
     try:
         folder_path = f"{os.getcwd()}/cookies"
@@ -447,6 +454,7 @@ class YouTubeAPI:
             return None
 
         async def download_with_requests_fallback(url, filepath, headers=None):
+            session = None
             try:
                 session = create_session()
                 
@@ -472,129 +480,160 @@ class YouTubeAPI:
                     os.remove(filepath)
                 return None
             finally:
-                session.close()
+                if session:
+                    session.close()
+
+        async def download_from_source(url, filepath, headers=None):
+            result = await download_with_ytdlp(url, filepath, headers)
+            if result:
+                return result
+            return await download_with_requests_fallback(url, filepath, headers)
+
+        def fetch_worker_fallback_link_sync(vid_id, media_format):
+            if not WORKER_FALLBACK_API_URL or not WORKER_FALLBACK_API_KEY:
+                logger.warning("Worker fallback API URL/key not set. Skipping worker fallback.")
+                return None
+
+            session = None
+            try:
+                session = create_session()
+                api_url = f"{WORKER_FALLBACK_API_URL.rstrip('/')}/api"
+                payload = {
+                    "key": WORKER_FALLBACK_API_KEY,
+                    "url": f"https://youtube.com/watch?v={vid_id}",
+                    "format": media_format,
+                }
+
+                response = session.get(api_url, params=payload, timeout=75)
+                response.raise_for_status()
+                data = response.json()
+
+                if not data.get("success"):
+                    logger.error(f"Worker fallback API error: {data.get('error', 'Unknown error')}")
+                    return None
+
+                return data.get("directLink") or data.get("streamLink") or data.get("downloads")
+            except Exception as e:
+                logger.error(f"Worker fallback request failed: {str(e)}")
+                return None
+            finally:
+                if session:
+                    session.close()
+
+        async def get_worker_fallback_link(vid_id, media_format):
+            return await loop.run_in_executor(
+                None, fetch_worker_fallback_link_sync, vid_id, media_format
+            )
 
         async def audio_dl(vid_id):
-            try:
-                if not YT_API_KEY:
-                    logger.error("API KEY not set in config, Set API Key you got from @tgmusic_apibot")
-                    return None
-                if not YTPROXY:
-                    logger.error("API Endpoint not set in config\nPlease set a valid endpoint for YTPROXY_URL in config.")
-                    return None
-                
-                headers = {
-                    "x-api-key": f"{YT_API_KEY}",
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-                }
-                
-                filepath = os.path.join("downloads", f"{vid_id}.mp3")
-                
-                if os.path.exists(filepath):
-                    return filepath
-                
-                session = create_session()
-                getAudio = session.get(f"{YTPROXY}/info/{vid_id}", headers=headers, timeout=60)
-                
+            filepath = os.path.join("downloads", f"{vid_id}.mp3")
+            if os.path.exists(filepath):
+                return filepath
+
+            headers = {
+                "x-api-key": f"{YT_API_KEY}",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            }
+
+            paid_audio_url = None
+
+            if YT_API_KEY and YTPROXY:
+                session = None
                 try:
-                    songData = getAudio.json()
+                    session = create_session()
+                    get_audio = session.get(f"{YTPROXY}/info/{vid_id}", headers=headers, timeout=60)
+                    song_data = get_audio.json()
+                    status = song_data.get('status')
+
+                    if status == 'success':
+                        paid_audio_url = song_data.get('audio_url')
+                    elif status == 'error':
+                        logger.error(
+                            f"Paid API Error: {song_data.get('message', 'Unknown error from API.')}"
+                        )
+                    else:
+                        logger.error("Paid API returned unexpected response while fetching audio.")
+                except requests.exceptions.RequestException as e:
+                    logger.error(f"Network error while fetching paid audio info: {str(e)}")
+                except json.JSONDecodeError as e:
+                    logger.error(f"Invalid paid API response for audio: {str(e)}")
                 except Exception as e:
-                    logger.error(f"Invalid response from API: {str(e)}")
-                    return None
+                    logger.error(f"Error in paid audio flow: {str(e)}")
                 finally:
-                    session.close()
-                
-                status = songData.get('status')
-                if status == 'success':
-                    audio_url = songData['audio_url']
-                    #audio_url = base64.b64decode(songlink).decode() remove in 3.5.0
-                    
-                    result = await download_with_ytdlp(audio_url, filepath, headers)
-                    if result:
-                        return result
-                    
-                    result = await download_with_requests_fallback(audio_url, filepath, headers)
-                    if result:
-                        return result
-                    
-                    return None
-                    
-                elif status == 'error':
-                    logger.error(f"API Error: {songData.get('message', 'Unknown error from API.')}")
-                    return None
-                else:
-                    logger.error("Could not fetch Backend \nPlease contact API provider.")
-                    return None
-                    
-            except requests.exceptions.RequestException as e:
-                logger.error(f"Network error while fetching audio info: {str(e)}")
-            except json.JSONDecodeError as e:
-                logger.error(f"Invalid response from proxy: {str(e)}")
-            except Exception as e:
-                logger.error(f"Error in audio download: {str(e)}")
-            
+                    if session:
+                        session.close()
+            else:
+                logger.warning("Paid API key/endpoint not configured. Using worker fallback for audio.")
+
+            if paid_audio_url:
+                result = await download_from_source(paid_audio_url, filepath, headers)
+                if result:
+                    return result
+                logger.warning("Paid audio URL download failed, trying worker fallback.")
+
+            fallback_audio_url = await get_worker_fallback_link(vid_id, "mp3")
+            if fallback_audio_url:
+                result = await download_from_source(fallback_audio_url, filepath)
+                if result:
+                    return result
+
+            logger.error("Audio download failed on both paid API and worker fallback.")
             return None
         
         
         async def video_dl(vid_id):
-            try:
-                if not YT_API_KEY:
-                    logger.error("API KEY not set in config, Set API Key you got from @tgmusic_apibot")
-                    return None
-                if not YTPROXY:
-                    logger.error("API Endpoint not set in config\nPlease set a valid endpoint for YTPROXY_URL in config.")
-                    return None
-                
-                headers = {
-                    "x-api-key": f"{YT_API_KEY}",
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-                }
-                
-                filepath = os.path.join("downloads", f"{vid_id}.mp4")
-                
-                if os.path.exists(filepath):
-                    return filepath
-                
-                session = create_session()
-                getVideo = session.get(f"{YTPROXY}/info/{vid_id}", headers=headers, timeout=60)
-                
+            filepath = os.path.join("downloads", f"{vid_id}.mp4")
+            if os.path.exists(filepath):
+                return filepath
+
+            headers = {
+                "x-api-key": f"{YT_API_KEY}",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            }
+
+            paid_video_url = None
+
+            if YT_API_KEY and YTPROXY:
+                session = None
                 try:
-                    videoData = getVideo.json()
+                    session = create_session()
+                    get_video = session.get(f"{YTPROXY}/info/{vid_id}", headers=headers, timeout=60)
+                    video_data = get_video.json()
+                    status = video_data.get('status')
+
+                    if status == 'success':
+                        paid_video_url = video_data.get('video_url')
+                    elif status == 'error':
+                        logger.error(
+                            f"Paid API Error: {video_data.get('message', 'Unknown error from API.')}"
+                        )
+                    else:
+                        logger.error("Paid API returned unexpected response while fetching video.")
+                except requests.exceptions.RequestException as e:
+                    logger.error(f"Network error while fetching paid video info: {str(e)}")
+                except json.JSONDecodeError as e:
+                    logger.error(f"Invalid paid API response for video: {str(e)}")
                 except Exception as e:
-                    logger.error(f"Invalid response from API: {str(e)}")
-                    return None
+                    logger.error(f"Error in paid video flow: {str(e)}")
                 finally:
-                    session.close()
-                
-                status = videoData.get('status')
-                if status == 'success':
-                    video_url = videoData['video_url']
-                    #video_url = base64.b64decode(videolink).decode() removed in 3.5.0
-                    
-                    result = await download_with_ytdlp(video_url, filepath, headers)
-                    if result:
-                        return result
-                    
-                    result = await download_with_requests_fallback(video_url, filepath, headers)
-                    if result:
-                        return result
-                    
-                    return None
-                    
-                elif status == 'error':
-                    logger.error(f"API Error: {videoData.get('message', 'Unknown error from API.')}")
-                    return None
-                else:
-                    logger.error("Could not fetch Backend \nPlease contact API provider.")
-                    return None
-                    
-            except requests.exceptions.RequestException as e:
-                logger.error(f"Network error while fetching video info: {str(e)}")
-            except json.JSONDecodeError as e:
-                logger.error(f"Invalid response from proxy: {str(e)}")
-            except Exception as e:
-                logger.error(f"Error in video download: {str(e)}")
-            
+                    if session:
+                        session.close()
+            else:
+                logger.warning("Paid API key/endpoint not configured. Using worker fallback for video.")
+
+            if paid_video_url:
+                result = await download_from_source(paid_video_url, filepath, headers)
+                if result:
+                    return result
+                logger.warning("Paid video URL download failed, trying worker fallback.")
+
+            fallback_video_url = await get_worker_fallback_link(vid_id, "mp4")
+            if fallback_video_url:
+                result = await download_from_source(fallback_video_url, filepath)
+                if result:
+                    return result
+
+            logger.error("Video download failed on both paid API and worker fallback.")
             return None
         
         def song_video_dl():
