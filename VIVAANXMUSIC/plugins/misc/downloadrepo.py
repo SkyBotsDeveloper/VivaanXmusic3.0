@@ -9,7 +9,7 @@ from pyrogram.types import Message
 
 from VIVAANXMUSIC import app
 from VIVAANXMUSIC.misc import SUDOERS
-from VIVAANXMUSIC.utils.security import (
+from VIVAANXMUSIC.security import (
     SecurityError,
     build_subprocess_env,
     validate_github_repo_url,

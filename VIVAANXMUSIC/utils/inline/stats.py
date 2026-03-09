@@ -1,6 +1,6 @@
 from pyrogram.types import InlineKeyboardMarkup
 
-from VIVAANXMUSIC.utils.button_styles import danger_button, primary_button
+from VIVAANXMUSIC.button_styles import danger_button, primary_button
 
 
 def stats_buttons(_, status):

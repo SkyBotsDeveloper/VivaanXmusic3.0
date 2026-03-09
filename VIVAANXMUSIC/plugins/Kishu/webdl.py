@@ -10,7 +10,7 @@ from requests.packages.urllib3.util.retry import Retry
 
 from VIVAANXMUSIC import app
 from VIVAANXMUSIC.misc import SUDOERS
-from VIVAANXMUSIC.utils.security import SecurityError, validate_public_http_url
+from VIVAANXMUSIC.security import SecurityError, validate_public_http_url
 
 
 MAX_SOURCE_BYTES = 1_000_000

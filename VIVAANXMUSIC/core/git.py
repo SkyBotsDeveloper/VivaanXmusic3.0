@@ -8,7 +8,7 @@ from git.exc import GitCommandError, InvalidGitRepositoryError
 import config
 
 from ..logging import LOGGER
-from ..utils.security import build_subprocess_env
+from ..security import build_subprocess_env
 
 
 def install_req(cmd: str) -> Tuple[str, str, int, int]:

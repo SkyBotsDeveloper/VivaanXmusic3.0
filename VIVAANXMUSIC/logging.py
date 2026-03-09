@@ -1,7 +1,7 @@
 import logging
 from logging.handlers import RotatingFileHandler
 
-from VIVAANXMUSIC.utils.security import redact_secrets
+from VIVAANXMUSIC.security import redact_secrets
 
 LOG_FILE = "log.txt"
 LOG_LEVEL = "INFO"

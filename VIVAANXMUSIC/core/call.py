@@ -30,7 +30,7 @@ from VIVAANXMUSIC.utils.database import (
 from VIVAANXMUSIC.utils.exceptions import AssistantErr
 from VIVAANXMUSIC.utils.formatters import check_duration, seconds_to_min, speed_converter
 from VIVAANXMUSIC.utils.inline.play import stream_markup
-from VIVAANXMUSIC.utils.security import build_subprocess_env
+from VIVAANXMUSIC.security import build_subprocess_env
 from VIVAANXMUSIC.utils.stream.autoclear import auto_clean
 from VIVAANXMUSIC.utils.thumbnails import get_thumb
 from VIVAANXMUSIC.utils.errors import capture_internal_err, send_large_error

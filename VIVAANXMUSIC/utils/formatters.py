@@ -1,7 +1,7 @@
 import json
 import subprocess
 
-from VIVAANXMUSIC.utils.security import build_subprocess_env
+from VIVAANXMUSIC.security import build_subprocess_env
 
 def get_readable_time(seconds: int) -> str:
     count = 0

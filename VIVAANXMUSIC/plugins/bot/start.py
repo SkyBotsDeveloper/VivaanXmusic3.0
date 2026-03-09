@@ -23,7 +23,7 @@ from VIVAANXMUSIC.utils.database import (
 )
 from VIVAANXMUSIC.utils.decorators.language import LanguageStart
 from VIVAANXMUSIC.utils.formatters import get_readable_time
-from VIVAANXMUSIC.utils.button_styles import primary_button, success_button
+from VIVAANXMUSIC.button_styles import primary_button, success_button
 from VIVAANXMUSIC.utils.inline.start import private_panel, start_panel
 from VIVAANXMUSIC.utils.inline.help import first_page
 from config import BANNED_USERS, AYUV, HELP_IMG_URL, START_VIDS, STICKERS

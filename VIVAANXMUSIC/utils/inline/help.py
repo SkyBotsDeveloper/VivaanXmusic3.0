@@ -1,6 +1,6 @@
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from VIVAANXMUSIC import app
-from VIVAANXMUSIC.utils.button_styles import danger_button, primary_button
+from VIVAANXMUSIC.button_styles import danger_button, primary_button
 
 
 TOTAL_SECTIONS = 29

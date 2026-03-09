@@ -4,7 +4,7 @@ import cv2
 from PIL import Image
 from pyrogram import Client, filters
 from VIVAANXMUSIC import app
-from VIVAANXMUSIC.utils.security import build_subprocess_env
+from VIVAANXMUSIC.security import build_subprocess_env
 
 
 @app.on_message(filters.command("tiny"))

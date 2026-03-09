@@ -3,7 +3,7 @@ from VIVAANXMUSIC.core.dir import dirr
 from VIVAANXMUSIC.core.git import git
 from VIVAANXMUSIC.core.userbot import Userbot
 from VIVAANXMUSIC.misc import dbb, heroku
-from VIVAANXMUSIC.utils.security import drop_sensitive_env_vars
+from VIVAANXMUSIC.security import drop_sensitive_env_vars
 
 from .logging import LOGGER
 

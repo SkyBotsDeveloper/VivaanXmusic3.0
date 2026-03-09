@@ -5,7 +5,7 @@ from pyrogram import filters
 from pyrogram.types import Message
 from pydub import AudioSegment
 from VIVAANXMUSIC import app
-from VIVAANXMUSIC.utils.security import build_subprocess_env
+from VIVAANXMUSIC.security import build_subprocess_env
 
 MAX_SIZE_MB = 50
 MAX_SIZE_BYTES = MAX_SIZE_MB * 1024 * 1024

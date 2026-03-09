@@ -1,6 +1,6 @@
 import config
 from VIVAANXMUSIC import app
-from VIVAANXMUSIC.utils.button_styles import primary_button, success_button
+from VIVAANXMUSIC.button_styles import primary_button, success_button
 
 
 def start_panel(_):

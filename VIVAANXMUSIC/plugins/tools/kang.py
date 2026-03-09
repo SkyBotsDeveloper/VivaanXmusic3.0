@@ -20,7 +20,7 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from VIVAANXMUSIC import app
 from VIVAANXMUSIC.utils.files import resize_file_to_sticker_size
-from VIVAANXMUSIC.utils.security import build_subprocess_env
+from VIVAANXMUSIC.security import build_subprocess_env
 from config import BOT_USERNAME
 
 BOT = BOT_USERNAME.lstrip("@").lower()

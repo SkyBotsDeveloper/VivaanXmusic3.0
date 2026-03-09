@@ -11,7 +11,7 @@ from config import DEBUG_IGNORE_LOG, LOGGER_ID
 from VIVAANXMUSIC import app
 from VIVAANXMUSIC.utils.exceptions import is_ignored_error
 from VIVAANXMUSIC.utils.pastebin import VIVAANBIN
-from VIVAANXMUSIC.utils.security import redact_secrets
+from VIVAANXMUSIC.security import redact_secrets
 
 
 DEBUG_LOG_FILE = "ignored_errors.log"

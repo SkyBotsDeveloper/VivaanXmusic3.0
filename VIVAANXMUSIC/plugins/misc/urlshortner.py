@@ -9,7 +9,7 @@ from pyrogram.types import InlineKeyboardMarkup as ikm
 from pyrogram.types import Message
 
 from VIVAANXMUSIC import app
-from VIVAANXMUSIC.utils.security import SecurityError, validate_public_http_url
+from VIVAANXMUSIC.security import SecurityError, validate_public_http_url
 
 
 shortener = pyshorteners.Shortener()

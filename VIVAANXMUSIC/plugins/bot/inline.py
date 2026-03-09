@@ -6,7 +6,7 @@ from pyrogram.types import (
 from youtubesearchpython.future import VideosSearch
 
 from VIVAANXMUSIC.utils.inlinequery import answer
-from VIVAANXMUSIC.utils.button_styles import primary_button
+from VIVAANXMUSIC.button_styles import primary_button
 from config import BANNED_USERS
 from VIVAANXMUSIC import app
 
