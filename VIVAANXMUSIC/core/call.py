@@ -1,6 +1,5 @@
 import asyncio
 import os
-import shlex
 from datetime import datetime, timedelta
 from typing import Union
 
@@ -31,6 +30,7 @@ from VIVAANXMUSIC.utils.database import (
 from VIVAANXMUSIC.utils.exceptions import AssistantErr
 from VIVAANXMUSIC.utils.formatters import check_duration, seconds_to_min, speed_converter
 from VIVAANXMUSIC.utils.inline.play import stream_markup
+from VIVAANXMUSIC.utils.security import build_subprocess_env
 from VIVAANXMUSIC.utils.stream.autoclear import auto_clean
 from VIVAANXMUSIC.utils.thumbnails import get_thumb
 from VIVAANXMUSIC.utils.errors import capture_internal_err, send_large_error
@@ -176,12 +176,21 @@ class Call:
 
         if not os.path.exists(out):
             vs = str(2.0 / float(speed))
-            cmd = f"ffmpeg -i {file_path} -filter:v setpts={vs}*PTS -filter:a atempo={speed} {out}"
-            args = shlex.split(cmd)
+            args = [
+                "ffmpeg",
+                "-i",
+                file_path,
+                "-filter:v",
+                f"setpts={vs}*PTS",
+                "-filter:a",
+                f"atempo={speed}",
+                out,
+            ]
             proc = await asyncio.create_subprocess_exec(
                 *args,
                 stdin=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=build_subprocess_env(),
             )
             await proc.communicate()
 

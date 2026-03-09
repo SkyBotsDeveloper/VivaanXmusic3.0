@@ -1,114 +1,94 @@
-import os
-import base64
-import mimetypes
-
 from pyrogram import Client, filters
-from pyrogram.types import Message
 from pyrogram.enums import ChatAction
+from pyrogram.types import Message
 
-from lexica import AsyncClient, languageModels, Messages
 from VIVAANXMUSIC import app
+from VIVAANXMUSIC.utils.free_ai import (
+    FreeAIError,
+    generate_chat_response,
+    vision_unavailable_message,
+)
 
 
 def get_prompt(message: Message) -> str | None:
-    parts = message.text.split(' ', 1)
-    return parts[1] if len(parts) > 1 else None
+    source = (message.text or message.caption or "").strip()
+    parts = source.split(None, 1)
+    if len(parts) > 1 and parts[1].strip():
+        return parts[1].strip()
 
-
-def extract_content(response) -> str | None:
-    content = response.get('content')
-    if isinstance(content, str):
-        return content
-    elif isinstance(content, list):
-        return '\n'.join(item['text'] for item in content if isinstance(item, dict) and 'text' in item)
-    elif isinstance(content, dict):
-        if 'parts' in content and isinstance(content['parts'], list):
-            return '\n'.join(part.get('text', '') for part in content['parts'] if 'text' in part)
-        return content.get('text')
+    if message.reply_to_message:
+        replied = (
+            message.reply_to_message.text or message.reply_to_message.caption or ""
+        ).strip()
+        if replied:
+            return replied
     return None
 
 
-def format_response(model_name: str, content: str) -> str:
-    return f"**ᴍᴏᴅᴇʟ:** `{model_name}`\n\n**ʀᴇsᴘᴏɴsᴇ:**\n{content}"
+def format_response(command_name: str, model_name: str, content: str) -> str:
+    return (
+        f"Command: {command_name}\n"
+        f"Engine: {model_name}\n\n"
+        f"{content}"
+    )
 
 
-async def handle_text_model(message: Message, model, model_name: str, as_messages=False):
-    prompt = get_prompt(message)
-    if not prompt:
-        return await message.reply_text("Please provide a prompt after the command.")
-
-    await message._client.send_chat_action(message.chat.id, ChatAction.TYPING)
-
-    lexica_client = AsyncClient()
-    try:
-        data = [Messages(content=prompt, role="user")] if as_messages else prompt
-        response = await lexica_client.ChatCompletion(data, model)
-        content = extract_content(response)
-        await message.reply_text(format_response(model_name, content) if content else "No content received from the API.")
-    except Exception as e:
-        await message.reply_text(f"An error occurred: {e}")
-    finally:
-        await lexica_client.close()
+async def send_chunked_reply(message: Message, text: str):
+    for start in range(0, len(text), 4096):
+        await message.reply_text(
+            text[start : start + 4096],
+            disable_web_page_preview=True,
+        )
 
 
-@app.on_message(filters.command("bard"))
-async def bard_handler(client: Client, message: Message):
-    await handle_text_model(message, languageModels.bard, "Bard")
-
-
-@app.on_message(filters.command("gemini"))
-async def gemini_handler(client: Client, message: Message):
-    await handle_text_model(message, languageModels.gemini, "Gemini", as_messages=True)
-
-
-@app.on_message(filters.command("gpt"))
-async def gpt_handler(client: Client, message: Message):
-    await handle_text_model(message, languageModels.gpt, "GPT", as_messages=True)
-
-
-@app.on_message(filters.command("llama"))
-async def llama_handler(client: Client, message: Message):
-    await handle_text_model(message, languageModels.llama, "LLaMA", as_messages=True)
-
-
-@app.on_message(filters.command("mistral"))
-async def mistral_handler(client: Client, message: Message):
-    await handle_text_model(message, languageModels.mistral, "Mistral", as_messages=True)
-
-
-@app.on_message(filters.command("geminivision"))
-async def geminivision_handler(client: Client, message: Message):
-    if not (message.reply_to_message and message.reply_to_message.photo):
-        return await message.reply_text("Please reply to an image with the /geminivision command and a prompt.")
-
+async def handle_text_model(
+    client: Client,
+    message: Message,
+    *,
+    alias: str,
+    command_name: str,
+):
     prompt = get_prompt(message)
     if not prompt:
         return await message.reply_text("Please provide a prompt after the command.")
 
     await client.send_chat_action(message.chat.id, ChatAction.TYPING)
-    status = await message.reply_text("Processing your image, please wait...")
-
-
     try:
-        file_path = await client.download_media(message.reply_to_message.photo.file_id)
-    except Exception as e:
-        await status.delete()
-        return await message.reply_text(f"❌ Failed to download image.\nError: {e}")
+        result = await generate_chat_response(prompt, alias=alias)
+        await send_chunked_reply(
+            message,
+            format_response(command_name, result.model, result.content),
+        )
+    except FreeAIError as exc:
+        await message.reply_text(str(exc))
 
-    lexica_client = AsyncClient()
 
-    try:
-        with open(file_path, "rb") as f:
-            data = base64.b64encode(f.read()).decode()
-        mime_type, _ = mimetypes.guess_type(file_path)
-        image_info = [{"data": data, "mime_type": mime_type}]
+@app.on_message(filters.command("bard"))
+async def bard_handler(client: Client, message: Message):
+    await handle_text_model(client, message, alias="bard", command_name="Bard")
 
-        response = await lexica_client.ChatCompletion(prompt, languageModels.geminiVision, images=image_info)
-        content = extract_content(response)
-        await message.reply_text(format_response("Gemini Vision", content) if content else "No content received from the API.")
-    except Exception as e:
-        await message.reply_text(f"An error occurred: {e}")
-    finally:
-        await status.delete()
-        await lexica_client.close()
-        os.remove(file_path)
+
+@app.on_message(filters.command("gemini"))
+async def gemini_handler(client: Client, message: Message):
+    await handle_text_model(client, message, alias="gemini", command_name="Gemini")
+
+
+@app.on_message(filters.command("gpt"))
+async def gpt_handler(client: Client, message: Message):
+    await handle_text_model(client, message, alias="gpt", command_name="GPT")
+
+
+@app.on_message(filters.command("llama"))
+async def llama_handler(client: Client, message: Message):
+    await handle_text_model(client, message, alias="llama", command_name="LLaMA")
+
+
+@app.on_message(filters.command("mistral"))
+async def mistral_handler(client: Client, message: Message):
+    await handle_text_model(client, message, alias="mistral", command_name="Mistral")
+
+
+@app.on_message(filters.command("geminivision"))
+async def geminivision_handler(client: Client, message: Message):
+    await client.send_chat_action(message.chat.id, ChatAction.TYPING)
+    await message.reply_text(vision_unavailable_message())

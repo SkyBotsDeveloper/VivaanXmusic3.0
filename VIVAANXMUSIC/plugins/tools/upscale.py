@@ -1,113 +1,95 @@
+import mimetypes
 import os
-import aiohttp
-import aiofiles
+from io import BytesIO
 
-from config import DEEP_API
-from VIVAANXMUSIC import app
 from pyrogram import filters
 from pyrogram.types import Message
 
+from VIVAANXMUSIC import app
+from VIVAANXMUSIC.utils.free_ai import (
+    FreeAIError,
+    generate_image,
+    process_image_bytes,
+)
 
-async def download_from_url(path: str, url: str) -> str:
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
-            if resp.status == 200:
-                async with aiofiles.open(path, mode="wb") as f:
-                    await f.write(await resp.read())
-                return path
+
+def get_prompt(message: Message) -> str | None:
+    if message.reply_to_message:
+        replied = (
+            message.reply_to_message.text or message.reply_to_message.caption or ""
+        ).strip()
+        if replied:
+            return replied
+
+    source = (message.text or message.caption or "").strip()
+    parts = source.split(None, 1)
+    if len(parts) > 1 and parts[1].strip():
+        return parts[1].strip()
     return None
 
 
-async def post_file(url: str, file_path: str, headers: dict):
-    async with aiohttp.ClientSession() as session:
-        with open(file_path, 'rb') as f:
-            form = aiohttp.FormData()
-            form.add_field('image', f, filename=os.path.basename(file_path), content_type='application/octet-stream')
+def get_image_target(message: Message):
+    replied = message.reply_to_message
+    if not replied:
+        return None, None
 
-            async with session.post(url, data=form, headers=headers) as resp:
-                return await resp.json()
+    if replied.photo:
+        return replied.photo.file_id, "image/jpeg"
 
+    document = replied.document
+    if document and document.mime_type and document.mime_type.startswith("image/"):
+        return document.file_id, document.mime_type
 
-async def post_data(url: str, data: dict, headers: dict):
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, data=data, headers=headers) as resp:
-            return await resp.json()
+    return None, None
 
 
 @app.on_message(filters.command("upscale"))
-async def upscale_image(_, message: Message):
-    if not DEEP_API:
-        return await message.reply_text("🚫 Missing DeepAI API key.")
+async def upscale_image(client, message: Message):
+    file_id, mime_type = get_image_target(message)
+    if not file_id:
+        return await message.reply_text("Please reply to an image.")
 
-    reply = message.reply_to_message
-    if not reply or not reply.photo:
-        return await message.reply_text("📎 Please reply to an image.")
-
-    status = await message.reply_text("🔄 Upscaling image...")
-
+    status = await message.reply_text("Enhancing image...")
+    file_path = None
     try:
-        local_path = await reply.download()
-        resp = await post_file(
-            "https://api.deepai.org/api/torch-srgan",
-            local_path,
-            headers={'api-key': DEEP_API}
+        file_path = await client.download_media(file_id)
+        with open(file_path, "rb") as handle:
+            image_bytes = handle.read()
+
+        guessed_type, _ = mimetypes.guess_type(file_path)
+        result_bytes = await process_image_bytes(
+            image_bytes,
+            mime_type=mime_type or guessed_type or "image/jpeg",
+            mode="enhance",
         )
 
-        image_url = resp.get("output_url")
-        if not image_url:
-            return await status.edit("❌ Upscale request failed.")
-
-        final_path = await download_from_url(local_path, image_url)
-        if not final_path:
-            return await status.edit("❌ Could not download result.")
-
+        document = BytesIO(result_bytes)
+        document.name = "enhanced.png"
         await status.delete()
-        await message.reply_document(final_path)
-
-    except Exception as e:
-        await status.edit(f"⚠️ Error: `{str(e)}`")
+        await message.reply_document(document=document, caption="Enhanced image")
+    except FreeAIError as exc:
+        await status.edit(str(exc))
+    except Exception as exc:
+        await status.edit(f"Error: {exc}")
+    finally:
+        if file_path and os.path.exists(file_path):
+            os.remove(file_path)
 
 
 @app.on_message(filters.command("getdraw"))
 async def draw_image(_, message: Message):
-    if not DEEP_API:
-        return await message.reply_text("🚫 DeepAI API key is missing.")
-
-    reply = message.reply_to_message
-    query = None
-
-    if reply and reply.text:
-        query = reply.text
-    elif len(message.command) > 1:
-        query = message.text.split(None, 1)[1]
-
+    query = get_prompt(message)
     if not query:
-        return await message.reply_text("💬 Please reply or provide text.")
+        return await message.reply_text("Please reply or provide text.")
 
-    status = await message.reply_text("🎨 Generating image...")
-
-    user_id = message.from_user.id
-    chat_id = message.chat.id
-    temp_path = f"cache/{user_id}_{chat_id}_{message.id}.png"
-
+    status = await message.reply_text("Generating image...")
     try:
-        resp = await post_data(
-            "https://api.deepai.org/api/text2img",
-            data={'text': query, 'grid_size': '1', 'image_generator_version': 'hd'},
-            headers={'api-key': DEEP_API}
-        )
-
-        image_url = resp.get("output_url")
-        if not image_url:
-            return await status.edit("❌ Failed to generate image.")
-
-        final_path = await download_from_url(temp_path, image_url)
-        if not final_path:
-            return await status.edit("❌ Error downloading image.")
-
+        result_bytes = await generate_image(query)
+        photo = BytesIO(result_bytes)
+        photo.name = "generated.png"
         await status.delete()
-        await message.reply_photo(final_path, caption=f"`{query}`")
-
-    except Exception as e:
-        await status.edit(f"⚠️ Error: `{str(e)}`")
+        await message.reply_photo(photo, caption=query)
+    except FreeAIError as exc:
+        await status.edit(str(exc))
+    except Exception as exc:
+        await status.edit(f"Error: {exc}")

@@ -21,6 +21,7 @@ from VIVAANXMUSIC.utils.database import (
 )
 from VIVAANXMUSIC.utils.decorators.language import language
 from VIVAANXMUSIC.utils.pastebin import VIVAANBIN
+from VIVAANXMUSIC.utils.security import build_subprocess_env
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -74,6 +75,7 @@ async def update_(client, message, _):
         ["git", "fetch", "origin", str(config.UPSTREAM_BRANCH)],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        env=build_subprocess_env(),
     )
     await asyncio.sleep(7)
 
@@ -118,12 +120,14 @@ async def update_(client, message, _):
         ["git", "stash"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        env=build_subprocess_env(),
     )
     if stash.returncode == 0:
         subprocess.run(
             ["git", "pull"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            env=build_subprocess_env(),
         )
 
     try:
@@ -152,6 +156,7 @@ async def update_(client, message, _):
                 [XCB[5], XCB[7], heroku_url, refspec],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                env=build_subprocess_env(),
             )
             return
         except Exception as err:

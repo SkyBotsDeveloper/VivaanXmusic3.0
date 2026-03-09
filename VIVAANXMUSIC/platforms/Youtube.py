@@ -1,8 +1,6 @@
 import asyncio
-import glob
 import json
 import os
-import random
 import re
 import shlex
 from concurrent.futures import ThreadPoolExecutor
@@ -19,6 +17,7 @@ import base64
 from VIVAANXMUSIC import LOGGER
 from VIVAANXMUSIC.utils.database import is_on_off
 from VIVAANXMUSIC.utils.formatters import time_to_seconds
+from VIVAANXMUSIC.utils.security import build_subprocess_env
 from config import YT_API_KEY, YTPROXY_URL as YTPROXY
 
 logger = LOGGER(__name__)
@@ -30,30 +29,19 @@ WORKER_FALLBACK_API_URL = os.getenv(
 )
 WORKER_FALLBACK_API_KEY = os.getenv("WORKER_FALLBACK_API_KEY", "itsmesid")
 
-def cookie_txt_file():
-    try:
-        folder_path = f"{os.getcwd()}/cookies"
-        filename = f"{os.getcwd()}/cookies/logs.csv"
-        txt_files = glob.glob(os.path.join(folder_path, '*.txt'))
-        if not txt_files:
-            raise FileNotFoundError("No .txt files found in the specified folder.")
-        cookie_txt_file = random.choice(txt_files)
-        with open(filename, 'a') as file:
-            file.write(f'Choosen File : {cookie_txt_file}\n')
-        return f"""cookies/{str(cookie_txt_file).split("/")[-1]}"""
-    except:
-        return None
+def build_yt_dlp_args(args: list[str]) -> list[str]:
+    return list(args)
 
 
 async def check_file_size(link):
     async def get_format_info(link):
+        args = build_yt_dlp_args(["yt-dlp"])
+        args.extend(["-J", link])
         proc = await asyncio.create_subprocess_exec(
-            "yt-dlp",
-            "--cookies", cookie_txt_file(),
-            "-J",
-            link,
+            *args,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
+            stderr=asyncio.subprocess.PIPE,
+            env=build_subprocess_env(),
         )
         stdout, stderr = await proc.communicate()
         if proc.returncode != 0:
@@ -89,6 +77,7 @@ async def shell_cmd(cmd):
         *args,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        env=build_subprocess_env(),
     )
     out, errorz = await proc.communicate()
     if errorz:
@@ -227,15 +216,20 @@ class YouTubeAPI:
         elif "&si=" in link:
             link = link.split("&si=")[0]
 
+        args = build_yt_dlp_args(["yt-dlp"])
+        args.extend(
+            [
+                "-g",
+                "-f",
+                "best[height<=?720][width<=?1280]",
+                f"{link}",
+            ]
+        )
         proc = await asyncio.create_subprocess_exec(
-            "yt-dlp",
-            "--cookies",cookie_txt_file(),
-            "-g",
-            "-f",
-            "best[height<=?720][width<=?1280]",
-            f"{link}",
+            *args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=build_subprocess_env(),
         )
         stdout, stderr = await proc.communicate()
         if stdout:
@@ -254,23 +248,19 @@ class YouTubeAPI:
             link = link.split("&si=")[0]
         if self._has_disallowed_url_chars(link):
             return []
-        cookie_file = cookie_txt_file()
-        if cookie_file is None:
-            cookie_file = "None"
-        playlist = await shell_cmd(
+        args = build_yt_dlp_args(
             [
                 "yt-dlp",
                 "-i",
                 "--get-id",
                 "--flat-playlist",
-                "--cookies",
-                cookie_file,
                 "--playlist-end",
                 str(limit),
                 "--skip-download",
                 link,
             ]
         )
+        playlist = await shell_cmd(args)
         try:
             result = playlist.split("\n")
             for key in result:
@@ -315,7 +305,7 @@ class YouTubeAPI:
             link = link.split("?si=")[0]
         elif "&si=" in link:
             link = link.split("&si=")[0]
-        ytdl_opts = {"quiet": True, "cookiefile" : cookie_txt_file()}
+        ytdl_opts = {"quiet": True}
         ydl = yt_dlp.YoutubeDL(ytdl_opts)
         with ydl:
             formats_available = []
@@ -646,7 +636,6 @@ class YouTubeAPI:
                 "nocheckcertificate": True,
                 "quiet": True,
                 "no_warnings": True,
-                "cookiefile" : cookie_txt_file(),
                 "prefer_ffmpeg": True,
                 "merge_output_format": "mp4",
             }
@@ -662,7 +651,6 @@ class YouTubeAPI:
                 "nocheckcertificate": True,
                 "quiet": True,
                 "no_warnings": True,
-                "cookiefile" : cookie_txt_file(),
                 "prefer_ffmpeg": True,
                 "postprocessors": [
                     {

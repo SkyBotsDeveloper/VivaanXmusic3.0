@@ -5,6 +5,7 @@ from pyrogram import filters
 from pyrogram.types import Message
 from pydub import AudioSegment
 from VIVAANXMUSIC import app
+from VIVAANXMUSIC.utils.security import build_subprocess_env
 
 MAX_SIZE_MB = 50
 MAX_SIZE_BYTES = MAX_SIZE_MB * 1024 * 1024
@@ -60,7 +61,8 @@ async def remove_media(_, message: Message):
                         "copy",
                         "-an",
                         output_video,
-                    ]
+                    ],
+                    env=build_subprocess_env(),
                 )
 
             await asyncio.to_thread(process_video)

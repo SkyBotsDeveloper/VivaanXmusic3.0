@@ -4,6 +4,7 @@ import cv2
 from PIL import Image
 from pyrogram import Client, filters
 from VIVAANXMUSIC import app
+from VIVAANXMUSIC.utils.security import build_subprocess_env
 
 
 @app.on_message(filters.command("tiny"))
@@ -31,13 +32,19 @@ async def tiny_sticker(client, message):
             except Exception:
                 pass
             return
-        subprocess.run(["lottie_convert.py", "wel2.tgs", "json.json"])
+        subprocess.run(
+            ["lottie_convert.py", "wel2.tgs", "json.json"],
+            env=build_subprocess_env(),
+        )
         with open("json.json", "r") as json_file:
             jsn = json_file.read()
             jsn = jsn.replace("512", "2000")
         with open("json.json", "w") as json_file:
             json_file.write(jsn)
-        subprocess.run(["lottie_convert.py", "json.json", "wel2.tgs"])
+        subprocess.run(
+            ["lottie_convert.py", "json.json", "wel2.tgs"],
+            env=build_subprocess_env(),
+        )
         file = "wel2.tgs"
         os.remove("json.json")
     elif ik.endswith((".gif", ".mp4")):

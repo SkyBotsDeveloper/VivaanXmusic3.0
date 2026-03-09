@@ -2,6 +2,7 @@ import asyncio
 import importlib
 
 from pyrogram import idle
+from pyrogram.types import BotCommand
 from pytgcalls.exceptions import NoActiveGroupCall
 
 import config
@@ -10,8 +11,26 @@ from VIVAANXMUSIC.core.call import JARVIS
 from VIVAANXMUSIC.misc import sudo
 from VIVAANXMUSIC.plugins import ALL_MODULES
 from VIVAANXMUSIC.utils.database import get_banned_users, get_gbanned
-from VIVAANXMUSIC.utils.cookie_handler import fetch_and_store_cookies
 from config import BANNED_USERS
+
+BOT_COMMANDS = [
+    BotCommand("start", "Start the bot"),
+    BotCommand("help", "Open help menu"),
+    BotCommand("play", "Play audio in voice chat"),
+    BotCommand("vplay", "Play video in voice chat"),
+    BotCommand("song", "Download a song"),
+    BotCommand("queue", "Show current queue"),
+    BotCommand("player", "Open player controls"),
+    BotCommand("gpt", "Ask the AI assistant"),
+    BotCommand("getdraw", "Generate an AI image"),
+    BotCommand("upscale", "Enhance a replied image"),
+    BotCommand("rmbg", "Remove image background"),
+    BotCommand("weather", "Get weather info"),
+    BotCommand("insta", "Download Instagram media"),
+    BotCommand("movie", "Search movie info"),
+    BotCommand("settings", "Open group settings"),
+    BotCommand("ping", "Check bot status"),
+]
 
 
 async def init():
@@ -22,16 +41,10 @@ async def init():
         and not config.STRING4
         and not config.STRING5
     ):
-        LOGGER(__name__).error("ᴀssɪsᴛᴀɴᴛ sᴇssɪᴏɴ ɴᴏᴛ ғɪʟʟᴇᴅ, ᴘʟᴇᴀsᴇ ғɪʟʟ ᴀ ᴘʏʀᴏɢʀᴀᴍ sᴇssɪᴏɴ...")
+        LOGGER(__name__).error(
+            "Assistant session not filled, please fill a Pyrogram session."
+        )
         exit()
-
-    # ✅ Try to fetch cookies at startup
-    try:
-        await fetch_and_store_cookies()
-        LOGGER("VIVAANXMUSIC").info("ʏᴏᴜᴛᴜʙᴇ ᴄᴏᴏᴋɪᴇs ʟᴏᴀᴅᴇᴅ sᴜᴄᴄᴇssғᴜʟʟʏ ✅")
-    except Exception as e:
-        LOGGER("VIVAANXMUSIC").warning(f"⚠️ᴄᴏᴏᴋɪᴇ ᴇʀʀᴏʀ: {e}")
-
 
     await sudo()
 
@@ -42,26 +55,29 @@ async def init():
         users = await get_banned_users()
         for user_id in users:
             BANNED_USERS.add(user_id)
-    except:
+    except Exception:
         pass
 
     await app.start()
+    await app.set_bot_commands(BOT_COMMANDS)
     for all_module in ALL_MODULES:
         importlib.import_module("VIVAANXMUSIC.plugins" + all_module)
 
-    LOGGER("VIVAANXMUSIC.plugins").info("ᴀɴɴɪᴇ's ᴍᴏᴅᴜʟᴇs ʟᴏᴀᴅᴇᴅ...")
+    LOGGER("VIVAANXMUSIC.plugins").info("Modules loaded.")
 
     await userbot.start()
     await JARVIS.start()
 
     try:
-        await JARVIS.stream_call("http://docs.evostream.com/sample_content/assets/sintel1m720p.mp4")
+        await JARVIS.stream_call(
+            "http://docs.evostream.com/sample_content/assets/sintel1m720p.mp4"
+        )
     except NoActiveGroupCall:
         LOGGER("VIVAANXMUSIC").error(
-            "ᴘʟᴇᴀsᴇ ᴛᴜʀɴ ᴏɴ ᴛʜᴇ ᴠᴏɪᴄᴇ ᴄʜᴀᴛ ᴏғ ʏᴏᴜʀ ʟᴏɢ ɢʀᴏᴜᴘ/ᴄʜᴀɴɴᴇʟ.\n\nᴀɴɴɪᴇ ʙᴏᴛ sᴛᴏᴘᴘᴇᴅ..."
+            "Please turn on the voice chat of your log group/channel.\n\nBot stopped."
         )
         exit()
-    except:
+    except Exception:
         pass
 
     await JARVIS.decorators()
@@ -71,7 +87,7 @@ async def init():
     await idle()
     await app.stop()
     await userbot.stop()
-    LOGGER("VIVAANXMUSIC").info("sᴛᴏᴘᴘɪɴɢ ᴀɴɴɪᴇ ᴍᴜsɪᴄ ʙᴏᴛ ...")
+    LOGGER("VIVAANXMUSIC").info("Stopping music bot...")
 
 
 if __name__ == "__main__":

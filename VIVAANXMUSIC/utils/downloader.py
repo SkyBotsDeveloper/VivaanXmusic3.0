@@ -10,13 +10,10 @@ from aiohttp import TCPConnector
 from yt_dlp import YoutubeDL
 
 from VIVAANXMUSIC.core.dir import DOWNLOAD_DIR as _DOWNLOAD_DIR, CACHE_DIR
-from VIVAANXMUSIC.utils.cookie_handler import COOKIE_PATH
 from VIVAANXMUSIC.utils.tuning import CHUNK_SIZE, SEM
 from config import API_KEY, API_URL
 
 USE_API: bool = bool(API_URL and API_KEY)
-
-_COOKIES_FILE = str(COOKIE_PATH)
 
 _inflight: Dict[str, asyncio.Future] = {}
 _inflight_lock = asyncio.Lock()
@@ -29,17 +26,6 @@ def extract_video_id(link: str) -> str:
     if "v=" in link:
         return link.split("v=")[-1].split("&")[0]
     return link.split("/")[-1].split("?")[0]
-
-
-def _cookiefile_path() -> Optional[str]:
-    try:
-        if _COOKIES_FILE and os.path.exists(_COOKIES_FILE) and os.path.getsize(
-            _COOKIES_FILE
-        ) > 0:
-            return _COOKIES_FILE
-    except Exception:
-        pass
-    return None
 
 
 def file_exists(video_id: str) -> Optional[str]:
@@ -70,9 +56,6 @@ def _ytdlp_base_opts() -> Dict[str, Union[str, int, bool]]:
         "fragment_retries": 3,
         "cachedir": str(CACHE_DIR),
     }
-    cookiefile = _cookiefile_path()
-    if cookiefile:
-        opts["cookiefile"] = cookiefile
     return opts
 
 

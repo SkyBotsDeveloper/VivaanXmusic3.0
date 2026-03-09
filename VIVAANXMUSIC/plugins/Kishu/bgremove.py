@@ -1,64 +1,60 @@
+import mimetypes
 import os
-import aiohttp
-import aiofiles
+from io import BytesIO
+
 from pyrogram import filters
+
 from VIVAANXMUSIC import app
+from VIVAANXMUSIC.utils.free_ai import FreeAIError, process_image_bytes
 
-API_KEY = "23nfCEipDijgVv6SH14oktJe"
 
-def generate_unique_filename(base_name: str) -> str:
-    if os.path.exists(base_name):
-        count = 1
-        name, ext = os.path.splitext(base_name)
-        while True:
-            new_name = f"{name}_{count}{ext}"
-            if not os.path.exists(new_name):
-                return new_name
-            count += 1
-    return base_name
+def get_image_target(message):
+    replied = message.reply_to_message
+    if not replied:
+        return None, None
 
-async def remove_background(image_path: str) -> tuple:
-    headers = {"X-API-Key": API_KEY}
-    async with aiohttp.ClientSession() as session:
-        try:
-            with open(image_path, "rb") as img:
-                data = {"image_file": img.read()}
-            async with session.post(
-                "https://api.remove.bg/v1.0/removebg", headers=headers, data=data
-            ) as response:
+    if replied.photo:
+        return replied.photo.file_id, "image/jpeg"
 
-                if "image" not in response.headers.get("content-type", ""):
-                    return False, await response.json()
+    document = replied.document
+    if document and document.mime_type and document.mime_type.startswith("image/"):
+        return document.file_id, document.mime_type
 
-                output_filename = generate_unique_filename("no_bg.png")
-                async with aiofiles.open(output_filename, "wb") as out_file:
-                    await out_file.write(await response.read())
-                return True, output_filename
+    return None, None
 
-        except Exception as e:
-            return False, {"title": "Unknown Error", "errors": [{"detail": str(e)}]}
 
 @app.on_message(filters.command("rmbg"))
 async def remove_bg_command(client, message):
-    status = await message.reply("🖌️ Processing your image...")
-    replied = message.reply_to_message
-
-    if not replied or not replied.photo:
+    status = await message.reply("Processing your image...")
+    file_id, mime_type = get_image_target(message)
+    if not file_id:
         return await status.edit("Please reply to a photo to remove its background.")
 
+    file_path = None
     try:
-        downloaded_photo = await client.download_media(replied)
-        success, result = await remove_background(downloaded_photo)
-        os.remove(downloaded_photo)
+        file_path = await client.download_media(file_id)
+        with open(file_path, "rb") as handle:
+            image_bytes = handle.read()
 
-        if not success:
-            error = result["errors"][0]
-            return await status.edit(f"⚠️ ERROR: {result['title']}\n{error.get('detail', '')}")
+        guessed_type, _ = mimetypes.guess_type(file_path)
+        result_bytes = await process_image_bytes(
+            image_bytes,
+            mime_type=mime_type or guessed_type or "image/jpeg",
+            mode="removebg",
+        )
 
-        await message.reply_photo(photo=result, caption="✅ Here's your image without background.")
-        await message.reply_document(document=result)
-        os.remove(result)
+        photo = BytesIO(result_bytes)
+        photo.name = "no_bg.png"
+        document = BytesIO(result_bytes)
+        document.name = "no_bg.png"
+
+        await message.reply_photo(photo=photo, caption="Here is your image without background.")
+        await message.reply_document(document=document)
         await status.delete()
-
-    except Exception as e:
-        await status.edit(f"❌ Failed to process the image.\nError: {e}")
+    except FreeAIError as exc:
+        await status.edit(str(exc))
+    except Exception as exc:
+        await status.edit(f"Failed to process the image.\nError: {exc}")
+    finally:
+        if file_path and os.path.exists(file_path):
+            os.remove(file_path)

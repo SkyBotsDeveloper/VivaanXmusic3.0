@@ -1,5 +1,26 @@
 # Security Audit
 
+Date: 2026-03-09
+Scope: secret exposure hardening for subprocesses, logs, and user-controlled URL commands.
+
+## Additional Hardening
+
+6) Sensitive env isolation after startup
+Files: `VIVAANXMUSIC/__init__.py`, `VIVAANXMUSIC/utils/security.py`
+Patch: Sensitive env vars are stripped from the live process environment after config load so later child processes do not inherit bot secrets by default.
+
+7) Clean subprocess environments
+Files: `VIVAANXMUSIC/core/call.py`, `VIVAANXMUSIC/core/git.py`, `VIVAANXMUSIC/platforms/Youtube.py`, `VIVAANXMUSIC/plugins/sudo/restart.py`, `VIVAANXMUSIC/plugins/tools/kang.py`, `VIVAANXMUSIC/plugins/tools/tiny.py`, `VIVAANXMUSIC/plugins/tools/videoedit.py`, `VIVAANXMUSIC/utils/formatters.py`
+Patch: Child processes now run with a reduced allowlisted environment instead of inheriting all loaded secrets.
+
+8) Secret redaction in logs and error reports
+Files: `VIVAANXMUSIC/logging.py`, `VIVAANXMUSIC/utils/errors.py`, `VIVAANXMUSIC/utils/security.py`
+Patch: Known env and config secrets are redacted before being written to logs, paste output, or Telegram error messages.
+
+9) SSRF and untrusted URL hardening
+Files: `VIVAANXMUSIC/plugins/Kishu/webdl.py`, `VIVAANXMUSIC/plugins/misc/urlshortner.py`, `VIVAANXMUSIC/plugins/misc/downloadrepo.py`, `VIVAANXMUSIC/utils/security.py`
+Patch: Public URL validation now blocks localhost, private IPs, credentialed URLs, redirects to untrusted hosts, and URLs containing secret values. `webdl` and `downloadrepo` were restricted to `SUDOERS`, and repo downloads are limited to HTTPS GitHub repos.
+
 Date: 2026-02-05
 Scope: command injection / shell execution and minimal safety hardening per request.
 

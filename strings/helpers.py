@@ -14,6 +14,25 @@ HELP_1_PROMO = """
 
 """
 
+# Override AI help text with the current command set.
+HELP_11 = """
+<b><u>AI Chat:</u></b>
+
+<b><u>Chat-with-AI features.</u></b>
+
+• Jarvis - chat with the AI assistant.
+• Assis - AI reply in audio format.
+• /gpt - text chat reply.
+• /bard - alternate AI reply command.
+• /llama - alternate AI reply command.
+• /gemini - alternate AI reply command.
+• /geminivision - temporarily unavailable on the current free provider stack.
+• /mistral - alternate AI reply command.
+• /getdraw - generate an AI image from text.
+• /upscale - enhance a replied image.
+• /rmbg - remove image background.
+"""
+
 HELP_1_PUNISH = """
 <b><u>ᴘᴜɴɪꜱʜᴍᴇɴᴛ ⁄ ᴘᴏʟɪᴄɪɴɢ</u></b>
 ᴀᴠᴀɪʟᴀʙʟᴇ ᴄᴏᴍᴍᴀɴᴅꜱ ꜰᴏʀ ᴍᴏᴅᴇʀᴀᴛɪᴏɴ, ᴘʀᴏᴍᴏᴛɪᴏɴ (ᴀᴅᴍɪɴꜱ ᴏɴʟʏ):

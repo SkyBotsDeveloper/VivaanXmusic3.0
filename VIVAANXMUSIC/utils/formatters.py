@@ -1,6 +1,8 @@
 import json
 import subprocess
 
+from VIVAANXMUSIC.utils.security import build_subprocess_env
+
 def get_readable_time(seconds: int) -> str:
     count = 0
     ping_time = ""
@@ -127,7 +129,12 @@ def check_duration(file_path):
         file_path,
     ]
 
-    pipe = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    pipe = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        env=build_subprocess_env(),
+    )
     out, err = pipe.communicate()
     _json = json.loads(out)
 

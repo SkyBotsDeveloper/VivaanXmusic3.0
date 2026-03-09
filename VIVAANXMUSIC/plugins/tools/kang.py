@@ -20,6 +20,7 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from VIVAANXMUSIC import app
 from VIVAANXMUSIC.utils.files import resize_file_to_sticker_size
+from VIVAANXMUSIC.utils.security import build_subprocess_env
 from config import BOT_USERNAME
 
 BOT = BOT_USERNAME.lstrip("@").lower()
@@ -108,7 +109,12 @@ async def _prepare_media(message, tmp_dir: str, notify) -> Tuple[str, str, bool,
             "-an", "-r", "30",
             out_v
         ]
-        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        res = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=build_subprocess_env(),
+        )
         if res.returncode != 0:
             raise RuntimeError(res.stderr.decode())
         return "video", out_v, False, True

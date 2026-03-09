@@ -1,60 +1,78 @@
-from pyrogram import Client, filters
-from pyrogram.types import Message
-from pyrogram.enums import ParseMode
-import git
-import shutil
 import os
-from VIVAANXMUSIC import app
+import shutil
+import tempfile
 
-@app.on_message(filters.command(["downloadrepo"]))
+import git
+from pyrogram import Client, filters
+from pyrogram.enums import ParseMode
+from pyrogram.types import Message
+
+from VIVAANXMUSIC import app
+from VIVAANXMUSIC.misc import SUDOERS
+from VIVAANXMUSIC.utils.security import (
+    SecurityError,
+    build_subprocess_env,
+    validate_github_repo_url,
+)
+
+
+@app.on_message(filters.command(["downloadrepo"]) & SUDOERS)
 async def download_repo(client: Client, message: Message):
     if len(message.command) != 2:
         return await message.reply_text(
-            "❌ Please provide a valid GitHub repository URL.\n\n"
+            "Please provide a GitHub repository URL.\n\n"
             "Example: `/downloadrepo https://github.com/VivaanNetworkDev/VivaanXmusic3.0`",
-            parse_mode=ParseMode.MARKDOWN
+            parse_mode=ParseMode.MARKDOWN,
         )
 
     repo_url = message.command[1]
-    status_msg = await message.reply_text("⏬ Cloning the repository...")
-
-    zip_path = await clone_and_zip_repo(repo_url)
-
-    if zip_path:
-        try:
-            await message.reply_document(
-                zip_path,
-                caption="✅ Repository downloaded and zipped."
-            )
-        except Exception as e:
-            await message.reply_text(
-                f"❌ Failed to send file: `{e}`",
-                parse_mode=ParseMode.MARKDOWN
-            )
-        finally:
-            os.remove(zip_path)
-    else:
-        await message.reply_text(
-            "❌ Unable to download the specified GitHub repository.",
-            parse_mode=ParseMode.MARKDOWN
-        )
-
-    await status_msg.delete()
-
-async def clone_and_zip_repo(repo_url: str) -> str | None:
-    repo_name = repo_url.rstrip("/").split("/")[-1].replace(".git", "")
-    repo_path = repo_name
+    status_msg = await message.reply_text("Cloning the repository...")
+    cleanup_dir = None
 
     try:
-        git.Repo.clone_from(repo_url, repo_path)
-        zip_file = shutil.make_archive(repo_path, 'zip', repo_path)
-        return zip_file
-    except git.exc.GitCommandError as e:
-        print(f"Git error: {e}")
-        return None
-    except Exception as e:
-        print(f"Unexpected error: {e}")
-        return None
+        zip_path, cleanup_dir = await clone_and_zip_repo(repo_url)
+        await message.reply_document(
+            zip_path,
+            caption="Repository downloaded and zipped.",
+        )
+    except SecurityError as exc:
+        await message.reply_text(
+            f"Blocked by security policy: `{exc}`",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+    except git.exc.GitCommandError:
+        await message.reply_text(
+            "Unable to download the specified GitHub repository.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+    except Exception as exc:
+        await message.reply_text(
+            f"Failed to prepare repository archive: `{exc}`",
+            parse_mode=ParseMode.MARKDOWN,
+        )
     finally:
-        if os.path.exists(repo_path):
-            shutil.rmtree(repo_path)
+        if cleanup_dir and os.path.exists(cleanup_dir):
+            shutil.rmtree(cleanup_dir, ignore_errors=True)
+        await status_msg.delete()
+
+
+async def clone_and_zip_repo(repo_url: str) -> tuple[str, str]:
+    safe_repo_url = validate_github_repo_url(repo_url)
+
+    temp_root = tempfile.mkdtemp(prefix="vivaan_repo_")
+    repo_name = safe_repo_url.rstrip("/").split("/")[-1].removesuffix(".git")
+    repo_path = os.path.join(temp_root, repo_name)
+    archive_base = os.path.join(temp_root, repo_name)
+
+    try:
+        git.Repo.clone_from(
+            safe_repo_url,
+            repo_path,
+            env=build_subprocess_env(),
+            multi_options=["--depth=1", "--single-branch"],
+        )
+        zip_file = shutil.make_archive(archive_base, "zip", repo_path)
+        return zip_file, temp_root
+    except Exception:
+        shutil.rmtree(temp_root, ignore_errors=True)
+        raise

@@ -18,6 +18,24 @@ from VIVAANXMUSIC.utils.inline.start import private_panel
 from config import BANNED_USERS, HELP_IMG_URL, SUPPORT_CHAT
 from strings import get_string, helpers
 
+AI_HELP_TEXT = """
+<b><u>AI Chat:</u></b>
+
+<b><u>Chat-with-AI features.</u></b>
+
+• Jarvis - chat with the AI assistant.
+• Assis - AI reply in audio format.
+• /gpt - text chat reply.
+• /bard - alternate AI reply command.
+• /llama - alternate AI reply command.
+• /gemini - alternate AI reply command.
+• /geminivision - temporarily unavailable on the current free provider stack.
+• /mistral - alternate AI reply command.
+• /getdraw - generate an AI image from text.
+• /upscale - enhance a replied image.
+• /rmbg - remove image background.
+"""
+
 # ────────────────────────────────────────────────  /help entrypoints ──
 
 @app.on_message(filters.command(["help"]) & filters.private & ~BANNED_USERS)
@@ -71,6 +89,14 @@ async def helper_cb(client: Client, CallbackQuery: types.CallbackQuery, _):
         await CallbackQuery.edit_message_text(
             _["S_B_M"],
             reply_markup=action_sub_menu(_, current_page),
+            disable_web_page_preview=True
+        )
+        return
+
+    if number == 11:
+        await CallbackQuery.edit_message_text(
+            AI_HELP_TEXT,
+            reply_markup=help_back_markup(_, current_page),
             disable_web_page_preview=True
         )
         return
