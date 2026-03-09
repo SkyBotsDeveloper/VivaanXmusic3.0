@@ -36,7 +36,11 @@ def get_user_mention(message: Message) -> str:
 
 
 def get_reply_id(message: Message) -> int | None:
-    return message.reply_to_message.message_id if message.reply_to_message else None
+    if not message.reply_to_message:
+        return None
+    return getattr(message.reply_to_message, "id", None) or getattr(
+        message.reply_to_message, "message_id", None
+    )
 
 
 async def handle_percentage_command(_, message: Message):

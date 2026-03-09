@@ -55,5 +55,10 @@ async def cute(_, message):
         caption=caption,
         parse_mode=enums.ParseMode.MARKDOWN,
         reply_markup=SUPPORT_BTN,
-        reply_to_message_id=message.reply_to_message.message_id if message.reply_to_message else None,
+        reply_to_message_id=(
+            getattr(message.reply_to_message, "id", None)
+            or getattr(message.reply_to_message, "message_id", None)
+        )
+        if message.reply_to_message
+        else None,
     )
