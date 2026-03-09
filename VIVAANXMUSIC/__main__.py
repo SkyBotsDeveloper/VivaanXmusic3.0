@@ -22,6 +22,7 @@ BOT_COMMANDS = [
     BotCommand("queue", "Show current queue"),
     BotCommand("player", "Open player controls"),
     BotCommand("gpt", "Ask the AI assistant"),
+    BotCommand("geminivision", "Analyze a replied image"),
     BotCommand("getdraw", "Generate an AI image"),
     BotCommand("upscale", "Enhance a replied image"),
     BotCommand("rmbg", "Remove image background"),

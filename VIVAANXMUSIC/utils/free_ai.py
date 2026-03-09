@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import re
+import tempfile
 from dataclasses import dataclass
 
 import httpx
+from gradio_client import Client as GradioClient, handle_file
 
 
 HTTP_TIMEOUT = httpx.Timeout(45.0, connect=10.0)
@@ -14,6 +17,11 @@ IMAGE_GEN_URL = "https://death-image.ashlynn.workers.dev/generate"
 IMAGE_ENHANCE_URL = "https://arimagex.netlify.app/api/enhance"
 IMAGE_REMOVEBG_URL = "https://arimagex.netlify.app/api/removebg"
 CHAT_MODEL_CANDIDATES = ("gpt-4", "gpt-4o-mini")
+VISION_SYSTEM_PROMPT = (
+    "You answer questions about an image using only the provided visual description. "
+    "If the description is not enough to answer confidently, say so briefly. "
+    "Do not invent details."
+)
 PROMO_LINE_MARKERS = (
     "need proxies cheaper than the market",
     "ashlynn_repository",
@@ -87,6 +95,13 @@ def _extract_json_error(payload) -> str:
     return "Unknown upstream error."
 
 
+def _write_temp_image(image_bytes: bytes, mime_type: str) -> str:
+    suffix = ".png" if "png" in mime_type.lower() else ".jpg"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as handle:
+        handle.write(image_bytes)
+        return handle.name
+
+
 async def _chat_request(
     client: httpx.AsyncClient,
     prompt: str,
@@ -129,6 +144,76 @@ async def generate_chat_response(
                     failures.append(f"{model} attempt {attempt + 1}: {exc}")
     details = "\n".join(failures[:4])
     raise FreeAIError(f"Chat service is temporarily unavailable.\n{details}")
+
+
+def _caption_with_florence(image_path: str) -> tuple[str, str]:
+    client = GradioClient("prithivMLmods/Florence-2-Image-Caption")
+    result = client.predict(
+        uploaded_image=handle_file(image_path),
+        model_choice="Florence-2-base",
+        api_name="/describe_image",
+    )
+    return "Florence-2-base", str(result or "").strip()
+
+
+def _caption_with_blip(image_path: str) -> tuple[str, str]:
+    client = GradioClient("hysts/image-captioning-with-blip")
+    result = client.predict(
+        image=handle_file(image_path),
+        text="A picture of",
+        api_name="/caption",
+    )
+    return "BLIP", str(result or "").strip()
+
+
+async def _caption_image(image_path: str) -> tuple[str, str]:
+    failures: list[str] = []
+    for runner in (_caption_with_florence, _caption_with_blip):
+        try:
+            backend, caption = await asyncio.to_thread(runner, image_path)
+            if caption:
+                return backend, caption
+            failures.append(f"{runner.__name__}: empty caption")
+        except Exception as exc:
+            failures.append(f"{runner.__name__}: {exc}")
+
+    details = "\n".join(failures[:4])
+    raise FreeAIError(f"Vision service is temporarily unavailable.\n{details}")
+
+
+async def generate_vision_response(
+    prompt: str,
+    image_bytes: bytes,
+    *,
+    mime_type: str = "image/jpeg",
+) -> ChatResult:
+    image_path = _write_temp_image(image_bytes, mime_type)
+    try:
+        vision_model, caption = await _caption_image(image_path)
+    finally:
+        try:
+            import os
+
+            os.remove(image_path)
+        except Exception:
+            pass
+
+    user_prompt = (prompt or "").strip() or "Describe this image."
+    if user_prompt.lower() in {"describe this image", "describe this image."}:
+        return ChatResult(model=vision_model, content=caption)
+
+    answer = await generate_chat_response(
+        (
+            f"Visual description:\n{caption}\n\n"
+            f"User question:\n{user_prompt}"
+        ),
+        alias="geminivision",
+        system_prompt=VISION_SYSTEM_PROMPT,
+    )
+    return ChatResult(
+        model=f"{vision_model} + {answer.model}",
+        content=answer.content,
+    )
 
 
 async def generate_image(prompt: str) -> bytes:

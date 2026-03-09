@@ -29,7 +29,7 @@ AI_HELP_TEXT = """
 • /bard - alternate AI reply command.
 • /llama - alternate AI reply command.
 • /gemini - alternate AI reply command.
-• /geminivision - temporarily unavailable on the current free provider stack.
+• /geminivision - analyze a replied image.
 • /mistral - alternate AI reply command.
 • /getdraw - generate an AI image from text.
 • /upscale - enhance a replied image.

@@ -1,3 +1,6 @@
+import mimetypes
+import os
+
 from pyrogram import Client, filters
 from pyrogram.enums import ChatAction
 from pyrogram.types import Message
@@ -6,7 +9,7 @@ from VIVAANXMUSIC import app
 from VIVAANXMUSIC.utils.free_ai import (
     FreeAIError,
     generate_chat_response,
-    vision_unavailable_message,
+    generate_vision_response,
 )
 
 
@@ -39,6 +42,21 @@ async def send_chunked_reply(message: Message, text: str):
             text[start : start + 4096],
             disable_web_page_preview=True,
         )
+
+
+def get_image_target(message: Message):
+    replied = message.reply_to_message
+    if not replied:
+        return None, None
+
+    if replied.photo:
+        return replied.photo.file_id, "image/jpeg"
+
+    document = replied.document
+    if document and document.mime_type and document.mime_type.startswith("image/"):
+        return document.file_id, document.mime_type
+
+    return None, None
 
 
 async def handle_text_model(
@@ -90,5 +108,33 @@ async def mistral_handler(client: Client, message: Message):
 
 @app.on_message(filters.command("geminivision"))
 async def geminivision_handler(client: Client, message: Message):
+    file_id, mime_type = get_image_target(message)
+    if not file_id:
+        return await message.reply_text(
+            "Please reply to an image with the /geminivision command."
+        )
+
+    prompt = get_prompt(message) or "Describe this image."
     await client.send_chat_action(message.chat.id, ChatAction.TYPING)
-    await message.reply_text(vision_unavailable_message())
+
+    file_path = None
+    try:
+        file_path = await client.download_media(file_id)
+        with open(file_path, "rb") as handle:
+            image_bytes = handle.read()
+
+        guessed_type, _ = mimetypes.guess_type(file_path)
+        result = await generate_vision_response(
+            prompt,
+            image_bytes,
+            mime_type=mime_type or guessed_type or "image/jpeg",
+        )
+        await send_chunked_reply(
+            message,
+            format_response("Gemini Vision", result.model, result.content),
+        )
+    except FreeAIError as exc:
+        await message.reply_text(str(exc))
+    finally:
+        if file_path and os.path.exists(file_path):
+            os.remove(file_path)
