@@ -1,13 +1,14 @@
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from pyrogram.types import InlineKeyboardMarkup
 
 from config import SUPPORT_CHAT
+from VIVAANXMUSIC.utils.button_styles import danger_button, success_button
 
 
 def botplaylist_markup(_):
     buttons = [
         [
-            InlineKeyboardButton(text=_["S_B_4"], url=SUPPORT_CHAT),
-            InlineKeyboardButton(text=_["CLOSE_BUTTON"], callback_data="close"),
+            success_button(text=_["S_B_4"], url=SUPPORT_CHAT),
+            danger_button(text=_["CLOSE_BUTTON"], callback_data="close"),
         ],
     ]
     return buttons
@@ -17,7 +18,7 @@ def close_markup(_):
     upl = InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton(
+                danger_button(
                     text=_["CLOSE_BUTTON"],
                     callback_data="close",
                 ),
@@ -31,7 +32,7 @@ def supp_markup(_):
     upl = InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton(
+                success_button(
                     text=_["S_B_4"],
                     url=SUPPORT_CHAT,
                 ),

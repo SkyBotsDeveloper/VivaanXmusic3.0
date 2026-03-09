@@ -1,19 +1,21 @@
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from pyrogram.types import InlineKeyboardMarkup
+
+from VIVAANXMUSIC.utils.button_styles import danger_button, primary_button
 
 
 def stats_buttons(_, status):
     not_sudo = [
-        InlineKeyboardButton(
+        primary_button(
             text=_["SA_B_1"],
             callback_data="TopOverall",
         )
     ]
     sudo = [
-        InlineKeyboardButton(
+        primary_button(
             text=_["SA_B_2"],
             callback_data="bot_stats_sudo",
         ),
-        InlineKeyboardButton(
+        primary_button(
             text=_["SA_B_3"],
             callback_data="TopOverall",
         ),
@@ -22,7 +24,7 @@ def stats_buttons(_, status):
         [
             sudo if status else not_sudo,
             [
-                InlineKeyboardButton(
+                danger_button(
                     text=_["CLOSE_BUTTON"],
                     callback_data="close",
                 ),
@@ -36,11 +38,11 @@ def back_stats_buttons(_):
     upl = InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton(
+                primary_button(
                     text=_["BACK_BUTTON"],
                     callback_data="stats_back",
                 ),
-                InlineKeyboardButton(
+                danger_button(
                     text=_["CLOSE_BUTTON"],
                     callback_data="close",
                 ),

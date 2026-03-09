@@ -1,6 +1,8 @@
 from typing import Union
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
+from VIVAANXMUSIC.utils.button_styles import danger_button, primary_button, success_button
+
 
 def queue_markup(
     _,
@@ -12,11 +14,11 @@ def queue_markup(
 ):
     not_dur = [
         [
-            InlineKeyboardButton(
+            primary_button(
                 text=_["QU_B_1"],
                 callback_data=f"GetQueued {CPLAY}|{videoid}",
             ),
-            InlineKeyboardButton(
+            danger_button(
                 text=_["CLOSE_BUTTON"],
                 callback_data="close",
             ),
@@ -30,11 +32,11 @@ def queue_markup(
             )
         ],
         [
-            InlineKeyboardButton(
+            primary_button(
                 text=_["QU_B_1"],
                 callback_data=f"GetQueued {CPLAY}|{videoid}",
             ),
-            InlineKeyboardButton(
+            danger_button(
                 text=_["CLOSE_BUTTON"],
                 callback_data="close",
             ),
@@ -48,11 +50,11 @@ def queue_back_markup(_, CPLAY):
     upl = InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton(
+                primary_button(
                     text=_["BACK_BUTTON"],
                     callback_data=f"queue_back_timer {CPLAY}",
                 ),
-                InlineKeyboardButton(
+                danger_button(
                     text=_["CLOSE_BUTTON"],
                     callback_data="close",
                 ),
@@ -65,11 +67,11 @@ def queue_back_markup(_, CPLAY):
 def aq_markup(_, chat_id):
     buttons = [
         [
-            InlineKeyboardButton(text="▷", callback_data=f"ADMIN Resume|{chat_id}"),
-            InlineKeyboardButton(text="II", callback_data=f"ADMIN Pause|{chat_id}"),
-            InlineKeyboardButton(text="‣‣I", callback_data=f"ADMIN Skip|{chat_id}"),
-            InlineKeyboardButton(text="▢", callback_data=f"ADMIN Stop|{chat_id}"),
+            success_button(text="▷", callback_data=f"ADMIN Resume|{chat_id}"),
+            primary_button(text="II", callback_data=f"ADMIN Pause|{chat_id}"),
+            primary_button(text="‣‣I", callback_data=f"ADMIN Skip|{chat_id}"),
+            danger_button(text="▢", callback_data=f"ADMIN Stop|{chat_id}"),
         ],
-        [InlineKeyboardButton(text=_["CLOSE_BUTTON"], callback_data="close")],
+        [danger_button(text=_["CLOSE_BUTTON"], callback_data="close")],
     ]
     return buttons

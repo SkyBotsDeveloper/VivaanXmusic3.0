@@ -4,7 +4,7 @@ import time
 from pyrogram import filters
 from pyrogram.enums import ChatType
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
-from youtubesearchpython.__future__ import VideosSearch
+from youtubesearchpython.future import VideosSearch
 
 import config
 from VIVAANXMUSIC import app
@@ -23,6 +23,7 @@ from VIVAANXMUSIC.utils.database import (
 )
 from VIVAANXMUSIC.utils.decorators.language import LanguageStart
 from VIVAANXMUSIC.utils.formatters import get_readable_time
+from VIVAANXMUSIC.utils.button_styles import primary_button, success_button
 from VIVAANXMUSIC.utils.inline.start import private_panel, start_panel
 from VIVAANXMUSIC.utils.inline.help import first_page
 from config import BANNED_USERS, AYUV, HELP_IMG_URL, START_VIDS, STICKERS
@@ -93,8 +94,10 @@ async def start_pm(client, message: Message, _):
 
                 searched_text = _["start_6"].format(title, duration, views, published, channellink, channel, app.mention)
                 key = InlineKeyboardMarkup(
-                    [[InlineKeyboardButton(text=_["S_B_6"], url=link),
-                      InlineKeyboardButton(text=_["S_B_4"], url=config.SUPPORT_CHAT)]]
+                    [[
+                        primary_button(text=_["S_B_6"], url=link),
+                        success_button(text=_["S_B_4"], url=config.SUPPORT_CHAT),
+                    ]]
                 )
 
                 await m.delete()

@@ -5,7 +5,7 @@ import aiohttp
 import numpy as np
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 from unidecode import unidecode
-from youtubesearchpython.__future__ import VideosSearch
+from youtubesearchpython.future import VideosSearch
 from collections import Counter
 from VIVAANXMUSIC import app
 from config import YOUTUBE_IMG_URL

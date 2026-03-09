@@ -1,5 +1,6 @@
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from VIVAANXMUSIC import app
+from VIVAANXMUSIC.utils.button_styles import danger_button, primary_button
 
 
 TOTAL_SECTIONS = 29
@@ -24,8 +25,8 @@ def first_page(_):
     buttons = generate_help_buttons(_, 1, 15, current_page=1)
     buttons.append(
         [
-            InlineKeyboardButton(text="๏ ᴍᴇɴᴜ ๏", callback_data="back_to_main"),
-            InlineKeyboardButton(text="๏ ɴᴇxᴛ ๏", callback_data="help_next_2")
+            primary_button(text="๏ ᴍᴇɴᴜ ๏", callback_data="back_to_main"),
+            primary_button(text="๏ ɴᴇxᴛ ๏", callback_data="help_next_2"),
         ]
     )
     return InlineKeyboardMarkup(buttons)
@@ -35,8 +36,8 @@ def second_page(_):
     buttons = generate_help_buttons(_, 16, TOTAL_SECTIONS, current_page=2)
     buttons.append(
         [
-            InlineKeyboardButton(text="๏ ʙᴀᴄᴋ ๏", callback_data="help_prev_1"),
-            InlineKeyboardButton(text="๏ ᴍᴇɴᴜ ๏", callback_data="back_to_main")
+            primary_button(text="๏ ʙᴀᴄᴋ ๏", callback_data="help_prev_1"),
+            primary_button(text="๏ ᴍᴇɴᴜ ๏", callback_data="back_to_main"),
         ]
     )
     return InlineKeyboardMarkup(buttons)
@@ -46,17 +47,17 @@ def action_sub_menu(_, current_page: int):
     return InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton(
+                primary_button(
                     text=_[ "H_B_S_1" ],
                     callback_data="action_prom_1"
                 ),
-                InlineKeyboardButton(
+                primary_button(
                     text=_[ "H_B_S_2" ],
                     callback_data="action_pun_1"
                 )
             ],
             [
-                InlineKeyboardButton(
+                primary_button(
                     text=_["BACK_BUTTON"],
                     callback_data=f"help_back_{current_page}"
                 )
@@ -69,11 +70,11 @@ def help_back_markup(_, current_page: int):
     return InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton(
+                primary_button(
                     text=_["BACK_BUTTON"],
                     callback_data=f"help_back_{current_page}"
                 ),
-                InlineKeyboardButton(
+                danger_button(
                     text=_["CLOSE_BUTTON"],
                     callback_data="close"
                 ),
@@ -85,7 +86,7 @@ def help_back_markup(_, current_page: int):
 def private_help_panel(_):
     return [
         [
-            InlineKeyboardButton(
+            primary_button(
                 text=_["S_B_3"],
                 url=f"https://t.me/{app.username}?start=help"
             ),

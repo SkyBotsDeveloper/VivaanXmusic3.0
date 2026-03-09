@@ -3,9 +3,10 @@ from pyrogram.types import (
     InlineKeyboardMarkup,
     InlineQueryResultPhoto,
 )
-from youtubesearchpython.__future__ import VideosSearch
+from youtubesearchpython.future import VideosSearch
 
 from VIVAANXMUSIC.utils.inlinequery import answer
+from VIVAANXMUSIC.utils.button_styles import primary_button
 from config import BANNED_USERS
 from VIVAANXMUSIC import app
 
@@ -21,21 +22,21 @@ async def inline_query_handler(client, query):
             return
     else:
         a = VideosSearch(text, limit=20)
-        result = (await a.next()).get("result")
-        for x in range(15):
-            title = (result[x]["title"]).title()
-            duration = result[x]["duration"]
-            views = result[x]["viewCount"]["short"]
-            thumbnail = result[x]["thumbnails"][0]["url"].split("?")[0]
-            channellink = result[x]["channel"]["link"]
-            channel = result[x]["channel"]["name"]
-            link = result[x]["link"]
-            published = result[x]["publishedTime"]
+        result = (await a.next()).get("result") or []
+        for item in result[:15]:
+            title = (item.get("title") or "").title()
+            duration = item.get("duration") or "Unknown"
+            views = (item.get("viewCount") or {}).get("short") or "Unknown"
+            thumbnail = ((item.get("thumbnails") or [{}])[0].get("url") or "").split("?")[0]
+            channellink = (item.get("channel") or {}).get("link") or "https://youtube.com"
+            channel = (item.get("channel") or {}).get("name") or "Unknown"
+            link = item.get("link") or "https://youtube.com"
+            published = item.get("publishedTime") or "Unknown"
             description = f"{views} | {duration} ᴍɪɴᴜᴛᴇs | {channel}  | {published}"
             buttons = InlineKeyboardMarkup(
                 [
                     [
-                        InlineKeyboardButton(
+                        primary_button(
                             text="ʏᴏᴜᴛᴜʙᴇ 🎄",
                             url=link,
                         )
