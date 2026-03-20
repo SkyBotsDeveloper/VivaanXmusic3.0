@@ -85,6 +85,30 @@ class Call:
         self.five = PyTgCalls(self.userbot5) if self.userbot5 else None
 
         self.active_calls: set[int] = set()
+        self._stream_locks: dict[int, asyncio.Lock] = {}
+
+
+    def _get_stream_lock(self, chat_id: int) -> asyncio.Lock:
+        lock = self._stream_locks.get(chat_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._stream_locks[chat_id] = lock
+        return lock
+
+    async def _play_stream(self, assistant: PyTgCalls, chat_id: int, stream: MediaStream) -> None:
+        async with self._get_stream_lock(chat_id):
+            for attempt in range(2):
+                try:
+                    await assistant.play(chat_id, stream)
+                    return
+                except OSError as err:
+                    if err.errno != 24 or attempt == 1:
+                        raise
+                    LOGGER(__name__).warning(
+                        "Retrying stream play for chat %s after hitting open-file limit.",
+                        chat_id,
+                    )
+                    await asyncio.sleep(1)
 
 
     @capture_internal_err
@@ -147,7 +171,7 @@ class Call:
     async def skip_stream(self, chat_id: int, link: str, video: Union[bool, str] = None, image: Union[bool, str] = None) -> None:
         assistant = await group_assistant(self, chat_id)
         stream = dynamic_media_stream(path=link, video=bool(video))
-        await assistant.play(chat_id, stream)
+        await self._play_stream(assistant, chat_id, stream)
 
     @capture_internal_err
     async def vc_users(self, chat_id: int) -> list:
@@ -161,7 +185,7 @@ class Call:
         ffmpeg_params = f"-ss {to_seek} -to {duration}"
         is_video = mode == "video"
         stream = dynamic_media_stream(path=file_path, video=is_video, ffmpeg_params=ffmpeg_params)
-        await assistant.play(chat_id, stream)
+        await self._play_stream(assistant, chat_id, stream)
 
     @capture_internal_err
     async def speedup_stream(self, chat_id: int, file_path: str, speed: float, playing: list) -> None:
@@ -202,7 +226,7 @@ class Call:
         stream = dynamic_media_stream(path=out, video=is_video, ffmpeg_params=ffmpeg_params)
 
         if chat_id in db and db[chat_id] and db[chat_id][0].get("file") == file_path:
-            await assistant.play(chat_id, stream)
+            await self._play_stream(assistant, chat_id, stream)
         else:
             raise AssistantErr("Stream mismatch during speedup.")
 
@@ -221,7 +245,7 @@ class Call:
     async def stream_call(self, link: str) -> None:
         assistant = await group_assistant(self, config.LOGGER_ID)
         try:
-            await assistant.play(config.LOGGER_ID, MediaStream(link))
+            await self._play_stream(assistant, config.LOGGER_ID, MediaStream(link))
             await asyncio.sleep(8)
         finally:
             try:
@@ -244,7 +268,7 @@ class Call:
         stream = dynamic_media_stream(path=link, video=bool(video))
 
         try:
-            await assistant.play(chat_id, stream)
+            await self._play_stream(assistant, chat_id, stream)
         except (NoActiveGroupCall, ChatAdminRequired):
             raise AssistantErr(_["call_8"])
         except TelegramServerError:
@@ -323,7 +347,7 @@ class Call:
 
                 stream = dynamic_media_stream(path=link, video=video)
                 try:
-                    await client.play(chat_id, stream)
+                    await self._play_stream(client, chat_id, stream)
                 except Exception:
                     return await app.send_message(original_chat_id, text=_["call_6"])
 
@@ -359,7 +383,7 @@ class Call:
 
                 stream = dynamic_media_stream(path=file_path, video=video)
                 try:
-                    await client.play(chat_id, stream)
+                    await self._play_stream(client, chat_id, stream)
                 except:
                     return await app.send_message(original_chat_id, text=_["call_6"])
 
@@ -383,7 +407,7 @@ class Call:
             elif "index_" in queued:
                 stream = dynamic_media_stream(path=videoid, video=video)
                 try:
-                    await client.play(chat_id, stream)
+                    await self._play_stream(client, chat_id, stream)
                 except:
                     return await app.send_message(original_chat_id, text=_["call_6"])
 
@@ -400,7 +424,7 @@ class Call:
             else:
                 stream = dynamic_media_stream(path=queued, video=video)
                 try:
-                    await client.play(chat_id, stream)
+                    await self._play_stream(client, chat_id, stream)
                 except:
                     return await app.send_message(original_chat_id, text=_["call_6"])
 
