@@ -44,6 +44,11 @@ PROMO_URL_PATTERN = re.compile(
     r"https?://(?:t\.me|op\.wtf|ar-hosting\.pages\.dev)\S*",
     re.IGNORECASE,
 )
+TRY_AGAIN_PATTERN = re.compile(
+    r"try again in (\d+):(\d+):(\d+)",
+    re.IGNORECASE,
+)
+PROVIDER_COOLDOWNS: dict[str, float] = {}
 
 
 class FreeAIError(RuntimeError):
@@ -120,6 +125,44 @@ def _remove_file(path: str | None):
             pass
 
 
+def _cooldown_seconds_from_error(message: str) -> int | None:
+    text = (message or "").strip()
+    if not text:
+        return None
+
+    match = TRY_AGAIN_PATTERN.search(text)
+    if match:
+        hours, minutes, seconds = map(int, match.groups())
+        return (hours * 3600) + (minutes * 60) + seconds
+
+    lowered = text.lower()
+    if "gpu quota" in lowered or "maximum allowed" in lowered:
+        return 30 * 60
+    if "queue is too long" in lowered:
+        return 10 * 60
+    if "timed out" in lowered or "read operation timed out" in lowered:
+        return 5 * 60
+    return None
+
+
+def _provider_cooldown_remaining(provider_name: str) -> int:
+    until = PROVIDER_COOLDOWNS.get(provider_name, 0)
+    remaining = int(until - time.time())
+    return remaining if remaining > 0 else 0
+
+
+def _set_provider_cooldown(provider_name: str, message: str):
+    seconds = _cooldown_seconds_from_error(message)
+    if seconds:
+        PROVIDER_COOLDOWNS[provider_name] = time.time() + seconds
+    else:
+        PROVIDER_COOLDOWNS.pop(provider_name, None)
+
+
+def _clear_provider_cooldown(provider_name: str):
+    PROVIDER_COOLDOWNS.pop(provider_name, None)
+
+
 def _unwrap_gradio_media(payload):
     current = payload
     for _ in range(4):
@@ -171,14 +214,76 @@ async def _ensure_local_video(path_or_url: str) -> str:
 
 def _run_gradio_job(client: GradioClient, timeout_seconds: int, *args, api_name: str):
     job = client.submit(*args, api_name=api_name)
-    try:
-        return job.result(timeout=timeout_seconds)
-    except concurrent.futures.TimeoutError as exc:
+    deadline = time.time() + timeout_seconds
+
+    while True:
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            try:
+                job.cancel()
+            except Exception:
+                pass
+            raise FreeAIError("Provider timed out.")
+
         try:
-            job.cancel()
-        except Exception:
+            return job.result(timeout=min(10, remaining))
+        except concurrent.futures.TimeoutError:
             pass
-        raise FreeAIError("Provider timed out.") from exc
+
+        try:
+            status = job.status()
+        except Exception:
+            continue
+
+        status_code = getattr(status, "code", None)
+        status_name = getattr(status_code, "name", str(status_code or "")).upper()
+        status_message = str(getattr(status, "message", "") or "").strip()
+        eta = getattr(status, "eta", None)
+
+        if status_name == "FAILED":
+            raise FreeAIError(status_message or "Provider failed.")
+        if status_name == "CANCELLED":
+            raise FreeAIError(status_message or "Provider cancelled the request.")
+        if status_message and TRY_AGAIN_PATTERN.search(status_message):
+            raise FreeAIError(status_message)
+        if eta is not None and float(eta) > (remaining + 5):
+            try:
+                job.cancel()
+            except Exception:
+                pass
+            raise FreeAIError(f"Queue is too long ({int(eta)}s).")
+
+
+def _run_text_only_video_space(
+    space_id: str,
+    prompt: str,
+    reference_image_path: str | None,
+    timeout_seconds: int,
+) -> str:
+    client = GradioClient(space_id, verbose=False)
+    result = _run_gradio_job(
+        client,
+        timeout_seconds,
+        prompt,
+        api_name="/predict",
+    )
+    video_path = _extract_video_path(result)
+    if not video_path:
+        raise FreeAIError(f"{space_id} returned no video.")
+    return video_path
+
+
+def _run_alava_wan_demo(
+    prompt: str,
+    reference_image_path: str | None,
+    timeout_seconds: int,
+) -> str:
+    return _run_text_only_video_space(
+        "Alava01/Wan-video-demo",
+        prompt,
+        reference_image_path,
+        timeout_seconds,
+    )
 
 
 def _run_multimodalart_video(
@@ -208,12 +313,13 @@ def _run_multimodalart_video(
     return video_path
 
 
-def _run_openking_video(
+def _run_wan_generation_clone(
+    space_id: str,
     prompt: str,
     reference_image_path: str | None,
     timeout_seconds: int,
 ) -> str:
-    client = GradioClient("OpenKing/wan2-video-generation", verbose=False)
+    client = GradioClient(space_id, verbose=False)
     image = handle_file(reference_image_path) if reference_image_path else None
     result = _run_gradio_job(
         client,
@@ -235,7 +341,72 @@ def _run_openking_video(
     status_text = ""
     if isinstance(result, tuple) and len(result) > 1:
         status_text = str(result[1] or "").strip()
-    raise FreeAIError(status_text or "OpenKing provider returned no video.")
+    raise FreeAIError(status_text or f"{space_id} returned no video.")
+
+
+def _run_openking_video(
+    prompt: str,
+    reference_image_path: str | None,
+    timeout_seconds: int,
+) -> str:
+    return _run_wan_generation_clone(
+        "OpenKing/wan2-video-generation",
+        prompt,
+        reference_image_path,
+        timeout_seconds,
+    )
+
+
+def _run_smikke_video(
+    prompt: str,
+    reference_image_path: str | None,
+    timeout_seconds: int,
+) -> str:
+    return _run_wan_generation_clone(
+        "Smikke/wan2-video-generation",
+        prompt,
+        reference_image_path,
+        timeout_seconds,
+    )
+
+
+def _run_mrfalco_video(
+    prompt: str,
+    reference_image_path: str | None,
+    timeout_seconds: int,
+) -> str:
+    return _run_wan_generation_clone(
+        "mrfalco/wan2-video-generation",
+        prompt,
+        reference_image_path,
+        timeout_seconds,
+    )
+
+
+def _run_chanpoin_video(
+    prompt: str,
+    reference_image_path: str | None,
+    timeout_seconds: int,
+) -> str:
+    return _run_wan_generation_clone(
+        "ChanPoin/wan2-video-generation",
+        prompt,
+        reference_image_path,
+        timeout_seconds,
+    )
+
+
+def _run_keen007_video(
+    prompt: str,
+    reference_image_path: str | None,
+    timeout_seconds: int,
+) -> str:
+    return _run_wan_generation_clone(
+        "keen007/wan2-video-generation",
+        prompt,
+        reference_image_path,
+        timeout_seconds,
+    )
 
 
 def _run_wan_async_video(prompt: str) -> str:
@@ -459,31 +630,47 @@ async def generate_video(
     reference_image_path = None
     used_reference_image = False
     failures: list[str] = []
+    generated_reference_attempted = False
 
     try:
         if image_bytes:
             reference_image_path = _write_temp_image(image_bytes, mime_type)
             used_reference_image = True
-        else:
-            try:
-                reference_image_path = _write_temp_image(
-                    await generate_image(text_prompt),
-                    "image/png",
-                )
-                used_reference_image = True
-            except Exception as exc:
-                failures.append(f"Reference image: {exc}")
 
         providers = [
-            ("Multimodalart / Wan2.1 Fast", 180, True, _run_multimodalart_video),
-            ("OpenKing / Wan2 Video", 210, False, _run_openking_video),
-            ("Wan-AI / Wan2.1", 120, False, _run_wan_async_video),
+            ("Alava01 / Wan Demo", 70, False, _run_alava_wan_demo),
+            ("OpenKing / Wan2 Video", 70, False, _run_openking_video),
+            ("Smikke / Wan2 Video", 70, False, _run_smikke_video),
+            ("Mrfalco / Wan2 Video", 70, False, _run_mrfalco_video),
+            ("ChanPoin / Wan2 Video", 70, False, _run_chanpoin_video),
+            ("Keen007 / Wan2 Video", 70, False, _run_keen007_video),
+            ("Multimodalart / Wan2.1 Fast", 120, True, _run_multimodalart_video),
+            ("Wan-AI / Wan2.1", 75, False, _run_wan_async_video),
         ]
 
         for provider_name, timeout_seconds, needs_reference, runner in providers:
-            if needs_reference and not reference_image_path:
-                failures.append(f"{provider_name}: no reference image available")
+            remaining = _provider_cooldown_remaining(provider_name)
+            if remaining:
+                failures.append(
+                    f"{provider_name}: cooldown active ({remaining}s remaining)"
+                )
                 continue
+
+            if needs_reference and not reference_image_path:
+                if not generated_reference_attempted:
+                    generated_reference_attempted = True
+                    try:
+                        reference_image_path = _write_temp_image(
+                            await generate_image(text_prompt),
+                            "image/png",
+                        )
+                        used_reference_image = True
+                    except Exception as exc:
+                        failures.append(f"Reference image: {exc}")
+
+                if not reference_image_path:
+                    failures.append(f"{provider_name}: no reference image available")
+                    continue
 
             if progress_callback:
                 await progress_callback(provider_name)
@@ -499,15 +686,18 @@ async def generate_video(
                         timeout_seconds,
                     )
                 local_path = await _ensure_local_video(output_path)
+                _clear_provider_cooldown(provider_name)
                 return VideoResult(
                     provider=provider_name,
                     file_path=local_path,
-                    used_reference_image=used_reference_image,
+                    used_reference_image=used_reference_image and needs_reference,
                 )
             except Exception as exc:
-                failures.append(f"{provider_name}: {exc}")
+                error_text = str(exc)
+                _set_provider_cooldown(provider_name, error_text)
+                failures.append(f"{provider_name}: {error_text}")
 
-        details = "\n".join(failures[:5])
+        details = "\n".join(failures[:8])
         raise FreeAIError(
             "Video generation service is temporarily unavailable.\n"
             f"{details}"
