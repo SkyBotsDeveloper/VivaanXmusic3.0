@@ -299,6 +299,27 @@ def _run_alava_wan_demo(
     )
 
 
+def _run_hysts_zeroscope_video(
+    prompt: str,
+    reference_image_path: str | None,
+    timeout_seconds: int,
+) -> str:
+    client = GradioClient("hysts/zeroscope-v2", verbose=False)
+    result = _run_gradio_job(
+        client,
+        timeout_seconds,
+        prompt,
+        0,
+        24,
+        10,
+        api_name="/run",
+    )
+    video_path = _extract_video_path(result)
+    if not video_path:
+        raise FreeAIError("hysts/zeroscope-v2 returned no video.")
+    return video_path
+
+
 def _run_multimodalart_video(
     prompt: str,
     reference_image_path: str,
@@ -746,6 +767,13 @@ async def generate_video(
 
         provider_batches = [
             [
+                VideoProvider(
+                    "hysts / zeroscope-v2",
+                    25,
+                    False,
+                    False,
+                    _run_hysts_zeroscope_video,
+                ),
                 VideoProvider(
                     "Alava01 / Wan Demo",
                     30,
