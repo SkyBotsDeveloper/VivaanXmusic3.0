@@ -2,7 +2,9 @@ import asyncio
 import mimetypes
 import os
 import random
+from io import BytesIO
 
+from PIL import Image
 from pyrogram import Client, filters
 from pyrogram.enums import ChatAction
 from pyrogram.types import Message
@@ -22,18 +24,25 @@ GENVID_STATUS_MESSAGES = (
 )
 
 
-def get_prompt(message: Message) -> str | None:
+def get_command_prompt(message: Message) -> str | None:
     source = (message.text or message.caption or "").strip()
     parts = source.split(None, 1)
     if len(parts) > 1 and parts[1].strip():
         return parts[1].strip()
+    return None
 
-    if message.reply_to_message:
-        replied = (
-            message.reply_to_message.text or message.reply_to_message.caption or ""
-        ).strip()
-        if replied:
-            return replied
+
+def get_text_prompt_from_reply(message: Message) -> str | None:
+    replied = message.reply_to_message
+    if not replied:
+        return None
+
+    if replied.photo or replied.sticker or replied.document:
+        return None
+
+    replied_text = (replied.text or replied.caption or "").strip()
+    if replied_text:
+        return replied_text
     return None
 
 
@@ -45,17 +54,40 @@ def get_image_target(message: Message):
     if replied.photo:
         return replied.photo.file_id, "image/jpeg"
 
+    if replied.sticker and not replied.sticker.is_animated and not replied.sticker.is_video:
+        return replied.sticker.file_id, "image/webp"
+
     document = replied.document
-    if document and document.mime_type and document.mime_type.startswith("image/"):
-        return document.file_id, document.mime_type
+    if document:
+        if document.mime_type and document.mime_type.startswith("image/"):
+            return document.file_id, document.mime_type
+
+        guessed_type, _ = mimetypes.guess_type(document.file_name or "")
+        if guessed_type and guessed_type.startswith("image/"):
+            return document.file_id, guessed_type
 
     return None, None
 
 
+def normalize_reference_image(file_path: str) -> tuple[bytes, str]:
+    with Image.open(file_path) as image:
+        if image.mode in {"RGBA", "LA", "P"}:
+            converted = image.convert("RGBA")
+        else:
+            converted = image.convert("RGB")
+
+        buffer = BytesIO()
+        converted.save(buffer, format="PNG")
+        return buffer.getvalue(), "image/png"
+
+
 @app.on_message(filters.command("genvid"))
 async def genvid_handler(client: Client, message: Message):
-    prompt = get_prompt(message)
     file_id, mime_type = get_image_target(message)
+    prompt = get_command_prompt(message)
+
+    if not prompt and not file_id:
+        prompt = get_text_prompt_from_reply(message)
 
     if not prompt and not file_id:
         return await message.reply_text(
@@ -83,10 +115,13 @@ async def genvid_handler(client: Client, message: Message):
 
         if file_id:
             input_path = await client.download_media(file_id)
-            with open(input_path, "rb") as handle:
-                image_bytes = handle.read()
-            guessed_type, _ = mimetypes.guess_type(input_path)
-            detected_mime = mime_type or guessed_type or "image/jpeg"
+            try:
+                image_bytes, detected_mime = normalize_reference_image(input_path)
+            except Exception:
+                with open(input_path, "rb") as handle:
+                    image_bytes = handle.read()
+                guessed_type, _ = mimetypes.guess_type(input_path)
+                detected_mime = mime_type or guessed_type or "image/jpeg"
 
         async def rotate_status():
             last_index = -1
