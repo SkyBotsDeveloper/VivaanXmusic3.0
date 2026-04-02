@@ -7,22 +7,22 @@ from VIVAANXMUSIC.utils.font_styles import Fonts
 FONT_TEXT_CACHE: dict[tuple[int, int], str] = {}
 
 PAGE_ONE = [
-    [("Typewriter", "typewriter"), ("Outline", "outline"), ("Serif", "serif")],
-    [("Bold Serif", "bold_cool"), ("Cool", "cool"), ("Small Caps", "small_cap")],
-    [("Script", "script"), ("Script Bold", "script_bolt"), ("Tiny", "tiny")],
-    [("Comic", "comic"), ("Sans", "sans"), ("Slant Sans", "slant_sans")],
-    [("Slant", "slant"), ("Sim", "sim"), ("Circles", "circles")],
-    [("Dark Circles", "circle_dark"), ("Gothic", "gothic"), ("Bold Gothic", "gothic_bolt")],
-    [("Cloud", "cloud"), ("Happy", "happy"), ("Sad", "sad")],
+    [("Typewriter", "typewriter", "Typewriter"), ("Outline", "outline", "Outline"), ("Serif", "serif", "Serif")],
+    [("Bold Serif", "bold_cool", "Serif"), ("Cool", "cool", "Serif"), ("Small Caps", "small_cap", "Small Caps")],
+    [("Script", "script", "script"), ("Script Bold", "script_bolt", "script"), ("Tiny", "tiny", "tiny")],
+    [("Comic", "comic", "Comic"), ("Sans", "sans", "Sans"), ("Slant Sans", "slant_sans", "Sans")],
+    [("Slant", "slant", "Sans"), ("Sim", "sim", "Sans"), ("Circles", "circles", "CIRCLES")],
+    [("Dark Circles", "circle_dark", "CIRCLES"), ("Gothic", "gothic", "Gothic"), ("Bold Gothic", "gothic_bolt", "Gothic")],
+    [("Cloud", "cloud", "CLOUDS"), ("Happy", "happy", "Happy"), ("Sad", "sad", "Sad")],
 ]
 
 PAGE_TWO = [
-    [("Special", "special"), ("Squares", "squares"), ("Bold Squares", "squares_bold")],
-    [("Andalucia", "andalucia"), ("Manga", "manga"), ("Stinky", "stinky")],
-    [("Bubbles", "bubbles"), ("Underline", "underline"), ("Ladybug", "ladybug")],
-    [("Rays", "rays"), ("Birds", "birds"), ("Slash", "slash")],
-    [("Stop", "stop"), ("Skyline", "skyline"), ("Arrows", "arrows")],
-    [("Qvnes", "qvnes"), ("Strike", "strike"), ("Frozen", "frozen")],
+    [("Special", "special", "SPECIAL"), ("Squares", "squares", "SQUARES"), ("Bold Squares", "squares_bold", "SQUARES")],
+    [("Andalucia", "andalucia", "andalucia"), ("Manga", "manga", "Manga"), ("Stinky", "stinky", "Stinky")],
+    [("Bubbles", "bubbles", "Bubbles"), ("Underline", "underline", "Underline"), ("Ladybug", "ladybug", "Ladybug")],
+    [("Rays", "rays", "Rays"), ("Birds", "birds", "Birds"), ("Slash", "slash", "Slash")],
+    [("Stop", "stop", "stop"), ("Skyline", "skyline", "Skyline"), ("Arrows", "arrows", "Arrows")],
+    [("Qvnes", "qvnes", "Qvnes"), ("Strike", "strike", "Strike"), ("Frozen", "frozen", "Frozen")],
 ]
 
 STYLE_MAP = {
@@ -76,23 +76,26 @@ def _build_buttons(page: int) -> InlineKeyboardMarkup:
     rows = PAGE_ONE if page == 0 else PAGE_TWO
     keyboard = [
         [
-            InlineKeyboardButton(label, callback_data=f"style+{style_name}")
-            for label, style_name in row
+            InlineKeyboardButton(
+                STYLE_MAP[style_name](preview_text),
+                callback_data=f"style+{style_name}",
+            )
+            for _, style_name, preview_text in row
         ]
         for row in rows
     ]
     if page == 0:
         keyboard.append(
             [
-                InlineKeyboardButton("Close", callback_data="close_reply"),
-                InlineKeyboardButton("Next ->", callback_data="nxt"),
+                InlineKeyboardButton("ᴄʟᴏsᴇ", callback_data="close_reply"),
+                InlineKeyboardButton("ɴᴇxᴛ ➻", callback_data="nxt"),
             ]
         )
     else:
         keyboard.append(
             [
-                InlineKeyboardButton("Close", callback_data="close_reply"),
-                InlineKeyboardButton("Back", callback_data="nxt+0"),
+                InlineKeyboardButton("ᴄʟᴏsᴇ", callback_data="close_reply"),
+                InlineKeyboardButton("ʙᴀᴄᴋ", callback_data="nxt+0"),
             ]
         )
     return InlineKeyboardMarkup(keyboard)
