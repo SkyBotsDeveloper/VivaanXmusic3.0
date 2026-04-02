@@ -1,5 +1,7 @@
+import asyncio
 import mimetypes
 import os
+import random
 
 from pyrogram import Client, filters
 from pyrogram.enums import ChatAction
@@ -10,6 +12,14 @@ from VIVAANXMUSIC.utils.free_ai import FreeAIError, generate_video
 
 
 DEFAULT_IMAGE_ANIMATION_PROMPT = "make this image come alive, smooth cinematic motion"
+GENVID_STATUS_MESSAGES = (
+    "Your video is being generated...",
+    "Still working, don't panic...",
+    "Free servers are cooking your video...",
+    "Adding motion to your prompt...",
+    "Rendering frames in the background...",
+    "Almost there, still processing...",
+)
 
 
 def get_prompt(message: Message) -> str | None:
@@ -61,9 +71,11 @@ async def genvid_handler(client: Client, message: Message):
             "Prompt is too long. Please keep it under 1000 characters."
         )
 
-    status = await message.reply_text("Preparing video request...")
+    status = await message.reply_text("Preparing your video request...")
     input_path = None
     output_path = None
+    status_task = None
+    stop_status_updates = asyncio.Event()
 
     try:
         image_bytes = None
@@ -76,12 +88,34 @@ async def genvid_handler(client: Client, message: Message):
             guessed_type, _ = mimetypes.guess_type(input_path)
             detected_mime = mime_type or guessed_type or "image/jpeg"
 
-        async def update_status(provider_name: str):
+        async def rotate_status():
+            last_index = -1
+            while not stop_status_updates.is_set():
+                choices = [
+                    index
+                    for index in range(len(GENVID_STATUS_MESSAGES))
+                    if index != last_index
+                ]
+                last_index = random.choice(choices)
+                try:
+                    await status.edit(GENVID_STATUS_MESSAGES[last_index])
+                except Exception:
+                    pass
+                try:
+                    await asyncio.wait_for(
+                        stop_status_updates.wait(),
+                        timeout=random.randint(5, 8),
+                    )
+                except asyncio.TimeoutError:
+                    continue
+
+        async def update_status(_provider_name: str):
             try:
-                await status.edit(f"Trying video provider:\n{provider_name}")
+                await status.edit(random.choice(GENVID_STATUS_MESSAGES))
             except Exception:
                 pass
 
+        status_task = asyncio.create_task(rotate_status())
         result = await generate_video(
             prompt or DEFAULT_IMAGE_ANIMATION_PROMPT,
             image_bytes=image_bytes,
@@ -90,6 +124,11 @@ async def genvid_handler(client: Client, message: Message):
         )
         output_path = result.file_path
 
+        stop_status_updates.set()
+        try:
+            await status.edit("Uploading your video...")
+        except Exception:
+            pass
         await client.send_chat_action(message.chat.id, ChatAction.UPLOAD_VIDEO)
         display_prompt = prompt or DEFAULT_IMAGE_ANIMATION_PROMPT
         if len(display_prompt) > 850:
@@ -97,18 +136,27 @@ async def genvid_handler(client: Client, message: Message):
 
         await message.reply_video(
             video=output_path,
-            caption=(
-                f"Engine: {result.provider}\n"
-                f"Prompt: {display_prompt}"
-            ),
+            caption=f"Prompt: {display_prompt}",
             supports_streaming=True,
         )
         await status.delete()
-    except FreeAIError as exc:
-        await status.edit(str(exc))
+    except FreeAIError:
+        stop_status_updates.set()
+        await status.edit(
+            "Free video servers are busy right now.\n"
+            "Please try again after a little while."
+        )
     except Exception as exc:
+        stop_status_updates.set()
         await status.edit(f"Error: {exc}")
     finally:
+        stop_status_updates.set()
+        if status_task:
+            status_task.cancel()
+            try:
+                await status_task
+            except asyncio.CancelledError:
+                pass
         if input_path and os.path.exists(input_path):
             os.remove(input_path)
         if output_path and os.path.exists(output_path):

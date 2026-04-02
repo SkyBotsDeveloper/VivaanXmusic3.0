@@ -971,6 +971,8 @@ async def generate_video(
                         False,
                         _run_replicate_seedance_video,
                     ),
+                ],
+                [
                     VideoProvider(
                         "Replicate / MiniMax Video-01",
                         150,
@@ -978,17 +980,19 @@ async def generate_video(
                         False,
                         _run_replicate_minimax_video,
                     ),
-                ]
+                ],
             ]
             if reference_image_path:
-                replicate_batch[0].append(
-                    VideoProvider(
-                        "Replicate / Kling v2.1",
-                        150,
-                        True,
-                        True,
-                        _run_replicate_kling_video,
-                    )
+                replicate_batch.append(
+                    [
+                        VideoProvider(
+                            "Replicate / Kling v2.1",
+                            150,
+                            True,
+                            True,
+                            _run_replicate_kling_video,
+                        )
+                    ]
                 )
             provider_batches.extend(replicate_batch)
 
