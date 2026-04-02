@@ -7,13 +7,21 @@ import mimetypes
 import os
 import re
 import tempfile
+import threading
 import time
 from dataclasses import dataclass
 
 import httpx
 from gradio_client import Client as GradioClient, handle_file
 
-from config import GENVID_USE_PUBLIC_FALLBACKS, REPLICATE_API_TOKEN
+from config import (
+    GENVID_USE_PUBLIC_FALLBACKS,
+    HF_TOKEN,
+    HF_TOKENS,
+    OCR_SPACE_API_KEY,
+    REPLICATE_API_TOKEN,
+    REPLICATE_API_TOKENS,
+)
 
 
 HTTP_TIMEOUT = httpx.Timeout(45.0, connect=10.0)
@@ -22,18 +30,33 @@ CHAT_API_URL = "https://api-xqwa.onrender.com/chat/"
 IMAGE_GEN_URL = "https://death-image.ashlynn.workers.dev/generate"
 IMAGE_ENHANCE_URL = "https://arimagex.netlify.app/api/enhance"
 IMAGE_REMOVEBG_URL = "https://arimagex.netlify.app/api/removebg"
+OCR_SPACE_API_URL = "https://api.ocr.space/parse/image"
 REPLICATE_API_URL = "https://api.replicate.com/v1"
 REPLICATE_SEEDANCE_MODEL = "bytedance/seedance-1-lite"
 REPLICATE_MINIMAX_MODEL = "minimax/video-01"
 REPLICATE_KLING_MODEL = "kwaivgi/kling-v2.1"
+HF_VISION_SPACE = "prithivMLmods/Qwen2.5-VL"
+HF_VISION_FALLBACK_SPACE = "prithivMLmods/Qwen-3.5-HF-Demo"
+HF_VISION_ALT_SPACE = "vikhyatk/moondream2"
+DEFAULT_VISION_PROMPT = "Describe this image."
+DETAILED_VISION_PROMPT = (
+    "Describe this image clearly and helpfully. Mention the main subject, setting, "
+    "important objects, colors, actions, style, and any visible text. If it looks "
+    "like a screenshot, poster, UI, or meme, say that."
+)
+VISION_PROVIDER_TIMEOUT = 50
+OCR_VISIBLE_TEXT_LIMIT = 900
 CHAT_MODEL_CANDIDATES = ("gpt-4", "gpt-4o-mini")
 VIDEO_NEGATIVE_PROMPT = (
     "low quality, blur, watermark, text, distorted anatomy, artifacts"
 )
 VISION_SYSTEM_PROMPT = (
-    "You answer questions about an image using only the provided visual description. "
-    "If the description is not enough to answer confidently, say so briefly. "
-    "Do not invent details."
+    "You answer questions about an image using the provided multimodal analysis, OCR "
+    "text, and fallback captions. Prefer the direct multimodal analysis when present. "
+    "Use OCR text to capture visible writing, but mention when OCR may be approximate. "
+    "Never speculate about symbolism, brand, intent, unseen objects, or context beyond "
+    "the supplied evidence. If the evidence is limited, say so briefly. Keep the answer "
+    "natural, concise, and useful. Do not invent details."
 )
 PROMO_LINE_MARKERS = (
     "need proxies cheaper than the market",
@@ -50,6 +73,15 @@ BLOCKED_RESPONSE_MARKERS = (
     "invalid model",
     "something went wrong. please try again later.",
 )
+VISION_UPSTREAM_ERROR_MARKERS = (
+    "unlogged user is runnning out of daily zerogpu quotas",
+    "you have exceeded your gpu quota",
+    "exceeded your gpu quota",
+    "no gpu was available",
+    "queue is too long",
+    "try again in",
+    "upstream gradio app has raised an exception",
+)
 PROMO_URL_PATTERN = re.compile(
     r"https?://(?:t\.me|op\.wtf|ar-hosting\.pages\.dev)\S*",
     re.IGNORECASE,
@@ -58,7 +90,12 @@ TRY_AGAIN_PATTERN = re.compile(
     r"try again in (\d+):(\d+):(\d+)",
     re.IGNORECASE,
 )
+DEFAULT_VISION_PATTERN = re.compile(r"^describe this image\.?$", re.IGNORECASE)
+THINK_BLOCK_PATTERN = re.compile(r"<think>.*?</think>", re.IGNORECASE | re.DOTALL)
 PROVIDER_COOLDOWNS: dict[str, float] = {}
+TOKEN_COOLDOWNS: dict[str, float] = {}
+TOKEN_ROTATION_LOCK = threading.Lock()
+TOKEN_ROTATION_STATE = {"replicate": 0, "hf": 0}
 
 
 class FreeAIError(RuntimeError):
@@ -90,6 +127,23 @@ class VideoProvider:
 def _build_data_uri(mime_type: str, image_bytes: bytes) -> str:
     encoded = base64.b64encode(image_bytes).decode("utf-8")
     return f"data:{mime_type};base64,{encoded}"
+
+
+def _parse_token_pool(*values: str | None) -> tuple[str, ...]:
+    items: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        for raw in re.split(r"[\r\n,]+", str(value or "")):
+            token = raw.strip()
+            if not token or token in seen:
+                continue
+            seen.add(token)
+            items.append(token)
+    return tuple(items)
+
+
+REPLICATE_TOKEN_POOL = _parse_token_pool(REPLICATE_API_TOKENS, REPLICATE_API_TOKEN)
+HF_TOKEN_POOL = _parse_token_pool(HF_TOKENS, HF_TOKEN)
 
 
 def _is_enabled(value) -> bool:
@@ -199,6 +253,54 @@ def _clear_provider_cooldown(provider_name: str):
     PROVIDER_COOLDOWNS.pop(provider_name, None)
 
 
+def _token_cooldown_key(service: str, token: str) -> str:
+    return f"{service}:{token}"
+
+
+def _token_cooldown_remaining(service: str, token: str) -> int:
+    until = TOKEN_COOLDOWNS.get(_token_cooldown_key(service, token), 0)
+    remaining = int(until - time.time())
+    return remaining if remaining > 0 else 0
+
+
+def _set_token_cooldown(service: str, token: str, message: str):
+    seconds = _cooldown_seconds_from_error(message)
+    key = _token_cooldown_key(service, token)
+    if seconds:
+        TOKEN_COOLDOWNS[key] = time.time() + seconds
+    else:
+        TOKEN_COOLDOWNS.pop(key, None)
+
+
+def _clear_token_cooldown(service: str, token: str):
+    TOKEN_COOLDOWNS.pop(_token_cooldown_key(service, token), None)
+
+
+def _rotate_tokens(service: str, tokens: tuple[str, ...]) -> tuple[str, ...]:
+    if not tokens:
+        return ()
+
+    with TOKEN_ROTATION_LOCK:
+        start = TOKEN_ROTATION_STATE.get(service, 0) % len(tokens)
+        TOKEN_ROTATION_STATE[service] = (start + 1) % len(tokens)
+
+    rotated = tokens[start:] + tokens[:start]
+    active = [
+        token
+        for token in rotated
+        if _token_cooldown_remaining(service, token) <= 0
+    ]
+    return tuple(active or rotated)
+
+
+def _get_replicate_tokens() -> tuple[str, ...]:
+    return _rotate_tokens("replicate", REPLICATE_TOKEN_POOL)
+
+
+def _get_hf_tokens() -> tuple[str, ...]:
+    return _rotate_tokens("hf", HF_TOKEN_POOL)
+
+
 def _unwrap_gradio_media(payload):
     current = payload
     for _ in range(4):
@@ -302,12 +404,15 @@ def _run_text_only_video_space(
     reference_image_path: str | None,
     timeout_seconds: int,
 ) -> str:
-    client = GradioClient(space_id, verbose=False)
-    result = _run_gradio_job(
-        client,
-        timeout_seconds,
-        prompt,
-        api_name="/predict",
+    result = _run_with_hf_client(
+        space_id,
+        lambda client: _run_gradio_job(
+            client,
+            timeout_seconds,
+            prompt,
+            api_name="/predict",
+        ),
+        allow_anonymous=True,
     )
     video_path = _extract_video_path(result)
     if not video_path:
@@ -315,9 +420,9 @@ def _run_text_only_video_space(
     return video_path
 
 
-def _replicate_headers(*, wait_seconds: int | None = None) -> dict[str, str]:
+def _replicate_headers(token: str, *, wait_seconds: int | None = None) -> dict[str, str]:
     headers = {
-        "Authorization": f"Bearer {REPLICATE_API_TOKEN}",
+        "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
     }
     if wait_seconds:
@@ -359,15 +464,13 @@ def _replicate_output_video_path(payload) -> str | None:
     return None
 
 
-def _run_replicate_prediction(
+def _run_replicate_prediction_once(
+    token: str,
     model: str,
     input_payload: dict,
     timeout_seconds: int,
 ) -> str:
-    if not REPLICATE_API_TOKEN:
-        raise FreeAIError("Replicate API token is not configured.")
-
-    headers = _replicate_headers(wait_seconds=min(timeout_seconds, 60))
+    headers = _replicate_headers(token, wait_seconds=min(timeout_seconds, 60))
     request_timeout = httpx.Timeout(max(timeout_seconds + 15, 60), connect=10.0)
     with httpx.Client(
         timeout=request_timeout,
@@ -402,7 +505,7 @@ def _run_replicate_prediction(
                 cancel_url = (prediction.get("urls") or {}).get("cancel")
                 if cancel_url:
                     try:
-                        client.post(cancel_url, headers=_replicate_headers())
+                        client.post(cancel_url, headers=_replicate_headers(token))
                     except Exception:
                         pass
                 raise FreeAIError("Replicate provider timed out.")
@@ -412,10 +515,39 @@ def _run_replicate_prediction(
                 raise FreeAIError(f"{model} did not return a status URL.")
 
             time.sleep(min(4, max(1, remaining)))
-            poll = client.get(get_url, headers=_replicate_headers())
+            poll = client.get(get_url, headers=_replicate_headers(token))
             if poll.status_code >= 400:
                 raise FreeAIError(_replicate_error_message(poll))
             prediction = poll.json()
+
+
+def _run_replicate_prediction(
+    model: str,
+    input_payload: dict,
+    timeout_seconds: int,
+) -> str:
+    tokens = _get_replicate_tokens()
+    if not tokens:
+        raise FreeAIError("Replicate API token is not configured.")
+
+    failures: list[str] = []
+    for token in tokens:
+        try:
+            output = _run_replicate_prediction_once(
+                token,
+                model,
+                input_payload,
+                timeout_seconds,
+            )
+            _clear_token_cooldown("replicate", token)
+            return output
+        except FreeAIError as exc:
+            message = str(exc)
+            _set_token_cooldown("replicate", token, message)
+            failures.append(message)
+
+    details = "\n".join(failures[:3])
+    raise FreeAIError(details or "Replicate request failed.")
 
 
 def _run_replicate_seedance_video(
@@ -498,15 +630,18 @@ def _run_hysts_zeroscope_video(
     reference_image_path: str | None,
     timeout_seconds: int,
 ) -> str:
-    client = GradioClient("hysts/zeroscope-v2", verbose=False)
-    result = _run_gradio_job(
-        client,
-        timeout_seconds,
-        prompt,
-        0,
-        24,
-        10,
-        api_name="/run",
+    result = _run_with_hf_client(
+        "hysts/zeroscope-v2",
+        lambda client: _run_gradio_job(
+            client,
+            timeout_seconds,
+            prompt,
+            0,
+            24,
+            10,
+            api_name="/run",
+        ),
+        allow_anonymous=True,
     )
     video_path = _extract_video_path(result)
     if not video_path:
@@ -519,21 +654,24 @@ def _run_multimodalart_video(
     reference_image_path: str,
     timeout_seconds: int,
 ) -> str:
-    client = GradioClient("multimodalart/wan2-1-fast", verbose=False)
-    result = _run_gradio_job(
-        client,
-        timeout_seconds,
-        handle_file(reference_image_path),
-        prompt,
-        512,
-        512,
-        "low quality, blur, watermark, text, duplicate frames",
-        2,
-        1.0,
-        4,
-        42,
-        True,
-        api_name="/generate_video",
+    result = _run_with_hf_client(
+        "multimodalart/wan2-1-fast",
+        lambda client: _run_gradio_job(
+            client,
+            timeout_seconds,
+            handle_file(reference_image_path),
+            prompt,
+            512,
+            512,
+            "low quality, blur, watermark, text, duplicate frames",
+            2,
+            1.0,
+            4,
+            42,
+            True,
+            api_name="/generate_video",
+        ),
+        allow_anonymous=True,
     )
     video_path = _extract_video_path(result)
     if not video_path:
@@ -547,20 +685,23 @@ def _run_wan_generation_clone(
     reference_image_path: str | None,
     timeout_seconds: int,
 ) -> str:
-    client = GradioClient(space_id, verbose=False)
     image = handle_file(reference_image_path) if reference_image_path else None
-    result = _run_gradio_job(
-        client,
-        timeout_seconds,
-        prompt,
-        image,
-        512,
-        512,
-        25,
-        20,
-        5,
-        -1,
-        api_name="/generate_video",
+    result = _run_with_hf_client(
+        space_id,
+        lambda client: _run_gradio_job(
+            client,
+            timeout_seconds,
+            prompt,
+            image,
+            512,
+            512,
+            25,
+            20,
+            5,
+            -1,
+            api_name="/generate_video",
+        ),
+        allow_anonymous=True,
     )
     video_path = _extract_video_path(result)
     if video_path:
@@ -642,32 +783,38 @@ def _run_wan_async_video(
     reference_image_path: str | None,
     timeout_seconds: int,
 ) -> str:
-    client = GradioClient("Wan-AI/Wan2.1", verbose=False)
-    client.predict(prompt, "960*960", True, -1, api_name="/t2v_generation_async")
-    deadline = time.time() + timeout_seconds
+    def _runner(client: GradioClient) -> str:
+        client.predict(prompt, "960*960", True, -1, api_name="/t2v_generation_async")
+        deadline = time.time() + timeout_seconds
 
-    while True:
-        remaining = deadline - time.time()
-        if remaining <= 0:
-            break
+        while True:
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                break
 
-        status = client.predict(api_name="/status_refresh")
-        video_path = _extract_video_path(status)
-        if video_path:
-            return video_path
+            status = client.predict(api_name="/status_refresh")
+            video_path = _extract_video_path(status)
+            if video_path:
+                return video_path
 
-        estimated_wait = None
-        if isinstance(status, tuple) and len(status) > 2:
-            try:
-                estimated_wait = float(status[2])
-            except (TypeError, ValueError):
-                estimated_wait = None
+            estimated_wait = None
+            if isinstance(status, tuple) and len(status) > 2:
+                try:
+                    estimated_wait = float(status[2])
+                except (TypeError, ValueError):
+                    estimated_wait = None
 
-        if estimated_wait and estimated_wait > max(45, remaining + 5):
-            raise FreeAIError(f"Wan queue is too long ({int(estimated_wait)}s).")
-        time.sleep(min(6, max(1, remaining)))
+            if estimated_wait and estimated_wait > max(45, remaining + 5):
+                raise FreeAIError(f"Wan queue is too long ({int(estimated_wait)}s).")
+            time.sleep(min(6, max(1, remaining)))
 
-    raise FreeAIError("Wan provider timed out.")
+        raise FreeAIError("Wan provider timed out.")
+
+    return _run_with_hf_client(
+        "Wan-AI/Wan2.1",
+        _runner,
+        allow_anonymous=True,
+    )
 
 
 def _discard_background_video_task(task: asyncio.Task):
@@ -800,24 +947,381 @@ async def generate_chat_response(
     raise FreeAIError(f"Chat service is temporarily unavailable.\n{details}")
 
 
-def _caption_with_florence(image_path: str) -> tuple[str, str]:
-    client = GradioClient("prithivMLmods/Florence-2-Image-Caption")
-    result = client.predict(
-        uploaded_image=handle_file(image_path),
-        model_choice="Florence-2-base",
-        api_name="/describe_image",
+def _get_gradio_client(space_id: str, *, token: str | None = None) -> GradioClient:
+    return GradioClient(space_id, token=token, verbose=False)
+
+
+def _run_with_hf_client(
+    space_id: str,
+    runner,
+    *,
+    allow_anonymous: bool,
+):
+    failures: list[str] = []
+    tokens = list(_get_hf_tokens())
+    candidates: list[str | None] = tokens[:]
+    if allow_anonymous or not candidates:
+        candidates.append(None)
+
+    for token in candidates:
+        try:
+            result = runner(_get_gradio_client(space_id, token=token))
+            if token:
+                _clear_token_cooldown("hf", token)
+            return result
+        except Exception as exc:
+            message = str(exc)
+            if token:
+                _set_token_cooldown("hf", token, message)
+            failures.append(message)
+
+    details = "\n".join(failures[:3])
+    raise FreeAIError(details or f"{space_id} request failed.")
+
+
+def _clean_vision_text(text: str | None) -> str:
+    cleaned = str(text or "").strip()
+    if not cleaned:
+        return ""
+
+    cleaned = THINK_BLOCK_PATTERN.sub("", cleaned)
+    cleaned = re.sub(r"^```[\w-]*\s*", "", cleaned)
+    cleaned = re.sub(r"\s*```$", "", cleaned)
+    cleaned = re.sub(r"^\s*(assistant|answer)\s*:\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
+def _raise_if_vision_upstream_error(text: str):
+    lowered = (text or "").lower()
+    if any(marker in lowered for marker in VISION_UPSTREAM_ERROR_MARKERS):
+        raise FreeAIError(text)
+
+
+def _is_default_vision_prompt(prompt: str) -> bool:
+    text = (prompt or "").strip()
+    return bool(DEFAULT_VISION_PATTERN.fullmatch(text)) or text == DETAILED_VISION_PROMPT
+
+
+def _has_useful_ocr_text(text: str) -> bool:
+    compact = re.sub(r"\s+", " ", (text or "").strip())
+    if not compact:
+        return False
+    alpha_num = re.sub(r"[^A-Za-z0-9]", "", compact)
+    return len(alpha_num) >= 10 and len(compact) >= 12
+
+
+def _trim_visible_text(text: str) -> str:
+    compact = re.sub(r"[ \t]+\n", "\n", (text or "").strip())
+    compact = re.sub(r"\n{3,}", "\n\n", compact)
+    if len(compact) <= OCR_VISIBLE_TEXT_LIMIT:
+        return compact
+
+    shortened = compact[:OCR_VISIBLE_TEXT_LIMIT].rsplit(" ", 1)[0].rstrip()
+    return f"{shortened}..."
+
+
+def _prompt_wants_text(prompt: str) -> bool:
+    lowered = (prompt or "").lower()
+    keywords = (
+        "text",
+        "read",
+        "written",
+        "write",
+        "screenshot",
+        "caption",
+        "ocr",
+        "transcribe",
+        "what does",
+        "what is written",
+        "say",
     )
-    return "Florence-2-base", str(result or "").strip()
+    return any(keyword in lowered for keyword in keywords)
+
+
+def _build_plain_vision_fallback(
+    prompt: str,
+    *,
+    direct_answer: str = "",
+    caption: str = "",
+    ocr_text: str = "",
+) -> str:
+    base = (direct_answer or caption or "").strip()
+    visible_text = _trim_visible_text(ocr_text) if _has_useful_ocr_text(ocr_text) else ""
+
+    if not base:
+        if visible_text:
+            return f"Visible text detected:\n{visible_text}"
+        return ""
+
+    if not visible_text:
+        return base
+
+    if not (_is_default_vision_prompt(prompt) or _prompt_wants_text(prompt)):
+        return base
+
+    if visible_text.lower() in base.lower():
+        return base
+    return f"{base}\n\nVisible text detected:\n{visible_text}"
+
+
+def _build_caption_only_response(prompt: str, caption: str) -> str:
+    cleaned_caption = (caption or "").strip()
+    if not cleaned_caption:
+        return ""
+    if _is_default_vision_prompt(prompt):
+        return cleaned_caption
+
+    lowered = (prompt or "").lower()
+    if any(keyword in lowered for keyword in ("represent", "mean", "symbol", "identify")):
+        return (
+            "From the available free fallback analysis, this image appears to show:\n"
+            f"{cleaned_caption}\n\n"
+            "I can't confidently tell anything more specific than that from this fallback alone."
+        )
+
+    return (
+        "From the available free fallback analysis, the image appears to show:\n"
+        f"{cleaned_caption}"
+    )
+
+
+def _image_path_to_base64(image_path: str) -> str:
+    with open(image_path, "rb") as handle:
+        return base64.b64encode(handle.read()).decode("utf-8")
+
+
+def _run_qwen_outpost_vision(image_path: str, prompt: str) -> tuple[str, str]:
+    result = _run_with_hf_client(
+        HF_VISION_SPACE,
+        lambda client: client.predict(
+            "Qwen3-VL-4B-Instruct",
+            prompt,
+            _image_path_to_base64(image_path),
+            384,
+            0.2,
+            0.9,
+            50,
+            1.1,
+            30,
+            api_name="/run_router",
+        ),
+        allow_anonymous=True,
+    )
+    cleaned = _clean_vision_text(result)
+    _raise_if_vision_upstream_error(cleaned)
+    if not cleaned:
+        raise FreeAIError("Qwen multimodal response was empty.")
+    return "Qwen3-VL-4B-Instruct", cleaned
+
+
+def _run_qwen_hf_demo_vision(image_path: str, prompt: str) -> tuple[str, str]:
+    category = "Caption" if _is_default_vision_prompt(prompt) else "Query"
+    _, text_output = _run_with_hf_client(
+        HF_VISION_FALLBACK_SPACE,
+        lambda client: client.predict(
+            handle_file(image_path),
+            category,
+            prompt,
+            api_name="/process_inputs",
+        ),
+        allow_anonymous=True,
+    )
+    cleaned = _clean_vision_text(text_output)
+    _raise_if_vision_upstream_error(cleaned)
+    if not cleaned:
+        raise FreeAIError("Qwen HF demo returned an empty response.")
+    return "Qwen HF Demo", cleaned
+
+
+def _run_moondream_vision(image_path: str, prompt: str) -> tuple[str, str]:
+    result = _run_with_hf_client(
+        HF_VISION_ALT_SPACE,
+        lambda client: client.predict(
+            handle_file(image_path),
+            prompt,
+            api_name="/answer_question",
+        ),
+        allow_anonymous=True,
+    )
+    cleaned = _clean_vision_text(result)
+    _raise_if_vision_upstream_error(cleaned)
+    if not cleaned:
+        raise FreeAIError("Moondream returned an empty response.")
+    return "Moondream2", cleaned
+
+
+async def _answer_with_direct_vision(
+    image_path: str,
+    prompt: str,
+) -> tuple[str, str, list[str]]:
+    failures: list[str] = []
+    providers = (
+        ("Qwen3-VL-4B-Instruct", _run_qwen_outpost_vision),
+        ("Qwen HF Demo", _run_qwen_hf_demo_vision),
+        ("Moondream2", _run_moondream_vision),
+    )
+
+    for name, runner in providers:
+        try:
+            model, answer = await asyncio.wait_for(
+                asyncio.to_thread(runner, image_path, prompt),
+                timeout=VISION_PROVIDER_TIMEOUT,
+            )
+            if answer:
+                return model, answer, failures
+            failures.append(f"{name}: empty response")
+        except asyncio.TimeoutError:
+            failures.append(f"{name}: timed out")
+        except Exception as exc:
+            failures.append(f"{name}: {exc}")
+
+    return "", "", failures
+
+
+async def _extract_text_with_ocr_space(
+    image_bytes: bytes,
+    *,
+    mime_type: str = "image/jpeg",
+) -> str:
+    api_key = (OCR_SPACE_API_KEY or "").strip()
+    if not api_key:
+        return ""
+
+    extension = mimetypes.guess_extension(mime_type) or ".jpg"
+    files = {
+        "file": (
+            f"vision{extension}",
+            image_bytes,
+            mime_type,
+        )
+    }
+    data = {
+        "language": "auto",
+        "isOverlayRequired": "false",
+        "detectOrientation": "true",
+        "scale": "true",
+        "OCREngine": "2",
+    }
+    headers = {
+        **HTTP_HEADERS,
+        "apikey": api_key,
+    }
+
+    async with httpx.AsyncClient(
+        timeout=HTTP_TIMEOUT,
+        headers=HTTP_HEADERS,
+        follow_redirects=True,
+        trust_env=False,
+    ) as client:
+        response = await client.post(
+            OCR_SPACE_API_URL,
+            headers=headers,
+            data=data,
+            files=files,
+        )
+
+    if response.status_code != 200:
+        raise FreeAIError("OCR request failed.")
+
+    payload = response.json()
+    if payload.get("IsErroredOnProcessing"):
+        errors = payload.get("ErrorMessage") or payload.get("ErrorDetails") or "OCR failed."
+        if isinstance(errors, list):
+            errors = "; ".join(str(item) for item in errors if item)
+        raise FreeAIError(str(errors))
+
+    text_blocks: list[str] = []
+    for item in payload.get("ParsedResults") or []:
+        parsed = str(item.get("ParsedText") or "").strip()
+        if parsed:
+            text_blocks.append(parsed)
+
+    return _trim_visible_text("\n\n".join(text_blocks))
+
+
+async def _await_optional_ocr_text(task: asyncio.Task, failures: list[str]) -> str:
+    try:
+        return await asyncio.wait_for(task, timeout=30)
+    except asyncio.TimeoutError:
+        failures.append("OCR.Space: timed out")
+    except asyncio.CancelledError:
+        pass
+    except Exception as exc:
+        failures.append(f"OCR.Space: {exc}")
+    return ""
+
+
+async def _synthesize_vision_answer(
+    user_prompt: str,
+    *,
+    direct_answer: str = "",
+    caption: str = "",
+    ocr_text: str = "",
+) -> ChatResult:
+    sections: list[str] = []
+    if not direct_answer:
+        sections.append(
+            "Reliability note:\n"
+            "No direct multimodal answer was available, so rely conservatively on the "
+            "fallback caption and OCR only."
+        )
+    if direct_answer:
+        sections.append(f"Direct multimodal analysis:\n{direct_answer}")
+    if caption:
+        sections.append(f"Fallback caption:\n{caption}")
+    if _has_useful_ocr_text(ocr_text):
+        sections.append(
+            "OCR text (can contain small mistakes):\n"
+            f"{_trim_visible_text(ocr_text)}"
+        )
+
+    question = user_prompt
+    if _is_default_vision_prompt(user_prompt):
+        question = (
+            "Describe this image clearly and naturally. Mention the subject, setting, "
+            "important details, and visible text when relevant."
+        )
+
+    return await generate_chat_response(
+        "\n\n".join(sections) + f"\n\nUser request:\n{question}",
+        alias="geminivision",
+        system_prompt=VISION_SYSTEM_PROMPT,
+    )
+
+
+def _caption_with_florence(image_path: str) -> tuple[str, str]:
+    result = _run_with_hf_client(
+        "prithivMLmods/Florence-2-Image-Caption",
+        lambda client: client.predict(
+            uploaded_image=handle_file(image_path),
+            model_choice="Florence-2-base",
+            api_name="/describe_image",
+        ),
+        allow_anonymous=True,
+    )
+    cleaned = _clean_vision_text(result)
+    _raise_if_vision_upstream_error(cleaned)
+    if not cleaned:
+        raise FreeAIError("Florence returned an empty caption.")
+    return "Florence-2-base", cleaned
 
 
 def _caption_with_blip(image_path: str) -> tuple[str, str]:
-    client = GradioClient("hysts/image-captioning-with-blip")
-    result = client.predict(
-        image=handle_file(image_path),
-        text="A picture of",
-        api_name="/caption",
+    result = _run_with_hf_client(
+        "hysts/image-captioning-with-blip",
+        lambda client: client.predict(
+            image=handle_file(image_path),
+            text="A picture of",
+            api_name="/caption",
+        ),
+        allow_anonymous=True,
     )
-    return "BLIP", str(result or "").strip()
+    cleaned = _clean_vision_text(result)
+    _raise_if_vision_upstream_error(cleaned)
+    if not cleaned:
+        raise FreeAIError("BLIP returned an empty caption.")
+    return "BLIP", cleaned
 
 
 async def _caption_image(image_path: str) -> tuple[str, str]:
@@ -841,32 +1345,97 @@ async def generate_vision_response(
     *,
     mime_type: str = "image/jpeg",
 ) -> ChatResult:
-    image_path = _write_temp_image(image_bytes, mime_type)
-    try:
-        vision_model, caption = await _caption_image(image_path)
-    finally:
-        try:
-            import os
-
-            os.remove(image_path)
-        except Exception:
-            pass
-
-    user_prompt = (prompt or "").strip() or "Describe this image."
-    if user_prompt.lower() in {"describe this image", "describe this image."}:
-        return ChatResult(model=vision_model, content=caption)
-
-    answer = await generate_chat_response(
-        (
-            f"Visual description:\n{caption}\n\n"
-            f"User question:\n{user_prompt}"
-        ),
-        alias="geminivision",
-        system_prompt=VISION_SYSTEM_PROMPT,
+    user_prompt = (prompt or "").strip() or DEFAULT_VISION_PROMPT
+    vision_prompt = (
+        DETAILED_VISION_PROMPT if _is_default_vision_prompt(user_prompt) else user_prompt
     )
-    return ChatResult(
-        model=f"{vision_model} + {answer.model}",
-        content=answer.content,
+    image_path = _write_temp_image(image_bytes, mime_type)
+    ocr_failures: list[str] = []
+    direct_model = ""
+    direct_answer = ""
+    direct_failures: list[str] = []
+    caption_model = ""
+    caption = ""
+    caption_error = ""
+    ocr_text = ""
+    ocr_task = asyncio.create_task(
+        _extract_text_with_ocr_space(image_bytes, mime_type=mime_type)
+    )
+
+    try:
+        direct_model, direct_answer, direct_failures = await _answer_with_direct_vision(
+            image_path,
+            vision_prompt,
+        )
+        ocr_text = await _await_optional_ocr_text(ocr_task, ocr_failures)
+
+        if direct_answer and not _has_useful_ocr_text(ocr_text):
+            return ChatResult(model=direct_model, content=direct_answer)
+
+        if not direct_answer:
+            try:
+                caption_model, caption = await _caption_image(image_path)
+            except FreeAIError as exc:
+                caption_error = str(exc)
+    finally:
+        if not ocr_task.done():
+            ocr_task.cancel()
+            try:
+                await ocr_task
+            except BaseException:
+                pass
+        _remove_file(image_path)
+
+    base_model = direct_model or caption_model
+    base_content = direct_answer or caption
+
+    if caption and not direct_answer and not _has_useful_ocr_text(ocr_text):
+        return ChatResult(
+            model=caption_model,
+            content=_build_caption_only_response(user_prompt, caption),
+        )
+
+    if base_content:
+        try:
+            synthesized = await _synthesize_vision_answer(
+                user_prompt,
+                direct_answer=direct_answer,
+                caption=caption,
+                ocr_text=ocr_text,
+            )
+            model_parts = [base_model, synthesized.model]
+            if _has_useful_ocr_text(ocr_text):
+                model_parts.insert(1, "OCR.Space")
+            return ChatResult(
+                model=" + ".join(part for part in model_parts if part),
+                content=synthesized.content,
+            )
+        except FreeAIError:
+            fallback_text = _build_plain_vision_fallback(
+                user_prompt,
+                direct_answer=direct_answer,
+                caption=caption,
+                ocr_text=ocr_text,
+            )
+            if fallback_text:
+                model_name = base_model
+                if _has_useful_ocr_text(ocr_text):
+                    model_name = f"{model_name} + OCR.Space"
+                return ChatResult(model=model_name, content=fallback_text)
+
+    if _has_useful_ocr_text(ocr_text):
+        return ChatResult(
+            model="OCR.Space",
+            content=f"Visible text detected:\n{_trim_visible_text(ocr_text)}",
+        )
+
+    failures = direct_failures + ocr_failures
+    if caption_error:
+        failures.append(caption_error)
+    details = "\n".join(failures[:6])
+    raise FreeAIError(
+        "Image analysis service is temporarily unavailable.\n"
+        f"{details}"
     )
 
 
@@ -961,7 +1530,7 @@ async def generate_video(
 
         provider_batches: list[list[VideoProvider]] = []
 
-        if REPLICATE_API_TOKEN:
+        if REPLICATE_TOKEN_POOL:
             replicate_batch = [
                 [
                     VideoProvider(
@@ -996,7 +1565,7 @@ async def generate_video(
                 )
             provider_batches.extend(replicate_batch)
 
-        if not REPLICATE_API_TOKEN or _is_enabled(GENVID_USE_PUBLIC_FALLBACKS):
+        if not REPLICATE_TOKEN_POOL or _is_enabled(GENVID_USE_PUBLIC_FALLBACKS):
             provider_batches.extend(
                 [
                     [
@@ -1090,12 +1659,12 @@ async def generate_video(
                 return result
 
         details = "\n".join(failures[:8])
-        if REPLICATE_API_TOKEN:
+        if REPLICATE_TOKEN_POOL:
             headline = "Configured video providers are temporarily unavailable."
         else:
             headline = (
                 "Public no-key video providers are temporarily unavailable.\n"
-                "Tip: set REPLICATE_API_TOKEN for reliable /genvid output."
+                "Tip: set REPLICATE_API_TOKEN or REPLICATE_API_TOKENS for reliable /genvid output."
             )
         raise FreeAIError(
             f"{headline}\n{details}"
@@ -1106,7 +1675,7 @@ async def generate_video(
 
 def vision_unavailable_message() -> str:
     return (
-        "Vision command abhi free provider stack me available nahi hai. "
-        "Chat, image generation, enhance, aur remove-bg commands wire ho rahe hain, "
-        "lekin direct image analysis ke liye koi stable no-key endpoint docs me nahi mila."
+        "Vision command ab free multimodal + OCR fallback stack use karta hai. "
+        "Best results ke liye reply-to-image use karo; HF_TOKEN optional hai aur "
+        "OCR_SPACE_API_KEY default shared free key par chal sakta hai."
     )

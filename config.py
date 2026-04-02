@@ -34,7 +34,11 @@ API_URL = getenv("API_URL")        # optional
 API_KEY = getenv("API_KEY")        # optional
 DEEP_API = getenv("DEEP_API")      # optional
 REPLICATE_API_TOKEN = getenv("REPLICATE_API_TOKEN")  # optional
+REPLICATE_API_TOKENS = getenv("REPLICATE_API_TOKENS", "")  # optional comma-separated pool
 GENVID_USE_PUBLIC_FALLBACKS = getenv("GENVID_USE_PUBLIC_FALLBACKS", "0")
+HF_TOKEN = getenv("HF_TOKEN")  # optional
+HF_TOKENS = getenv("HF_TOKENS", "")  # optional comma-separated pool
+OCR_SPACE_API_KEY = getenv("OCR_SPACE_API_KEY", "helloworld")  # optional shared free key
 
 # Vars For API End Pont.
 YTPROXY_URL = getenv("YTPROXY_URL", 'https://tgapi.xbitcode.com') ## xBit Music Endpoint.

@@ -1,6 +1,8 @@
 import mimetypes
 import os
+from io import BytesIO
 
+from PIL import Image
 from pyrogram import Client, filters
 from pyrogram.enums import ChatAction
 from pyrogram.types import Message
@@ -52,11 +54,39 @@ def get_image_target(message: Message):
     if replied.photo:
         return replied.photo.file_id, "image/jpeg"
 
+    if replied.sticker and not replied.sticker.is_animated and not replied.sticker.is_video:
+        return replied.sticker.file_id, "image/webp"
+
     document = replied.document
-    if document and document.mime_type and document.mime_type.startswith("image/"):
-        return document.file_id, document.mime_type
+    if document:
+        if document.mime_type and document.mime_type.startswith("image/"):
+            return document.file_id, document.mime_type
+
+        guessed_type, _ = mimetypes.guess_type(document.file_name or "")
+        if guessed_type and guessed_type.startswith("image/"):
+            return document.file_id, guessed_type
 
     return None, None
+
+
+def get_vision_prompt(message: Message) -> str:
+    source = (message.text or message.caption or "").strip()
+    parts = source.split(None, 1)
+    if len(parts) > 1 and parts[1].strip():
+        return parts[1].strip()
+    return "Describe this image."
+
+
+def normalize_image_bytes(file_path: str) -> tuple[bytes, str]:
+    with Image.open(file_path) as image:
+        if image.mode in {"RGBA", "LA", "P"}:
+            converted = image.convert("RGBA")
+        else:
+            converted = image.convert("RGB")
+
+        buffer = BytesIO()
+        converted.save(buffer, format="PNG")
+        return buffer.getvalue(), "image/png"
 
 
 async def handle_text_model(
@@ -111,23 +141,29 @@ async def geminivision_handler(client: Client, message: Message):
     file_id, mime_type = get_image_target(message)
     if not file_id:
         return await message.reply_text(
-            "Please reply to an image with the /geminivision command."
+            "Please reply to an image or static sticker with the /geminivision command."
         )
 
-    prompt = get_prompt(message) or "Describe this image."
+    prompt = get_vision_prompt(message)
     await client.send_chat_action(message.chat.id, ChatAction.TYPING)
 
     file_path = None
     try:
         file_path = await client.download_media(file_id)
-        with open(file_path, "rb") as handle:
-            image_bytes = handle.read()
+        image_bytes = None
+        detected_mime = mime_type or "image/jpeg"
+        try:
+            image_bytes, detected_mime = normalize_image_bytes(file_path)
+        except Exception:
+            with open(file_path, "rb") as handle:
+                image_bytes = handle.read()
+            guessed_type, _ = mimetypes.guess_type(file_path)
+            detected_mime = mime_type or guessed_type or "image/jpeg"
 
-        guessed_type, _ = mimetypes.guess_type(file_path)
         result = await generate_vision_response(
             prompt,
             image_bytes,
-            mime_type=mime_type or guessed_type or "image/jpeg",
+            mime_type=detected_mime,
         )
         await send_chunked_reply(
             message,

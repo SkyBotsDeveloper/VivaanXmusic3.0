@@ -92,7 +92,11 @@ DEEP_API=            # Optional - Get from https://deepai.org
 API_KEY=             # Optional - External API key for music Download
 API_URL=             # Optional - External API url for music Download
 REPLICATE_API_TOKEN= # Optional - Recommended for reliable /genvid via Replicate
+REPLICATE_API_TOKENS= # Optional - Comma-separated Replicate token pool for /genvid failover
 GENVID_USE_PUBLIC_FALLBACKS=0  # Optional - Set 1 if you still want no-key public backups after Replicate
+HF_TOKEN=            # Optional - Hugging Face token for better quota on free multimodal /geminivision spaces
+HF_TOKENS=           # Optional - Comma-separated Hugging Face token pool for Space-based fallbacks
+OCR_SPACE_API_KEY=helloworld  # Optional - OCR.Space key; shared free demo key works with low-rate OCR
 ```
 
 ⚠️ **Never expose raw cookies or tokens in public repos.** Use safe paste services like [Pastebin](https://pastebin.com) or [Batbin](https://batbin.me).
