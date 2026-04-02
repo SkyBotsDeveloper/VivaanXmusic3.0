@@ -68,6 +68,15 @@ class VideoResult:
     used_reference_image: bool
 
 
+@dataclass(slots=True)
+class VideoProvider:
+    name: str
+    timeout_seconds: int
+    supports_reference: bool
+    requires_reference: bool
+    runner: object
+
+
 def _build_data_uri(mime_type: str, image_bytes: bytes) -> str:
     encoded = base64.b64encode(image_bytes).decode("utf-8")
     return f"data:{mime_type};base64,{encoded}"
@@ -136,7 +145,11 @@ def _cooldown_seconds_from_error(message: str) -> int | None:
         return (hours * 3600) + (minutes * 60) + seconds
 
     lowered = text.lower()
-    if "gpu quota" in lowered or "maximum allowed" in lowered:
+    if (
+        "gpu quota" in lowered
+        or "maximum allowed" in lowered
+        or "no gpu was available" in lowered
+    ):
         return 30 * 60
     if "queue is too long" in lowered:
         return 10 * 60
@@ -409,11 +422,20 @@ def _run_keen007_video(
     )
 
 
-def _run_wan_async_video(prompt: str) -> str:
+def _run_wan_async_video(
+    prompt: str,
+    reference_image_path: str | None,
+    timeout_seconds: int,
+) -> str:
     client = GradioClient("Wan-AI/Wan2.1", verbose=False)
     client.predict(prompt, "960*960", True, -1, api_name="/t2v_generation_async")
+    deadline = time.time() + timeout_seconds
 
-    for _ in range(12):
+    while True:
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            break
+
         status = client.predict(api_name="/status_refresh")
         video_path = _extract_video_path(status)
         if video_path:
@@ -426,11 +448,97 @@ def _run_wan_async_video(prompt: str) -> str:
             except (TypeError, ValueError):
                 estimated_wait = None
 
-        if estimated_wait and estimated_wait > 240:
+        if estimated_wait and estimated_wait > max(45, remaining + 5):
             raise FreeAIError(f"Wan queue is too long ({int(estimated_wait)}s).")
-        time.sleep(8)
+        time.sleep(min(6, max(1, remaining)))
 
     raise FreeAIError("Wan provider timed out.")
+
+
+def _discard_background_video_task(task: asyncio.Task):
+    try:
+        output_path = task.result()
+    except Exception:
+        return
+
+    if isinstance(output_path, str) and os.path.exists(output_path):
+        _remove_file(output_path)
+
+
+async def _run_video_provider_batch(
+    providers: list[VideoProvider],
+    *,
+    prompt: str,
+    reference_image_path: str | None,
+    progress_callback,
+    failures: list[str],
+) -> VideoResult | None:
+    eligible: list[VideoProvider] = []
+    for provider in providers:
+        remaining = _provider_cooldown_remaining(provider.name)
+        if remaining:
+            failures.append(
+                f"{provider.name}: cooldown active ({remaining}s remaining)"
+            )
+            continue
+        if provider.requires_reference and not reference_image_path:
+            failures.append(f"{provider.name}: no reference image available")
+            continue
+        eligible.append(provider)
+
+    if not eligible:
+        return None
+
+    if progress_callback:
+        if len(eligible) == 1:
+            label = eligible[0].name
+        else:
+            label = "Fast pool:\n" + "\n".join(item.name for item in eligible[:4])
+            if len(eligible) > 4:
+                label += f"\n+{len(eligible) - 4} more"
+        await progress_callback(label)
+
+    tasks = {
+        asyncio.create_task(
+            asyncio.to_thread(
+                provider.runner,
+                prompt,
+                reference_image_path if provider.supports_reference else None,
+                provider.timeout_seconds,
+            )
+        ): provider
+        for provider in eligible
+    }
+
+    while tasks:
+        done, _ = await asyncio.wait(
+            set(tasks),
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+
+        for task in done:
+            provider = tasks.pop(task)
+            try:
+                output_path = task.result()
+                local_path = await _ensure_local_video(output_path)
+                _clear_provider_cooldown(provider.name)
+
+                for pending_task in tasks:
+                    pending_task.add_done_callback(_discard_background_video_task)
+
+                return VideoResult(
+                    provider=provider.name,
+                    file_path=local_path,
+                    used_reference_image=bool(
+                        reference_image_path and provider.supports_reference
+                    ),
+                )
+            except Exception as exc:
+                error_text = str(exc)
+                _set_provider_cooldown(provider.name, error_text)
+                failures.append(f"{provider.name}: {error_text}")
+
+    return None
 
 
 async def _chat_request(
@@ -630,76 +738,98 @@ async def generate_video(
     reference_image_path = None
     used_reference_image = False
     failures: list[str] = []
-    generated_reference_attempted = False
 
     try:
         if image_bytes:
             reference_image_path = _write_temp_image(image_bytes, mime_type)
             used_reference_image = True
 
-        providers = [
-            ("Alava01 / Wan Demo", 70, False, _run_alava_wan_demo),
-            ("OpenKing / Wan2 Video", 70, False, _run_openking_video),
-            ("Smikke / Wan2 Video", 70, False, _run_smikke_video),
-            ("Mrfalco / Wan2 Video", 70, False, _run_mrfalco_video),
-            ("ChanPoin / Wan2 Video", 70, False, _run_chanpoin_video),
-            ("Keen007 / Wan2 Video", 70, False, _run_keen007_video),
-            ("Multimodalart / Wan2.1 Fast", 120, True, _run_multimodalart_video),
-            ("Wan-AI / Wan2.1", 75, False, _run_wan_async_video),
+        provider_batches = [
+            [
+                VideoProvider(
+                    "Alava01 / Wan Demo",
+                    30,
+                    False,
+                    False,
+                    _run_alava_wan_demo,
+                ),
+                VideoProvider(
+                    "OpenKing / Wan2 Video",
+                    35,
+                    True,
+                    False,
+                    _run_openking_video,
+                ),
+                VideoProvider(
+                    "Smikke / Wan2 Video",
+                    35,
+                    True,
+                    False,
+                    _run_smikke_video,
+                ),
+                VideoProvider(
+                    "Mrfalco / Wan2 Video",
+                    35,
+                    True,
+                    False,
+                    _run_mrfalco_video,
+                ),
+                VideoProvider(
+                    "ChanPoin / Wan2 Video",
+                    35,
+                    True,
+                    False,
+                    _run_chanpoin_video,
+                ),
+                VideoProvider(
+                    "Keen007 / Wan2 Video",
+                    35,
+                    True,
+                    False,
+                    _run_keen007_video,
+                ),
+            ],
+            [
+                VideoProvider(
+                    "Wan-AI / Wan2.1",
+                    20,
+                    False,
+                    False,
+                    _run_wan_async_video,
+                ),
+            ],
         ]
 
-        for provider_name, timeout_seconds, needs_reference, runner in providers:
-            remaining = _provider_cooldown_remaining(provider_name)
-            if remaining:
-                failures.append(
-                    f"{provider_name}: cooldown active ({remaining}s remaining)"
-                )
-                continue
-
-            if needs_reference and not reference_image_path:
-                if not generated_reference_attempted:
-                    generated_reference_attempted = True
-                    try:
-                        reference_image_path = _write_temp_image(
-                            await generate_image(text_prompt),
-                            "image/png",
-                        )
-                        used_reference_image = True
-                    except Exception as exc:
-                        failures.append(f"Reference image: {exc}")
-
-                if not reference_image_path:
-                    failures.append(f"{provider_name}: no reference image available")
-                    continue
-
-            if progress_callback:
-                await progress_callback(provider_name)
-
-            try:
-                if runner is _run_wan_async_video:
-                    output_path = await asyncio.to_thread(runner, text_prompt)
-                else:
-                    output_path = await asyncio.to_thread(
-                        runner,
-                        text_prompt,
-                        reference_image_path,
-                        timeout_seconds,
+        if reference_image_path:
+            provider_batches.append(
+                [
+                    VideoProvider(
+                        "Multimodalart / Wan2.1 Fast",
+                        45,
+                        True,
+                        True,
+                        _run_multimodalart_video,
                     )
-                local_path = await _ensure_local_video(output_path)
-                _clear_provider_cooldown(provider_name)
-                return VideoResult(
-                    provider=provider_name,
-                    file_path=local_path,
-                    used_reference_image=used_reference_image and needs_reference,
+                ]
+            )
+
+        for batch in provider_batches:
+            result = await _run_video_provider_batch(
+                batch,
+                prompt=text_prompt,
+                reference_image_path=reference_image_path,
+                progress_callback=progress_callback,
+                failures=failures,
+            )
+            if result:
+                result.used_reference_image = (
+                    used_reference_image and result.used_reference_image
                 )
-            except Exception as exc:
-                error_text = str(exc)
-                _set_provider_cooldown(provider_name, error_text)
-                failures.append(f"{provider_name}: {error_text}")
+                return result
 
         details = "\n".join(failures[:8])
         raise FreeAIError(
-            "Video generation service is temporarily unavailable.\n"
+            "Public no-key video providers are temporarily unavailable.\n"
             f"{details}"
         )
     finally:
