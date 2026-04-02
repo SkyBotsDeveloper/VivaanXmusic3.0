@@ -91,6 +91,8 @@ COOKIE_URL=          # Required - YT Cookies url
 DEEP_API=            # Optional - Get from https://deepai.org
 API_KEY=             # Optional - External API key for music Download
 API_URL=             # Optional - External API url for music Download
+REPLICATE_API_TOKEN= # Optional - Recommended for reliable /genvid via Replicate
+GENVID_USE_PUBLIC_FALLBACKS=0  # Optional - Set 1 if you still want no-key public backups after Replicate
 ```
 
 ⚠️ **Never expose raw cookies or tokens in public repos.** Use safe paste services like [Pastebin](https://pastebin.com) or [Batbin](https://batbin.me).

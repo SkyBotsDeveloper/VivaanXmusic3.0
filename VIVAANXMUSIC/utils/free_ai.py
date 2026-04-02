@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import concurrent.futures
+import mimetypes
 import os
 import re
 import tempfile
@@ -12,6 +13,8 @@ from dataclasses import dataclass
 import httpx
 from gradio_client import Client as GradioClient, handle_file
 
+from config import GENVID_USE_PUBLIC_FALLBACKS, REPLICATE_API_TOKEN
+
 
 HTTP_TIMEOUT = httpx.Timeout(45.0, connect=10.0)
 HTTP_HEADERS = {"User-Agent": "VivaanX/FreeAI/1.0"}
@@ -19,7 +22,14 @@ CHAT_API_URL = "https://api-xqwa.onrender.com/chat/"
 IMAGE_GEN_URL = "https://death-image.ashlynn.workers.dev/generate"
 IMAGE_ENHANCE_URL = "https://arimagex.netlify.app/api/enhance"
 IMAGE_REMOVEBG_URL = "https://arimagex.netlify.app/api/removebg"
+REPLICATE_API_URL = "https://api.replicate.com/v1"
+REPLICATE_SEEDANCE_MODEL = "bytedance/seedance-1-lite"
+REPLICATE_MINIMAX_MODEL = "minimax/video-01"
+REPLICATE_KLING_MODEL = "kwaivgi/kling-v2.1"
 CHAT_MODEL_CANDIDATES = ("gpt-4", "gpt-4o-mini")
+VIDEO_NEGATIVE_PROMPT = (
+    "low quality, blur, watermark, text, distorted anatomy, artifacts"
+)
 VISION_SYSTEM_PROMPT = (
     "You answer questions about an image using only the provided visual description. "
     "If the description is not enough to answer confidently, say so briefly. "
@@ -80,6 +90,17 @@ class VideoProvider:
 def _build_data_uri(mime_type: str, image_bytes: bytes) -> str:
     encoded = base64.b64encode(image_bytes).decode("utf-8")
     return f"data:{mime_type};base64,{encoded}"
+
+
+def _is_enabled(value) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _path_to_data_uri(path: str) -> str:
+    guessed_type, _ = mimetypes.guess_type(path)
+    mime_type = guessed_type or "image/jpeg"
+    with open(path, "rb") as handle:
+        return _build_data_uri(mime_type, handle.read())
 
 
 def _sanitize_chat_text(text: str | None) -> str:
@@ -149,6 +170,8 @@ def _cooldown_seconds_from_error(message: str) -> int | None:
         "gpu quota" in lowered
         or "maximum allowed" in lowered
         or "no gpu was available" in lowered
+        or "monthly spending limit" in lowered
+        or "insufficient credit" in lowered
     ):
         return 30 * 60
     if "queue is too long" in lowered:
@@ -191,6 +214,12 @@ def _unwrap_gradio_media(payload):
 
 def _extract_video_path(payload) -> str | None:
     current = _unwrap_gradio_media(payload)
+    if isinstance(current, list):
+        for item in current:
+            candidate = _extract_video_path(item)
+            if candidate:
+                return candidate
+        return None
     if isinstance(current, dict):
         video = current.get("video")
         if isinstance(video, dict):
@@ -284,6 +313,171 @@ def _run_text_only_video_space(
     if not video_path:
         raise FreeAIError(f"{space_id} returned no video.")
     return video_path
+
+
+def _replicate_headers(*, wait_seconds: int | None = None) -> dict[str, str]:
+    headers = {
+        "Authorization": f"Bearer {REPLICATE_API_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    if wait_seconds:
+        headers["Prefer"] = f"wait={max(1, min(60, wait_seconds))}"
+    return headers
+
+
+def _replicate_error_message(response: httpx.Response) -> str:
+    try:
+        payload = response.json()
+    except Exception:
+        return response.text.strip() or "Replicate request failed."
+
+    if isinstance(payload, dict):
+        detail = payload.get("detail")
+        if detail:
+            return str(detail)
+        title = payload.get("title")
+        error = payload.get("error")
+        if title and error:
+            return f"{title}: {error}"
+        if title:
+            return str(title)
+        if error:
+            return str(error)
+    return "Replicate request failed."
+
+
+def _replicate_output_video_path(payload) -> str | None:
+    video_path = _extract_video_path(payload)
+    if video_path:
+        return video_path
+    if isinstance(payload, dict):
+        for key in ("output", "video", "url"):
+            value = payload.get(key)
+            candidate = _extract_video_path(value)
+            if candidate:
+                return candidate
+    return None
+
+
+def _run_replicate_prediction(
+    model: str,
+    input_payload: dict,
+    timeout_seconds: int,
+) -> str:
+    if not REPLICATE_API_TOKEN:
+        raise FreeAIError("Replicate API token is not configured.")
+
+    headers = _replicate_headers(wait_seconds=min(timeout_seconds, 60))
+    request_timeout = httpx.Timeout(max(timeout_seconds + 15, 60), connect=10.0)
+    with httpx.Client(
+        timeout=request_timeout,
+        headers=HTTP_HEADERS,
+        follow_redirects=True,
+        trust_env=False,
+    ) as client:
+        response = client.post(
+            f"{REPLICATE_API_URL}/models/{model}/predictions",
+            headers=headers,
+            json={"input": input_payload},
+        )
+        if response.status_code >= 400:
+            raise FreeAIError(_replicate_error_message(response))
+
+        prediction = response.json()
+        deadline = time.time() + timeout_seconds
+
+        while True:
+            status = str(prediction.get("status") or "").lower()
+            if status == "succeeded":
+                output_path = _replicate_output_video_path(prediction.get("output"))
+                if output_path:
+                    return output_path
+                raise FreeAIError(f"{model} returned no video.")
+            if status in {"failed", "canceled", "cancelled"}:
+                error_text = str(prediction.get("error") or "").strip()
+                raise FreeAIError(error_text or f"{model} {status}.")
+
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                cancel_url = (prediction.get("urls") or {}).get("cancel")
+                if cancel_url:
+                    try:
+                        client.post(cancel_url, headers=_replicate_headers())
+                    except Exception:
+                        pass
+                raise FreeAIError("Replicate provider timed out.")
+
+            get_url = (prediction.get("urls") or {}).get("get")
+            if not get_url:
+                raise FreeAIError(f"{model} did not return a status URL.")
+
+            time.sleep(min(4, max(1, remaining)))
+            poll = client.get(get_url, headers=_replicate_headers())
+            if poll.status_code >= 400:
+                raise FreeAIError(_replicate_error_message(poll))
+            prediction = poll.json()
+
+
+def _run_replicate_seedance_video(
+    prompt: str,
+    reference_image_path: str | None,
+    timeout_seconds: int,
+) -> str:
+    input_payload = {
+        "prompt": prompt,
+        "duration": 5,
+        "resolution": "720p",
+        "aspect_ratio": "16:9",
+        "fps": 24,
+        "camera_fixed": False,
+    }
+    if reference_image_path:
+        input_payload["image"] = _path_to_data_uri(reference_image_path)
+    return _run_replicate_prediction(
+        REPLICATE_SEEDANCE_MODEL,
+        input_payload,
+        timeout_seconds,
+    )
+
+
+def _run_replicate_minimax_video(
+    prompt: str,
+    reference_image_path: str | None,
+    timeout_seconds: int,
+) -> str:
+    input_payload = {
+        "prompt": prompt,
+        "prompt_optimizer": True,
+    }
+    if reference_image_path:
+        input_payload["first_frame_image"] = _path_to_data_uri(reference_image_path)
+    return _run_replicate_prediction(
+        REPLICATE_MINIMAX_MODEL,
+        input_payload,
+        timeout_seconds,
+    )
+
+
+def _run_replicate_kling_video(
+    prompt: str,
+    reference_image_path: str | None,
+    timeout_seconds: int,
+) -> str:
+    if not reference_image_path:
+        raise FreeAIError("Kling requires a reference image.")
+
+    input_payload = {
+        "prompt": prompt,
+        "start_image": _path_to_data_uri(reference_image_path),
+        "duration": 5,
+        "mode": "standard",
+        "negative_prompt": VIDEO_NEGATIVE_PROMPT,
+    }
+    return _run_replicate_prediction(
+        REPLICATE_KLING_MODEL,
+        input_payload,
+        timeout_seconds,
+    )
 
 
 def _run_alava_wan_demo(
@@ -765,81 +959,117 @@ async def generate_video(
             reference_image_path = _write_temp_image(image_bytes, mime_type)
             used_reference_image = True
 
-        provider_batches = [
-            [
-                VideoProvider(
-                    "hysts / zeroscope-v2",
-                    25,
-                    False,
-                    False,
-                    _run_hysts_zeroscope_video,
-                ),
-                VideoProvider(
-                    "Alava01 / Wan Demo",
-                    30,
-                    False,
-                    False,
-                    _run_alava_wan_demo,
-                ),
-                VideoProvider(
-                    "OpenKing / Wan2 Video",
-                    35,
-                    True,
-                    False,
-                    _run_openking_video,
-                ),
-                VideoProvider(
-                    "Smikke / Wan2 Video",
-                    35,
-                    True,
-                    False,
-                    _run_smikke_video,
-                ),
-                VideoProvider(
-                    "Mrfalco / Wan2 Video",
-                    35,
-                    True,
-                    False,
-                    _run_mrfalco_video,
-                ),
-                VideoProvider(
-                    "ChanPoin / Wan2 Video",
-                    35,
-                    True,
-                    False,
-                    _run_chanpoin_video,
-                ),
-                VideoProvider(
-                    "Keen007 / Wan2 Video",
-                    35,
-                    True,
-                    False,
-                    _run_keen007_video,
-                ),
-            ],
-            [
-                VideoProvider(
-                    "Wan-AI / Wan2.1",
-                    20,
-                    False,
-                    False,
-                    _run_wan_async_video,
-                ),
-            ],
-        ]
+        provider_batches: list[list[VideoProvider]] = []
 
-        if reference_image_path:
-            provider_batches.append(
+        if REPLICATE_API_TOKEN:
+            replicate_batch = [
                 [
                     VideoProvider(
-                        "Multimodalart / Wan2.1 Fast",
-                        45,
+                        "Replicate / Seedance 1 Lite",
+                        150,
+                        True,
+                        False,
+                        _run_replicate_seedance_video,
+                    ),
+                    VideoProvider(
+                        "Replicate / MiniMax Video-01",
+                        150,
+                        True,
+                        False,
+                        _run_replicate_minimax_video,
+                    ),
+                ]
+            ]
+            if reference_image_path:
+                replicate_batch[0].append(
+                    VideoProvider(
+                        "Replicate / Kling v2.1",
+                        150,
                         True,
                         True,
-                        _run_multimodalart_video,
+                        _run_replicate_kling_video,
                     )
+                )
+            provider_batches.extend(replicate_batch)
+
+        if not REPLICATE_API_TOKEN or _is_enabled(GENVID_USE_PUBLIC_FALLBACKS):
+            provider_batches.extend(
+                [
+                    [
+                        VideoProvider(
+                            "hysts / zeroscope-v2",
+                            25,
+                            False,
+                            False,
+                            _run_hysts_zeroscope_video,
+                        ),
+                        VideoProvider(
+                            "Alava01 / Wan Demo",
+                            30,
+                            False,
+                            False,
+                            _run_alava_wan_demo,
+                        ),
+                        VideoProvider(
+                            "OpenKing / Wan2 Video",
+                            35,
+                            True,
+                            False,
+                            _run_openking_video,
+                        ),
+                        VideoProvider(
+                            "Smikke / Wan2 Video",
+                            35,
+                            True,
+                            False,
+                            _run_smikke_video,
+                        ),
+                        VideoProvider(
+                            "Mrfalco / Wan2 Video",
+                            35,
+                            True,
+                            False,
+                            _run_mrfalco_video,
+                        ),
+                        VideoProvider(
+                            "ChanPoin / Wan2 Video",
+                            35,
+                            True,
+                            False,
+                            _run_chanpoin_video,
+                        ),
+                        VideoProvider(
+                            "Keen007 / Wan2 Video",
+                            35,
+                            True,
+                            False,
+                            _run_keen007_video,
+                        ),
+                    ],
+                    [
+                        VideoProvider(
+                            "Wan-AI / Wan2.1",
+                            20,
+                            False,
+                            False,
+                            _run_wan_async_video,
+                        ),
+                    ],
                 ]
             )
+
+            if reference_image_path:
+                provider_batches.append(
+                    [
+                        VideoProvider(
+                            "Multimodalart / Wan2.1 Fast",
+                            45,
+                            True,
+                            True,
+                            _run_multimodalart_video,
+                        )
+                    ]
+                )
 
         for batch in provider_batches:
             result = await _run_video_provider_batch(
@@ -856,9 +1086,15 @@ async def generate_video(
                 return result
 
         details = "\n".join(failures[:8])
+        if REPLICATE_API_TOKEN:
+            headline = "Configured video providers are temporarily unavailable."
+        else:
+            headline = (
+                "Public no-key video providers are temporarily unavailable.\n"
+                "Tip: set REPLICATE_API_TOKEN for reliable /genvid output."
+            )
         raise FreeAIError(
-            "Public no-key video providers are temporarily unavailable.\n"
-            f"{details}"
+            f"{headline}\n{details}"
         )
     finally:
         _remove_file(reference_image_path)
