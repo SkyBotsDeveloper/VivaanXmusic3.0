@@ -1,419 +1,333 @@
-# ───────────────────────────────────────────────────────────────────────
-
-# ── inside helpers.py ────────────────────────────────────────────────
 HELP_1_PROMO = """
-<b><u>ᴘʀᴏᴍᴏᴛɪᴏɴ ⁄ ᴅᴇᴍᴏᴛɪᴏɴ</u></b>
-ᴀᴠᴀɪʟᴀʙʟᴇ ᴄᴏᴍᴍᴀɴᴅꜱ ꜰᴏʀ ᴍᴏᴅᴇʀᴀᴛɪᴏɴ, ᴘʀᴏᴍᴏᴛɪᴏɴ (ᴀᴅᴍɪɴꜱ ᴏɴʟʏ):
+<b><u>Promotion / Demotion</u></b>
 
-• /promote <ᴜꜱᴇʀ>: ɢʀᴀɴᴛꜱ ʟɪᴍɪᴛᴇᴅ ᴀᴅᴍɪɴ ʀɪɢʜᴛꜱ. (ᴄᴀɴ ᴜꜱᴇ ʀᴇᴘʟʏ, @ᴜꜱᴇʀɴᴀᴍᴇ ᴏʀ ID)
-• /fullpromote <ᴜꜱᴇʀ>: ɢʀᴀɴᴛꜱ ᴀʟʟ ᴘᴏꜱꜱɪʙʟᴇ ᴀᴅᴍɪɴ ᴘᴇʀᴍɪꜱꜱɪᴏɴꜱ ᴛᴏ ᴛʜᴇ ᴜꜱᴇʀ.
-• /demote <ᴜꜱᴇʀ>: ʀᴇᴍᴏᴠᴇꜱ ᴀʟʟ ᴀᴅᴍɪɴ ᴘʀɪᴠɪʟᴇɢᴇꜱ ꜰʀᴏᴍ ᴛʜᴇ ᴜꜱᴇʀ.
-• /tempadmin <ᴜꜱᴇʀ> x(ᴍ /ʜ /ᴅ): ᴛᴇᴍᴘᴏʀᴀʀʏ ᴘʀᴏᴍᴏᴛɪᴏɴ ꜰᴏʀ x ᴛɪᴍᴇ. ᴀᴜᴛᴏ-ᴅᴇᴍᴏᴛᴇꜱ ᴀꜰᴛᴇʀ x. (ᴇ.ɢ. • /tempadmin @ᴜꜱᴇʀ 3ʜ)
-
-<b>➤ ᴀʟʟ ᴄᴏᴍᴍᴀɴᴅꜱ ꜱᴜᴘᴘᴏʀᴛ:</b> ʀᴇᴘʟʏ, @ᴜꜱᴇʀɴᴀᴍᴇ, ᴏʀ ᴜꜱᴇʀ ID
-
-"""
-
-# Override AI help text with the current command set.
-HELP_11 = """
-<b><u>AI Chat:</u></b>
-
-<b><u>Chat-with-AI features.</u></b>
-
-• Jarvis - chat with the AI assistant.
-• Assis - AI reply in audio format.
-• /gpt - text chat reply.
-• /bard - alternate AI reply command.
-• /llama - alternate AI reply command.
-• /gemini - alternate AI reply command.
-• /geminivision - temporarily unavailable on the current free provider stack.
-• /mistral - alternate AI reply command.
-• /getdraw - generate an AI image from text.
-• /upscale - enhance a replied image.
-• /rmbg - remove image background.
+- /promote [reply/@user/id] - grant limited admin rights.
+- /fullpromote [reply/@user/id] - grant full admin rights.
+- /demote [reply/@user/id] - remove admin rights.
+- /tempadmin [reply/@user/id] [time] - grant temporary admin rights.
 """
 
 HELP_1_PUNISH = """
-<b><u>ᴘᴜɴɪꜱʜᴍᴇɴᴛ ⁄ ᴘᴏʟɪᴄɪɴɢ</u></b>
-ᴀᴠᴀɪʟᴀʙʟᴇ ᴄᴏᴍᴍᴀɴᴅꜱ ꜰᴏʀ ᴍᴏᴅᴇʀᴀᴛɪᴏɴ, ᴘʀᴏᴍᴏᴛɪᴏɴ (ᴀᴅᴍɪɴꜱ ᴏɴʟʏ):
+<b><u>Punishment / Policing</u></b>
 
- • /ban <ᴜꜱᴇʀ>: ᴘᴇʀᴍᴀɴᴇɴᴛʟʏ ʙᴀɴꜱ ᴛʜᴇ ᴜꜱᴇʀ ꜰʀᴏᴍ ᴛʜᴇ ɢʀᴏᴜᴘ.
- • /unban <ᴜꜱᴇʀ>: ʀᴇᴠᴏᴋᴇꜱ ᴀ ʙᴀɴ.
- • /kick <ᴜꜱᴇʀ>: ᴛᴇᴍᴘᴏʀᴀʀɪʟʏ ʀᴇᴍᴏᴠᴇꜱ ᴀ ᴜꜱᴇʀ. (ᴀᴜᴛᴏ-ᴜɴʙᴀɴ ᴀꜰᴛᴇʀ 2ꜱ)
- • /kickme: ꜱᴇʟꜰ-ᴇᴊᴇᴄᴛ ꜰʀᴏᴍ ɢʀᴏᴜᴘ. (ᴀᴜᴛᴏ-ᴜɴʙᴀɴ ᴀꜰᴛᴇʀ 3ꜱ)
- • /mute <ᴜꜱᴇʀ>: ᴘʀᴇᴠᴇɴᴛꜱ ᴀ ᴜꜱᴇʀ ꜰʀᴏᴍ ꜱᴇɴᴅɪɴɢ ᴍᴇꜱꜱᴀɢᴇꜱ.
- • /tmute <ᴜꜱᴇʀ> x(ᴍ /ʜ /ᴅ): ᴛᴇᴍᴘ ᴍᴜᴛᴇ ꜰᴏʀ x ᴛɪᴍᴇ.
- • /unmute <ᴜꜱᴇʀ>: ʟɪꜰᴛꜱ ᴀ ᴍᴜᴛᴇ.
- • /tban <ᴜꜱᴇʀ> x(ᴍ /ʜ /ᴅ): ᴛᴇᴍᴘᴏʀᴀʀʏ ʙᴀɴ ᴡɪᴛʜ ᴅᴜʀᴀᴛɪᴏɴ.
- • /sban <ᴜꜱᴇʀ>: ꜱɪʟᴇɴᴛ ʙᴀɴ ᴡɪᴛʜᴏᴜᴛ ɴᴏᴛɪꜰɪᴄᴀᴛɪᴏɴ.
- • /dban (ʀᴇᴘʟʏ ᴏɴʟʏ): ᴅᴇʟᴇᴛᴇꜱ ᴀ ᴍᴇꜱꜱᴀɢᴇ ᴀɴᴅ ʙᴀɴꜱ ᴛʜᴇ ꜱᴇɴᴅᴇʀ.
-
- <b>➤ ᴀʟʟ ᴄᴏᴍᴍᴀɴᴅꜱ ꜱᴜᴘᴘᴏʀᴛ:</b> ʀᴇᴘʟʏ, @ᴜꜱᴇʀɴᴀᴍᴇ, ᴏʀ ᴜꜱᴇʀ ID
-
+- /ban [reply/@user/id] - ban a user from the group.
+- /unban [reply/@user/id] - unban a user.
+- /kick [reply/@user/id] - kick a user.
+- /kickme - leave the group yourself.
+- /mute [reply/@user/id] - mute a user.
+- /tmute [reply/@user/id] [time] - mute for a limited time.
+- /unmute [reply/@user/id] - unmute a user.
+- /tban [reply/@user/id] [time] - ban for a limited time.
+- /sban [reply/@user/id] - silent ban.
+- /dban [reply only] - delete the replied message and ban the sender.
 """
-# ────────────────────────────────────────────────────────────────────
 
-
-# ───────────────────────────────────────────────────────────────────────
 HELP_2 = """
-<b><u>ᴀᴅᴍɪɴ ᴄᴏɴᴛʀᴏʟ :</u></b>
-ᴊᴜꜱᴛ ᴀᴅᴅ <b>c</b> ᴀᴛ ᴛʜᴇ ʙᴇɢɪɴɴɪɴɢ ᴏꜰ ᴛʜᴇ ᴄᴏᴍᴍᴀɴᴅꜱ ᴛᴏ ᴜꜱᴇ ᴛʜᴇᴍ ꜰᴏʀ ᴛʜᴇ ᴄʜᴀɴɴᴇʟ.
+<b><u>Admin Control</u></b>
+Core in-call controls for group admins. Linked-channel variants use the same command with a <code>c</code> prefix where available.
 
-• /pause : ᴘᴀᴜꜱᴇ ᴛʜᴇ ᴄᴜʀʀᴇɴᴛ ᴘʟᴀʏɪɴɢ ꜱᴛʀᴇᴀᴍ.
-• /resume : ʀᴇꜱᴜᴍᴇ ᴛʜᴇ ᴘᴀᴜꜱᴇᴅ ꜱᴛʀᴇᴀᴍ.
-• /skip : ꜱᴋɪᴘ ᴛʜᴇ ᴄᴜʀʀᴇɴᴛ ᴘʟᴀʏɪɴɢ ꜱᴛʀᴇᴀᴍ ᴀɴᴅ ꜱᴛᴀʀᴛ ꜱᴛʀᴇᴀᴍɪɴɢ ᴛʜᴇ ɴᴇxᴛ ᴛʀᴀᴄᴋ ɪɴ ᴛʜᴇ ǫᴜᴇᴜᴇ.
-• /end ᴏʀ • /stop : ᴄʟᴇᴀʀꜱ ᴛʜᴇ ǫᴜᴇᴜᴇ ᴀɴᴅ ᴇɴᴅꜱ ᴛʜᴇ ᴄᴜʀʀᴇɴᴛ ᴘʟᴀʏɪɴɢ ꜱᴛʀᴇᴀᴍ.
-• /player : ɢᴇᴛ ᴀɴ ɪɴᴛᴇʀᴀᴄᴛɪᴠᴇ ᴘʟᴀʏᴇʀ ᴘᴀɴᴇʟ.
-• /queue : ꜱʜᴏᴡꜱ ᴛʜᴇ ǫᴜᴇᴜᴇᴅ ᴛʀᴀᴄᴋꜱ ʟɪꜱᴛ.
+- /pause, /cpause - pause the current stream.
+- /resume, /cresume - resume the paused stream.
+- /skip, /cskip, /next, /cnext - skip the current track.
+- /end - stop playback and clear the queue.
+- /player, /cplayer, /playing, /cplaying - open the player or view now playing info.
+- /queue, /cqueue - show queued tracks.
+- /reload, /refresh, /admincache - rebuild admin cache.
+- /reboot - reset the assistant and current VC session for this chat.
 """
 
-# ───────────────────────────────────────────────────────────────────────
 HELP_3 = """
-<b><u>ᴀᴜᴛʜ ᴜꜱᴇʀꜱ :</b></u>
+<b><u>Auth Users</u></b>
 
-ᴀᴜᴛʜ ᴜꜱᴇʀꜱ ᴄᴀɴ ᴜꜱᴇ ᴀᴅᴍɪɴ ʀɪɢʜᴛꜱ ɪɴ ᴛʜᴇ ʙᴏᴛ ᴡɪᴛʜᴏᴜᴛ ᴀᴅᴍɪɴ ʀɪɢʜᴛꜱ ɪɴ ᴛʜᴇ ᴄʜᴀᴛ.
-
-• /auth [ᴜꜱᴇʀɴᴀᴍᴇ• /ᴜꜱᴇʀ_ɪᴅ] : ᴀᴅᴅ ᴀ ᴜꜱᴇʀ ᴛᴏ ᴛʜᴇ ᴀᴜᴛʜ ʟɪꜱᴛ ᴏꜰ ᴛʜᴇ ʙᴏᴛ.
-• /unauth [ᴜꜱᴇʀɴᴀᴍᴇ• /ᴜꜱᴇʀ_ɪᴅ] : ʀᴇᴍᴏᴠᴇ ᴀ ᴜꜱᴇʀ ꜰʀᴏᴍ ᴛʜᴇ ᴀᴜᴛʜ ᴜꜱᴇʀꜱ ʟɪꜱᴛ.
-• /authusers : ꜱʜᴏᴡꜱ ᴛʜᴇ ʟɪꜱᴛ ᴏꜰ ᴀᴜᴛʜ ᴜꜱᴇʀꜱ ᴏꜰ ᴛʜᴇ ɢʀᴏᴜᴘ.
-
+- /auth [reply/@user/id] - authorize a user for admin play controls.
+- /unauth [reply/@user/id] - remove an authorized user.
+- /authlist, /authusers - list authorized users in the chat.
 """
 
-# ───────────────────────────────────────────────────────────────────────
 HELP_4 = """
-<u><b>ᴄʜᴀᴛ ʙʟᴀᴄᴋʟɪꜱᴛ ꜰᴇᴀᴛᴜʀᴇ :</b></u> [ᴏɴʟʏ ꜰᴏʀ ꜱᴜᴅᴏᴇʀꜱ]
+<b><u>Blacklist Chat</u></b> <i>(sudo)</i>
 
-ʀᴇꜱᴛʀɪᴄᴛ ᴜɴᴡᴀɴᴛᴇᴅ ᴄʜᴀᴛꜱ ꜰʀᴏᴍ ᴜꜱɪɴɢ ᴏᴜʀ ᴘʀᴇᴄɪᴏᴜꜱ ʙᴏᴛ.
-
-• /blacklistchat [ᴄʜᴀᴛ ɪᴅ] : ʙʟᴀᴄᴋʟɪꜱᴛ ᴀ ᴄʜᴀᴛ ꜰʀᴏᴍ ᴜꜱɪɴɢ ᴛʜᴇ ʙᴏᴛ.
-• /whitelistchat [ᴄʜᴀᴛ ɪᴅ] : ᴡʜɪᴛᴇʟɪꜱᴛ ᴛʜᴇ ʙʟᴀᴄᴋʟɪꜱᴛᴇᴅ ᴄʜᴀᴛ.
-• /blacklistedchats : ꜱʜᴏᴡꜱ ᴛʜᴇ ʟɪꜱᴛ ᴏꜰ ʙʟᴀᴄᴋʟɪꜱᴛᴇᴅ ᴄʜᴀᴛꜱ.
-
+- /blchat, /blacklistchat [chat id] - blacklist a chat from using the bot.
+- /whitelistchat, /unblacklistchat, /unblchat [chat id] - remove a blacklisted chat.
+- /blchats, /blacklistedchats - list blacklisted chats.
 """
 
-# ───────────────────────────────────────────────────────────────────────
 HELP_5 = """
-<b><u>ʙʟᴏᴄᴋ ᴜꜱᴇʀꜱ:</b></u> [ᴏɴʟʏ ꜰᴏʀ ꜱᴜᴅᴏᴇʀꜱ]
+<b><u>Block Users</u></b> <i>(sudo)</i>
 
-ꜱᴛᴀʀᴛꜱ ɪɢɴᴏʀɪɴɢ ᴛʜᴇ ʙʟᴀᴄᴋʟɪꜱᴛᴇᴅ ᴜꜱᴇʀ, ꜱᴏ ᴛʜᴀᴛ ᴛʜᴇʏ ᴄᴀɴ'ᴛ ᴜꜱᴇ ʙᴏᴛ ᴄᴏᴍᴍᴀɴᴅꜱ.
-
-• /block [ᴜꜱᴇʀɴᴀᴍᴇ ᴏʀ ʀᴇᴘʟʏ ᴛᴏ ᴀ ᴜꜱᴇʀ] : ʙʟᴏᴄᴋ ᴛʜᴇ ᴜꜱᴇʀ ꜰʀᴏᴍ ᴏᴜʀ ʙᴏᴛ.
-• /unblock [ᴜꜱᴇʀɴᴀᴍᴇ ᴏʀ ʀᴇᴘʟʏ ᴛᴏ ᴀ ᴜꜱᴇʀ] : ᴜɴʙʟᴏᴄᴋ ᴛʜᴇ ʙʟᴏᴄᴋᴇᴅ ᴜꜱᴇʀ.
-• /blockedusers : ꜱʜᴏᴡꜱ ᴛʜᴇ ʟɪꜱᴛ ᴏꜰ ʙʟᴏᴄᴋᴇᴅ ᴜꜱᴇʀꜱ.
-
+- /block [reply/@user/id] - block a user from using the bot.
+- /unblock [reply/@user/id] - unblock a user.
+- /blocked, /blockedusers, /blusers - list blocked users.
 """
 
-# ───────────────────────────────────────────────────────────────────────
 HELP_6 = """
-<b><u>ᴄʜᴀɴɴᴇʟ ᴘʟᴀʏ :</u></b>
-ʏᴏᴜ ᴄᴀɴ ꜱᴛʀᴇᴀᴍ ᴀᴜᴅɪᴏ• /ᴠɪᴅᴇᴏ ɪɴ ᴛʜᴇ ᴄʜᴀɴɴᴇʟ.
+<b><u>Channel Play</u></b>
+Use these when a linked channel is attached to a group.
 
-• /cplay : ꜱᴛᴀʀᴛꜱ ꜱᴛʀᴇᴀᴍɪɴɢ ᴛʜᴇ ʀᴇǫᴜᴇꜱᴛᴇᴅ ᴀᴜᴅɪᴏ ᴛʀᴀᴄᴋ ᴏɴ ᴛʜᴇ ᴄʜᴀɴɴᴇʟ'ꜱ ᴠɪᴅᴇᴏ ᴄʜᴀᴛ.
-• /cvplay : ꜱᴛᴀʀᴛꜱ ꜱᴛʀᴇᴀᴍɪɴɢ ᴛʜᴇ ʀᴇǫᴜᴇꜱᴛᴇᴅ ᴠɪᴅᴇᴏ ᴛʀᴀᴄᴋ ᴏɴ ᴛʜᴇ ᴄʜᴀɴɴᴇʟ'ꜱ ᴠɪᴅᴇᴏ ᴄʜᴀᴛ.
-• /cplayforce ᴏʀ • /cvplayforce : ꜱᴛᴏᴘꜱ ᴛʜᴇ ᴏɴɢᴏɪɴɢ ꜱᴛʀᴇᴀᴍ ᴀɴᴅ ꜱᴛᴀʀᴛꜱ ꜱᴛʀᴇᴀᴍɪɴɢ ᴛʜᴇ ʀᴇǫᴜᴇꜱᴛᴇᴅ ᴛʀᴀᴄᴋ.
-• /channelplay [ᴄʜᴀᴛ ᴜꜱᴇʀɴᴀᴍᴇ ᴏʀ ɪᴅ] ᴏʀ [ᴅɪꜱᴀʙʟᴇ] : ᴄᴏɴɴᴇᴄᴛ ᴀ ᴄʜᴀɴɴᴇʟ ᴛᴏ ᴀ ɢʀᴏᴜᴘ ᴀɴᴅ ꜱᴛᴀʀᴛ ꜱᴛʀᴇᴀᴍɪɴɢ ᴛʀᴀᴄᴋꜱ ʙʏ ᴜꜱɪɴɢ ᴄᴏᴍᴍᴀɴᴅꜱ ꜱᴇɴᴛ ɪɴ ᴛʜᴇ ɢʀᴏᴜᴘ.
-
+- /channelplay [chat username/id] or /channelplay disable - link or unlink a channel.
+- /cplay, /cvplay - play audio or video in linked-channel mode.
+- /cplayforce, /cvplayforce - force-play in linked-channel mode.
+- /cqueue, /cplayer, /cplaying - inspect the linked-channel queue or player.
 """
 
-# ───────────────────────────────────────────────────────────────────────
 HELP_7 = """
-<b><u>ᴇxᴛʀᴀ :</u></b>
-Handy utilities that aren’t music-related.
+<b><u>Extra Tools</u></b>
 
-• /carbon ➠ ɢᴇɴᴇʀᴀᴛᴇꜱ ᴀ ᴄᴀʀʙᴏɴ ᴄᴏᴅᴇ ɪᴍᴀɢᴇ ꜰʀᴏᴍ ᴀ ᴄᴏᴅᴇ ꜱɴɪᴘᴘᴇᴛ.
-• /speedtest ➠ ᴍᴇᴀꜱᴜʀᴇꜱ ᴛʜᴇ ɪɴᴛᴇʀɴᴇᴛ ꜱᴘᴇᴇᴅ.
-• /webdl ➠ ᴇɴᴛᴇʀ ᴛʜᴇ ʟɪɴᴋ ᴏꜰ ᴀ ᴡᴇʙꜱɪᴛᴇ ᴀꜰᴛᴇʀ ᴛʜᴇ ᴄᴏᴍᴍᴀɴᴅ ᴛᴏ ɢᴇᴛ ᴛʜᴇ ꜱᴏᴜʀᴄᴇ ᴄᴏᴅᴇ ᴏꜰ ᴛʜᴀᴛ ᴡᴇʙꜱɪᴛᴇ.
-• /tgm ➠ ᴜᴘʟᴏᴀᴅꜱ ᴀ ᴘʜᴏᴛᴏ (ᴜɴᴅᴇʀ 𝟧ᴍʙ) ᴛᴏ ᴛʜᴇ ᴄʟᴏᴜᴅ ᴀɴᴅ ᴘʀᴏᴠɪᴅᴇꜱ ᴀ ʟɪɴᴋ.
-• /tr ➠ ᴛʀᴀɴꜱʟᴀᴛᴇꜱ ᴛᴇxᴛ.
-• /short ➠ ᴇɴᴛᴇʀ ᴛʜᴇ ʟɪɴᴋ ᴛʜᴀᴛ ʏᴏᴜ ᴡᴀɴᴛ ᴛᴏ ꜱʜᴏʀᴛᴇɴ ᴀꜰᴛᴇʀ ᴛʜᴇ ᴄᴏᴍᴍᴀɴᴅ.
-
+- /tgm, /tgt, /telegraph - upload replied media to Telegraph.
+- /tr - translate text or a replied message.
+- /short, /unshort - shorten or expand a URL.
+- /speedtest, /spt - run a network speed test.
+- /webdl [url] - download a website snapshot/archive.
+- /bug [text or reply] - send a bug report to the owner.
 """
 
-# ───────────────────────────────────────────────────────────────────────
 HELP_8 = """
-<b><u>ɢʟᴏʙᴀʟ ʙᴀɴ ꜰᴇᴀᴛᴜʀᴇ</b></u> [ᴏɴʟʏ ꜰᴏʀ ꜱᴜᴅᴏᴇʀꜱ]:
+<b><u>Global Ban</u></b> <i>(sudo)</i>
 
-• /gban [ᴜꜱᴇʀɴᴀᴍᴇ ᴏʀ ʀᴇᴘʟʏ ᴛᴏ ᴀ ᴜꜱᴇʀ] : ɢʟᴏʙᴀʟʟʏ ʙᴀɴꜱ ᴛʜᴇ ᴜꜱᴇʀ ꜰʀᴏᴍ ᴀʟʟ ᴛʜᴇ ꜱᴇʀᴠᴇᴅ ᴄʜᴀᴛꜱ ᴀɴᴅ ʙʟᴀᴄᴋʟɪꜱᴛꜱ ᴛʜᴇᴍ ꜰʀᴏᴍ ᴜꜱɪɴɢ ᴛʜᴇ ʙᴏᴛ.
-• /ungban [ᴜꜱᴇʀɴᴀᴍᴇ ᴏʀ ʀᴇᴘʟʏ ᴛᴏ ᴀ ᴜꜱᴇʀ] : ɢʟᴏʙᴀʟʟʏ ᴜɴʙᴀɴꜱ ᴛʜᴇ ɢʟᴏʙᴀʟʟʏ ʙᴀɴɴᴇᴅ ᴜꜱᴇʀ.
-• /gbannedusers : ꜱʜᴏᴡꜱ ᴛʜᴇ ʟɪꜱᴛ ᴏꜰ ɢʟᴏʙᴀʟʟʏ ʙᴀɴɴᴇᴅ ᴜꜱᴇʀꜱ.
-
+- /gban, /globalban [reply/@user/id] - globally ban a user across served chats.
+- /ungban [reply/@user/id] - remove a global ban.
+- /gbannedusers, /gbanlist - list globally banned users.
 """
 
-# ───────────────────────────────────────────────────────────────────────
 HELP_9 = """
-<u><b>ʙʀᴏᴀᴅᴄᴀꜱᴛ ꜰᴇᴀᴛᴜʀᴇ</b></u> [ᴏɴʟʏ ꜰᴏʀ ꜱᴜᴅᴏᴇʀꜱ]:
+<b><u>Global Cast</u></b> <i>(sudo)</i>
 
-/ʙʀᴏᴀᴅᴄᴀꜱᴛ [ᴍᴇꜱꜱᴀɢᴇ ᴏʀ ʀᴇᴘʟʏ ᴛᴏ ᴀ ᴍᴇꜱꜱᴀɢᴇ] : ʙʀᴏᴀᴅᴄᴀꜱᴛ ᴀ ᴍᴇꜱꜱᴀɢᴇ ᴛᴏ ꜱᴇʀᴠᴇᴅ ᴄʜᴀᴛꜱ ᴏꜰ ᴛʜᴇ ʙᴏᴛ.
-
-<u>broadcast ᴍᴏᴅᴇꜱ:</ᴜ>
-<b>-pin</b>: ᴘɪɴꜱ ʏᴏᴜʀ ʙʀᴏᴀᴅᴄᴀꜱᴛᴇᴅ ᴍᴇꜱꜱᴀɢᴇꜱ ɪɴ ꜱᴇʀᴠᴇᴅ ᴄʜᴀᴛꜱ.
-<b>-pinloud</b>: ᴘɪɴꜱ ʏᴏᴜʀ ʙʀᴏᴀᴅᴄᴀꜱᴛᴇᴅ ᴍᴇꜱꜱᴀɢᴇ ɪɴ ꜱᴇʀᴠᴇᴅ ᴄʜᴀᴛꜱ ᴀɴᴅ ꜱᴇɴᴅꜱ ᴀ ɴᴏᴛɪꜰɪᴄᴀᴛɪᴏɴ ᴛᴏ ᴛʜᴇ ᴍᴇᴍʙᴇʀꜱ.
-<b>-user</b>: ʙʀᴏᴀᴅᴄᴀꜱᴛꜱ ᴛʜᴇ ᴍᴇꜱꜱᴀɢᴇ ᴛᴏ ᴛʜᴇ ᴜꜱᴇʀꜱ ᴡʜᴏ ʜᴀᴠᴇ ꜱᴛᴀʀᴛᴇᴅ ʏᴏᴜʀ ʙᴏᴛ.
-<b>-assistant</b>: ʙʀᴏᴀᴅᴄᴀꜱᴛꜱ ʏᴏᴜʀ ᴍᴇꜱꜱᴀɢᴇ ꜰʀᴏᴍ ᴛʜᴇ ᴀꜱꜱɪꜱᴛᴀɴᴛ ᴀᴄᴄᴏᴜɴᴛ ᴏꜰ ᴛʜᴇ ʙᴏᴛ.
-<b>-nobot</b>: ꜰᴏʀᴄᴇꜱ ᴛʜᴇ ʙᴏᴛ ᴛᴏ ɴᴏᴛ ʙʀᴏᴀᴅᴄᴀꜱᴛ ᴛʜᴇ ᴍᴇꜱꜱᴀɢᴇ.
-
-<b>ᴇxᴀᴍᴘʟᴇ:</b> <code>/broadcast -user -assistant -pin Testing broadcast</code>
+- /broadcast [text or reply] - broadcast a message to users/chats served by the bot.
 """
 
-# ───────────────────────────────────────────────────────────────────────
 HELP_10 = """
-<b><u>ɢᴀᴍᴇꜱ :</u></b>
-Telegram emoji games – quick fun.
+<b><u>Games</u></b>
 
-• /dice 🎲  • /dart 🎯  • /basket 🏀  
-• /ball 🎳  • /football ⚽  • /jackpot 🎰
+- /dice, /dart, /basket, /jackpot, /ball, /football - Telegram dice games.
+- /truth - get a random truth question.
+- /dare - get a random dare.
 """
 
-# ───────────────────────────────────────────────────────────────────────
 HELP_11 = """
-<b><u>ᴄʜᴀᴛɢᴘᴛ :</u></b>
+<b><u>AI Chat</u></b>
 
-<b><u>Cʜᴀᴛ-ᴡɪᴛʜ-AI ғᴇᴀᴛᴜʀᴇs.</u></b>
-
-• Jarvis - ʏᴏᴜ ᴄᴀɴ ᴀᴄᴄᴇꜱꜱ ᴊᴀʀᴠɪꜱ ʙʏ ᴛʜɪꜱ.
-• Assis - ᴛʜᴇ ᴀɪ ᴡɪʟʟ ʀᴇꜱᴘᴏɴᴅ ɪɴ ᴀᴜᴅɪᴏ ꜰᴏʀᴍᴀᴛ.
-• /gpt - ᴀᴄᴄᴇꜱꜱ ɢᴘᴛ ꜰᴜɴᴄᴛɪᴏɴᴀʟɪᴛʏ.
-• /bard - ɪɴᴠᴏᴋᴇ ᴛʜᴇ ʙᴀʀᴅ ꜰᴇᴀᴛᴜʀᴇ.
-• /llama - ᴇɴɢᴀɢᴇ ᴡɪᴛʜ ʟʟᴀᴍᴀ ᴍᴏᴅᴇ.
-• /gemini - ɪɴᴠᴏᴋᴇ ᴛʜᴇ ɢᴇᴍɪɴɪ ꜰᴇᴀᴛᴜʀᴇ.
-• /geminivision - ᴇxᴘʟᴏʀᴇ ɢᴇᴍɪɴɪ ᴍᴏᴅᴇ.
-• /mistral - ᴀᴄᴛɪᴠᴀᴛᴇ ᴍɪꜱᴛʀᴀʟ ᴄᴏᴅᴇ.
-• /tts - ᴄᴏɴᴠᴇʀᴛ ᴛᴇxᴛ ᴛᴏ ꜱᴘᴇᴇᴄʜ.
-• /enhance - ɪᴍᴀɢᴇ ᴜᴘsᴄᴀʟᴇ ғʀᴇᴇ ᴀᴘɪ.
+- jarvis [prompt] - chat with the assistant using the jarvis trigger.
+- assis [prompt] - get an AI voice reply.
+- /gpt, /bard, /gemini, /llama, /mistral - text AI replies.
+- /geminivision - analyze a replied image.
+- /chatgpt, /ai, /ask, /Master - alternate text-AI entry commands.
 """
 
-# ───────────────────────────────────────────────────────────────────────
 HELP_12 = """
-<b><u>ɪɴғᴏ :</u></b>
-Look up user, group or random IDs.
+<b><u>Info</u></b>
 
-• /id : ɢᴇᴛ ᴛʜᴇ ᴄᴜʀʀᴇɴᴛ ɢʀᴏᴜᴘ ɪᴅ. ɪꜰ ᴜꜱᴇᴅ ʙʏ ʀᴇᴘʟʏɪɴɢ ᴛᴏ ᴀ ᴍᴇꜱꜱᴀɢᴇ, ɢᴇᴛꜱ ᴛʜᴀᴛ ᴜꜱᴇʀ'ꜱ ɪᴅ.
-• /info : ɢᴇᴛ ɪɴꜰᴏʀᴍᴀᴛɪᴏɴ ᴀʙᴏᴜᴛ ᴀ ᴜꜱᴇʀ.
-• /github <ᴜꜱᴇʀɴᴀᴍᴇ> : ɢᴇᴛ ɪɴꜰᴏʀᴍᴀᴛɪᴏɴ ᴀʙᴏᴜᴛ ᴀ ɢɪᴛʜᴜʙ ᴜꜱᴇʀ.
-• /sg : ʀᴇᴘʟʏ ᴛᴏ ᴀɴ ɪᴅ ᴏʀ ᴜꜱᴇʀɴᴀᴍᴇ ᴛᴏ ɢᴇᴛ ᴛʜᴇ ʜɪꜱᴛᴏʀʏ ᴏꜰ ᴛʜᴀᴛ ᴘᴇʀꜱᴏɴ.
-• /groupdata & • /groupinfo : ᴛᴏ ɢᴇᴛ ɢʀᴏᴜᴘ ɪɴꜰᴏ.
-• /whois : ʀᴇᴘʟʏ ᴏʀ ᴛᴀɢ ᴀ ᴜꜱᴇʀɴᴀᴍᴇ ᴛᴏ ᴋɴᴏᴡ ᴅᴇᴛᴀɪʟꜱ ᴏꜰ ᴛʜᴀᴛ ᴘᴇʀꜱᴏɴ.
-• /phone : ᴇɴᴛᴇʀ ʏᴏᴜʀ ᴘʜᴏɴᴇ ɴᴜᴍʙᴇʀ ᴀꜰᴛᴇʀ ᴛʜᴇ ᴄᴏᴍᴍᴀɴᴅ ᴛᴏ ɢᴇᴛ ᴅᴇᴛᴀɪʟꜱ.
-
+- /id - get chat, user, or replied-message IDs.
+- /info, /userinfo, /whois - inspect a user's details.
+- /sg - fetch user history details.
+- /groupdata - show current group information.
+- /phone - look up details for a phone number.
 """
 
-# ───────────────────────────────────────────────────────────────────────
 HELP_13 = """
-<b><u>ɪᴍᴀɢᴇ :</u></b>
-AI drawing & editing.
+<b><u>Image</u></b>
 
-• /getdraw ➠ ɢᴇɴᴇʀᴀᴛᴇꜱ ᴀ ᴅʀᴀᴡɪɴɢ ʙᴀꜱᴇᴅ ᴏɴ ᴀ ɢɪᴠᴇɴ ᴘʀᴏᴍᴘᴛ.
-• /upscale ➠ ʀᴇᴘʟʏ ᴛᴏ ᴀɴ ɪᴍᴀɢᴇ ᴛᴏ ᴜᴘꜱᴄᴀʟᴇ ɪᴛ ᴀɴᴅ ɪᴍᴘʀᴏᴠᴇ ɪᴛꜱ ǫᴜᴀʟɪᴛʏ.
-• /rmbg ➠ ʀᴇᴍᴏᴠᴇꜱ ᴛʜᴇ ʙᴀᴄᴋɢʀᴏᴜɴᴅ ꜰʀᴏᴍ ᴀɴ ɪᴍᴀɢᴇ.
-
+- /getdraw - generate an AI image from a prompt.
+- /upscale - upscale a replied image.
+- /rmbg - remove the background from a replied image.
+- /waifu [tag] - fetch a waifu image by tag.
 """
 
-# ───────────────────────────────────────────────────────────────────────
 HELP_14 = """
-<u><b>ʟᴏɢ / ᴍᴀɪɴᴛᴇɴᴀɴᴄᴇ :</b></u>  (ꜱᴜᴅᴏ)
-Keep the bot healthy.
+<b><u>Log / Maintenance</u></b> <i>(sudo)</i>
 
-• /logs – Get latest Heroku/Docker logs.  
-• /logger enable – Start live message logging.  
-• /maintenance enable – Bot replies “Under maintenance”.  
-• /update – Git pull & PM you the diff.  
-• /restart – Graceful reboot.
+- /logger [enable|disable] - toggle live logging.
+- /maintenance [enable|disable] - toggle maintenance mode.
+- /logs, /getlog, /getlogs - fetch current logs.
+- /update, /gitpull - pull latest upstream changes.
+- /restart - restart the bot process.
 """
 
-# ───────────────────────────────────────────────────────────────────────
 HELP_15 = """
-<b><u>ʟᴏᴏᴘ :</u></b>
-ꜱᴛᴀʀᴛꜱ ꜱᴛʀᴇᴀᴍɪɴɢ ᴛʜᴇ ᴏɴɢᴏɪɴɢ ꜱᴛʀᴇᴀᴍ ɪɴ ᴀ ʟᴏᴏᴘ.
+<b><u>Loop</u></b>
 
-• /loop [ᴇɴᴀʙʟᴇ• /ᴅɪꜱᴀʙʟᴇ] : ᴇɴᴀʙʟᴇꜱ ᴏʀ ᴅɪꜱᴀʙʟᴇꜱ ʟᴏᴏᴘ ꜰᴏʀ ᴛʜᴇ ᴏɴɢᴏɪɴɢ ꜱᴛʀᴇᴀᴍ.
-• /loop [𝟣, 𝟤, 𝟥, ...] : ꜱᴇᴛꜱ ᴛʜᴇ ʟᴏᴏᴘ ᴛᴏ ᴛʜᴇ ꜱᴘᴇᴄɪꜰɪᴇᴅ ɴᴜᴍʙᴇʀ ᴏꜰ ᴛɪᴍᴇꜱ.
-
+- /loop [enable|disable|count] - repeat the current track.
+- /cloop [enable|disable|count] - same action for linked-channel playback.
 """
 
-# ───────────────────────────────────────────────────────────────────────
 HELP_16 = """
-<b><u>ɢʀᴏᴜᴘ ᴍᴀɴᴀɢᴇᴍᴇɴᴛ :</u></b>
+<b><u>Group Management</u></b>
 
-• /pin : ᴘɪɴꜱ ᴀ ᴍᴇꜱꜱᴀɢᴇ ɪɴ ᴛʜᴇ ɢʀᴏᴜᴘ.
-• /unpin : ᴜɴᴘɪɴꜱ ᴛʜᴇ ᴄᴜʀʀᴇɴᴛʟʏ ᴘɪɴɴᴇᴅ ᴍᴇꜱꜱᴀɢᴇ.
-• /staff : ᴅɪꜱᴘʟᴀʏꜱ ᴛʜᴇ ʟɪꜱᴛ ᴏꜰ ꜱᴛᴀꜰꜰ ᴍᴇᴍʙᴇʀꜱ.
-• /bots : ᴅɪꜱᴘʟᴀʏꜱ ᴛʜᴇ ʟɪꜱᴛ ᴏꜰ ʙᴏᴛꜱ ɪɴ ᴛʜᴇ ɢʀᴏᴜᴘ.
-• /settitle : ꜱᴇᴛꜱ ᴛʜᴇ ᴛɪᴛʟᴇ ᴏꜰ ᴛʜᴇ ɢʀᴏᴜᴘ.
-• /setdescription : ꜱᴇᴛꜱ ᴛʜᴇ ᴅᴇꜱᴄʀɪᴘᴛɪᴏɴ ᴏꜰ ᴛʜᴇ ɢʀᴏᴜᴘ.
-• /wel : ᴛᴜʀɴ ᴡᴇʟᴄᴏᴍᴇ ᴍᴇꜱꜱᴀɢᴇꜱ ᴏɴ ᴏʀ ᴏꜰꜰ.
-• /setphoto : ꜱᴇᴛꜱ ᴛʜᴇ ɢʀᴏᴜᴘ ᴘʜᴏᴛᴏ.
-• /removephoto : ʀᴇᴍᴏᴠᴇꜱ ᴛʜᴇ ɢʀᴏᴜᴘ ᴘʜᴏᴛᴏ.
-• /zombies : ʀᴇᴍᴏᴠᴇꜱ ᴅᴇʟᴇᴛᴇᴅ ᴀᴄᴄᴏᴜɴᴛꜱ ꜰʀᴏᴍ ᴛʜᴇ ɢʀᴏᴜᴘ.
-• /imposter ᴏɴ• /ᴏꜰꜰ : ᴛᴜʀɴꜱ ᴏɴ ᴏʀ ᴏꜰꜰ ᴛʜᴇ ᴡᴀᴛᴄʜᴇʀ ꜰᴏʀ ʏᴏᴜʀ ɢʀᴏᴜᴘ, ᴡʜɪᴄʜ ɴᴏᴛɪꜰɪᴇꜱ ᴀʙᴏᴜᴛ ᴜꜱᴇʀꜱ ᴡʜᴏ ᴄʜᴀɴɢᴇ ᴛʜᴇɪʀ ɴᴀᴍᴇ ᴏʀ ᴜꜱᴇʀɴᴀᴍᴇ.
-• /lang : ᴄʜᴀɴɢᴇ ᴛʜᴇ ʙᴏᴛ ʟᴀɴɢᴜᴀɢᴇ.
-
+- /pin, /unpin - pin or unpin messages.
+- /settitle - change the group title.
+- /setdiscription - change the group description.
+- /setphoto, /removephoto - set or remove the group photo.
+- /welcome [on|off] - toggle welcome messages.
+- /admins, /staff - list admins in the group.
+- /bots - list bot accounts in the group.
+- /zombies - clean deleted accounts from the group.
+- /imposter [on|off] - toggle the username/name change watcher.
+- /lang, /setlang, /language - change bot language for the chat.
+- /givelink - export the current group's invite link.
+- /user - export the member list as CSV or TXT.
 """
 
-# ───────────────────────────────────────────────────────────────────────
 HELP_17 = """
-<b><u>ᴍᴀꜱᴛɪ ♡︎  (ғᴜɴ):</u></b>
-Random social mini-games.
+<b><u>Masti / Fun</u></b>
 
-• /couple – Pick today’s random pair.  
-• /love Alice Bob – % compatibility.  
-• /cute, /hot, /sad, /sexy, /horny … – Self-rating fun.  
-• /kiss, /hug, /slap – Role-play replies.  
-• /sleep – Bot tells you good night.  
-• /wish Happy birthday! – Sweet wish card generator.  
+- /couple, /love, /wish, /cute, /bored - fun social commands.
+- /cutie, /horny, /hot, /sexy, /sad, /lesbian, /chill, /kill - percentage-style fun ratings.
+- Reaction GIFs: /hug, /kiss, /slap, /punch, /bite, /pat, /cuddle, /tickle, /poke, /wave, /highfive, /dance, /smile, /blush, /smug, /wink, /stare, /shrug, /happy, /baka, /feed, /nom, /yawn, /facepalm, /yeet, /think, /shoot, /peck, /nod, /nope, /sleep, /lurk.
 """
 
-# ───────────────────────────────────────────────────────────────────────
 HELP_18 = """
-<b><u>ᴍᴀꜱꜱ ᴀᴄᴛɪᴏɴꜱ :</u></b>
-Hᴇᴀᴠʏ ᴍᴀɪɴᴛᴇɴᴀɴᴄᴇ ᴛᴏᴏʟs – <b>ᴜsᴇ ᴡɪᴛʜ ᴄᴀᴜᴛɪᴏɴ.</b>
+<b><u>Mass Actions</u></b>
+Use with care.
 
-• /deleteall ➠ ᴅᴇʟᴇᴛᴇꜱ ᴀʟʟ ᴍᴇꜱꜱᴀɢᴇꜱ ɪɴ ᴛʜᴇ ɢʀᴏᴜᴘ.
-• /kickall ➠ ᴋɪᴄᴋꜱ ᴀʟʟ ᴍᴇᴍʙᴇʀꜱ ɪɴ ᴛʜᴇ ɢʀᴏᴜᴘ.
-• /banall ➠ ʙᴀɴꜱ ᴀʟʟ ᴍᴇᴍʙᴇʀꜱ ɪɴ ᴛʜᴇ ɢʀᴏᴜᴘ.
-• /unbanall ➠ ᴜɴʙᴀɴꜱ ᴀʟʟ ᴍᴇᴍʙᴇʀꜱ ɪɴ ᴛʜᴇ ɢʀᴏᴜᴘ.
-• /muteall ➠ ᴍᴜᴛᴇꜱ ᴀʟʟ ᴍᴇᴍʙᴇʀꜱ ɪɴ ᴛʜᴇ ɢʀᴏᴜᴘ.
-• /unmuteall ➠ ᴜɴᴍᴜᴛᴇꜱ ᴀʟʟ ᴍᴇᴍʙᴇʀꜱ ɪɴ ᴛʜᴇ ɢʀᴏᴜᴘ.
-• /unpinall ➠ ᴜɴᴘɪɴꜱ ᴀʟʟ ᴘɪɴɴᴇᴅ ᴍᴇꜱꜱᴀɢᴇꜱ ɪɴ ᴛʜᴇ ɢʀᴏᴜᴘ. 
-• /purge or /spurge – Sᴍᴀʟʟᴇʀ sᴄᴀʟᴇ ᴅᴇʟᴇᴛɪᴏɴs.
+- /deleteall - purge all messages in the current group after confirmation.
+- /purge, /spurge - bulk delete from a replied message up to the current message.
+- /del - delete a replied message quickly.
 """
 
-# ───────────────────────────────────────────────────────────────────────
 HELP_19 = """
-<b><u>ᴘɪɴɢ & ꜱᴛᴀᴛꜱ :</u></b>
+<b><u>Ping / Stats</u></b>
 
-• /start : ꜱᴛᴀʀᴛꜱ ᴛʜᴇ ᴍᴜꜱɪᴄ ʙᴏᴛ.
-• /help : ɢᴇᴛ ʜᴇʟᴘ ᴍᴇɴᴜ ᴡɪᴛʜ ᴇxᴘʟᴀɴᴀᴛɪᴏɴ ᴏꜰ ᴄᴏᴍᴍᴀɴᴅꜱ.
-• /ping : ꜱʜᴏᴡꜱ ᴛʜᴇ ᴘɪɴɢ ᴀɴᴅ ꜱʏꜱᴛᴇᴍ ꜱᴛᴀᴛꜱ ᴏꜰ ᴛʜᴇ ʙᴏᴛ.
-• /stats : ꜱʜᴏᴡꜱ ᴛʜᴇ ᴏᴠᴇʀᴀʟʟ ꜱᴛᴀᴛꜱ ᴏꜰ ᴛʜᴇ ʙᴏᴛ.
-
+- /start - start the bot in private.
+- /help - open the help menu.
+- /ping - show bot latency and runtime info.
+- /stats, /gstats - show bot statistics.
 """
 
-# ───────────────────────────────────────────────────────────────────────
 HELP_20 = """
-<b><u>ᴘʟᴀʏ :</u></b>
-<b>v :</b>ꜱᴛᴀɴᴅꜱ ꜰᴏʀ ᴠɪᴅᴇᴏ ᴘʟᴀʏ.
-<b>force :</b>ꜱᴛᴀɴᴅꜱ ꜰᴏʀ ꜰᴏʀᴄᴇ ᴘʟᴀʏ.
+<b><u>Play</u></b>
 
-• /play ᴏʀ • /vplay : ꜱᴛᴀʀᴛꜱ ꜱᴛʀᴇᴀᴍɪɴɢ ᴛʜᴇ ʀᴇǫᴜᴇꜱᴛᴇᴅ ᴛʀᴀᴄᴋ ᴏɴ ᴠɪᴅᴇᴏ ᴄʜᴀᴛ.
-• /playforce ᴏʀ • /vplayforce : ꜱᴛᴏᴘꜱ ᴛʜᴇ ᴏɴɢᴏɪɴɢ ꜱᴛʀᴇᴀᴍ ᴀɴᴅ ꜱᴛᴀʀᴛꜱ ꜱᴛʀᴇᴀᴍɪɴɢ ᴛʜᴇ ʀᴇǫᴜᴇꜱᴛᴇᴅ ᴛʀᴀᴄᴋ.
-
+- /play, /vplay - play audio or video by query, URL, or replied media.
+- /playforce, /vplayforce - force-start a new track immediately.
+- /settings, /setting - open group playback settings.
+- /playmode, /mode - switch direct/inline play mode.
 """
 
-# ───────────────────────────────────────────────────────────────────────
 HELP_21 = """
-<b><u>ʀᴇᴘᴏ ɪɴғᴏ :</u></b>
+<b><u>Repo Info</u></b>
 
-• /allrepo ➠ ᴇɴᴛᴇʀ ᴛʜᴇ ɢɪᴛʜᴜʙ ᴜꜱᴇʀɴᴀᴍᴇ ᴀꜰᴛᴇʀ ᴛʜᴇ ᴄᴏᴍᴍᴀɴᴅ ᴛᴏ ɢᴇᴛ ᴀʟʟ ʀᴇᴘᴏꜱɪᴛᴏʀɪᴇꜱ ᴏꜰ ᴛʜᴀᴛ ᴀᴄᴄᴏᴜɴᴛ.
-• /pypi ➠ ᴇɴᴛᴇʀ ᴛʜᴇ ᴘʀᴏᴊᴇᴄᴛ ɴᴀᴍᴇ ᴀꜰᴛᴇʀ ᴛʜᴇ ᴄᴏᴍᴍᴀɴᴅ ᴛᴏ ɢᴇᴛ ꜱᴛᴀᴛꜱ ᴏꜰ ᴛʜᴀᴛ ᴘʀᴏᴊᴇᴄᴛ [ᴘʀᴏᴊᴇᴄᴛ = ɢɪᴛʜᴜʙ ʀᴇᴘᴏꜱɪᴛᴏʀɪᴇꜱ].
-• /downloadrepo ➠ ᴇɴᴛᴇʀ ᴛʜᴇ ʀᴇᴘᴏꜱɪᴛᴏʀʏ ʟɪɴᴋ ᴀꜰᴛᴇʀ ᴛʜᴇ ᴄᴏᴍᴍᴀɴᴅ ᴛᴏ ᴅᴏᴡɴʟᴏᴀᴅ ᴛʜᴇ ʀᴇᴘᴏꜱɪᴛᴏʀʏ.
-
+- /repo - open repo/support buttons.
+- /pypi [package] - fetch package info from PyPI.
+- /downloadrepo [github url] - download a repository as a zip.
 """
 
-# ───────────────────────────────────────────────────────────────────────
 HELP_22 = """
-<b><u>ꜱᴇᴀʀᴄʜ :</u></b>
+<b><u>Search</u></b>
 
-• /anime <ǫᴜᴇʀʏ> : ꜱᴇᴀʀᴄʜ ᴍʏᴀɴɪᴍᴇʟɪꜱᴛ ꜰᴏʀ ᴛʜᴇ ɢɪᴠᴇɴ ǫᴜᴇʀʏ.
-• /mongochk : ᴄʜᴇᴄᴋ ᴛʜᴇ ꜱᴛᴀᴛᴜꜱ ᴏꜰ ʏᴏᴜʀ ᴍᴏɴɢᴏᴅʙ ɪɴꜱᴛᴀɴᴄᴇ [ᴇɴᴛᴇʀ ᴛʜᴇ ᴍᴏɴɢᴏᴅʙ ʟɪɴᴋ ᴀꜰᴛᴇʀ ᴛʜᴇ ᴄᴏᴍᴍᴀɴᴅ].
-• /ip : ᴇɴᴛᴇʀ ᴛʜᴇ ɪᴘ ᴀᴅᴅʀᴇꜱꜱ ᴀꜰᴛᴇʀ ᴛʜᴇ ᴄᴏᴍᴍᴀɴᴅ ᴛᴏ ɢᴇᴛ ɪɴꜰᴏ ᴀʙᴏᴜᴛ ᴛʜᴀᴛ ɪᴘ.
-• /domain : ᴇɴᴛᴇʀ ᴛʜᴇ ᴅᴏᴍᴀɪɴ ɴᴀᴍᴇ ᴀꜰᴛᴇʀ ᴛʜᴇ ᴄᴏᴍᴍᴀɴᴅ ᴛᴏ ꜰɪɴᴅ ɪɴꜰᴏ ᴀʙᴏᴜᴛ ᴛʜᴇ ᴅᴏᴍᴀɪɴ.
-• /weather : ᴇɴᴛᴇʀ ᴛʜᴇ ʟᴏᴄᴀᴛɪᴏɴ ᴀꜰᴛᴇʀ ᴛʜᴇ ᴄᴏᴍᴍᴀɴᴅ ᴛᴏ ɢᴇᴛ ᴛʜᴇ ᴡᴇᴀᴛʜᴇʀ ᴏꜰ ᴛʜᴀᴛ ʟᴏᴄᴀᴛɪᴏɴ.
-
+- /anime [query] - search anime details.
+- /movie [query] - fetch movie information.
+- /domain [name] - inspect a domain.
+- /ip [address] - inspect IP information.
+- /mongochk [mongo url] - check a MongoDB URI.
+- /weather [location] - show weather for a place.
+- /population [country code] - fetch population info for a country.
 """
 
-# ───────────────────────────────────────────────────────────────────────
 HELP_23 = """
-<b><u>ꜱᴇᴇᴋ :</u></b>
-Jump inside the currently playing media.
+<b><u>Seek</u></b>
 
-• /seek [ᴅᴜʀᴀᴛɪᴏɴ ɪɴ ꜱᴇᴄᴏɴᴅꜱ] : ꜱᴇᴇᴋ ᴛʜᴇ ꜱᴛʀᴇᴀᴍ ᴛᴏ ᴛʜᴇ ɢɪᴠᴇɴ ᴅᴜʀᴀᴛɪᴏɴ.
-• /seekback [ᴅᴜʀᴀᴛɪᴏɴ ɪɴ ꜱᴇᴄᴏɴᴅꜱ] : ʙᴀᴄᴋᴡᴀʀᴅ ꜱᴇᴇᴋ ᴛʜᴇ ꜱᴛʀᴇᴀᴍ ʙʏ ᴛʜᴇ ɢɪᴠᴇɴ ᴅᴜʀᴀᴛɪᴏɴ.
-
+- /seek, /cseek [seconds] - jump forward in the current stream.
+- /seekback, /cseekback [seconds] - jump backward in the current stream.
 """
 
-# ───────────────────────────────────────────────────────────────────────
 HELP_24 = """
-<b><u>ꜱʜᴜꜰꜰʟᴇ :</u></b>
-Randomise the queue.
+<b><u>Shuffle</u></b>
 
-• /shuffle : ꜱʜᴜꜰꜰʟᴇꜱ ᴛʜᴇ ǫᴜᴇᴜᴇ.
-• /queue : ꜱʜᴏᴡꜱ ᴛʜᴇ ꜱʜᴜꜰꜰʟᴇᴅ ǫᴜᴇᴜᴇ.
+- /shuffle, /cshuffle - shuffle the queue.
+- /queue, /cqueue - inspect the queue after shuffling.
 """
 
-# ───────────────────────────────────────────────────────────────────────
 HELP_25 = """
-<b><u>ꜱᴏɴɢ / ᴅᴏᴡɴʟᴏᴀᴅ :</u></b>
+<b><u>Song / Download</u></b>
 
-• /song [ꜱᴏɴɢ ɴᴀᴍᴇ/ʏᴏᴜᴛᴜʙᴇ ᴜʀʟ] : ᴅᴏᴡɴʟᴏᴀᴅ ᴀɴʏ ᴛʀᴀᴄᴋ ꜰʀᴏᴍ ʏᴏᴜᴛᴜʙᴇ ɪɴ ᴍᴘ𝟥 ᴏʀ ᴍᴘ𝟦 ꜰᴏʀᴍᴀᴛꜱ.
-• /insta : ᴛᴏ ᴅᴏᴡɴʟᴏᴀᴅ ᴀɴ ɪɴꜱᴛᴀɢʀᴀᴍ ʀᴇᴇʟ.
-• /movie : ᴛᴏ ɢᴇᴛ ɪɴꜰᴏʀᴍᴀᴛɪᴏɴ ᴀʙᴏᴜᴛ ᴀ ᴍᴏᴠɪᴇ.
-• /remove [ᴠɪᴅᴇᴏ ᴏʀ ᴀᴜᴅɪᴏ] : ʀᴇᴘʟʏ ᴛᴏ ᴀ ᴠɪᴅᴇᴏ ꜰɪʟᴇ ᴛᴏ ʀᴇᴍᴏᴠᴇ ᴀᴜᴅɪᴏ ᴏʀ ᴠɪᴅᴇᴏ ꜰʀᴏᴍ ɪᴛ.
-
+- /song [title/url] - download a song from YouTube.
+- /insta, /ig [instagram url] - download Instagram media.
+- /remove [audio|video] - remove audio or video from a replied media file.
 """
 
-# ───────────────────────────────────────────────────────────────────────
 HELP_26 = """
-<b><u>ꜱᴘᴇᴇᴅ :</u></b>
-Alter playback speed.
+<b><u>Speed</u></b>
 
-• /speed 1.25 – 25 % faster.  
-• /playback 0.5 – Half speed.  
-• /cspeed / /cplayback – Same but for linked channel.
+- /speed, /slow, /playback [value] - change playback speed.
+- /cspeed, /cslow, /cplayback [value] - same controls for linked-channel playback.
 """
 
-# ───────────────────────────────────────────────────────────────────────
 HELP_27 = """
-<b><u>ꜱᴛɪᴄᴋᴇʀ :</u></b>
+<b><u>Sticker</u></b>
 
-• /mmf ➠ ᴛᴏ ᴍᴇᴍɪꜰʏ ᴛʜᴇ ɪᴍᴀɢᴇ ᴏʀ ꜱᴛɪᴄᴋᴇʀ.
-• /tiny ➠ ʀᴇᴘʟʏ ᴛᴏ ᴀ ꜱᴛɪᴄᴋᴇʀ ᴛʜᴀᴛ ʏᴏᴜ ᴡᴀɴᴛ ᴛᴏ ᴍᴀᴋᴇ ᴛɪɴʏ.
-• /kang ➠ ᴛʜɪꜱ ᴄᴏᴍᴍᴀɴᴅ ɪꜱ ᴜꜱᴇᴅ ᴛᴏ ᴋᴀɴɢ ɪᴍᴀɢᴇꜱ ɪɴᴛᴏ ꜱᴛɪᴄᴋᴇʀꜱ.
-• /packkang ➠ ᴄʀᴇᴀᴛᴇꜱ ᴀ ᴘᴀᴄᴋ ᴏꜰ ꜱᴛɪᴄᴋᴇʀꜱ ꜰʀᴏᴍ ᴀɴᴏᴛʜᴇʀ ᴘᴀᴄᴋ.
-• /stid ➠ ɢᴇᴛꜱ ᴛʜᴇ ꜱᴛɪᴄᴋᴇʀ ɪᴅ ᴏꜰ ᴀ ꜱᴛɪᴄᴋᴇʀ.
-• /st ➠ ᴛᴏ ꜰɪɴᴅ ᴛʜᴇ ꜱᴛɪᴄᴋᴇʀ, ᴘʟᴇᴀꜱᴇ ᴘʀᴏᴠɪᴅᴇ ᴛʜᴇ ꜱᴛɪᴄᴋᴇʀ ɪᴅ ᴀꜰᴛᴇʀ ᴛʜᴇ ᴄᴏᴍᴍᴀɴᴅ.
-• /meme ➠ ᴜꜱᴇ ᴛʜɪꜱ ᴄᴏᴍᴍᴀɴᴅ ᴛᴏ ɢᴇɴᴇʀᴀᴛᴇ ᴍᴇᴍᴇꜱ.
-• /stdl ➠ ᴛᴏ ᴅᴏᴡɴʟᴏᴀᴅ ᴛʜᴇ sᴛɪᴄᴋᴇʀ.
+- /mmf - turn replied media into a meme-style sticker.
+- /tiny - shrink a replied sticker.
+- /kang - steal a replied sticker/image into your pack.
+- /packkang - clone a full sticker pack item by item.
+- /stickerid, /stid - show sticker IDs for a replied sticker.
+- /st - send a sticker by its file ID.
+- /stdl - download a replied sticker.
+- /meme - generate a meme image.
 """
 
-# ───────────────────────────────────────────────────────────────────────
 HELP_28 = """
-<b><u>ᴛᴀɢ-ᴀʟʟ :</u></b>
-Mention everyone – responsibly!
+<b><u>Tag-All</u></b>
 
-• /utag ᴏʀ /mention ᴏʀ /all ➠ ᴇɴᴛᴇʀ ᴛʜᴇ ᴛᴇxᴛ ᴀꜰᴛᴇʀ ᴛʜᴇ ᴄᴏᴍᴍᴀɴᴅ ᴏʀ ʀᴇᴘʟʏ ᴛᴏ ᴀ ᴛᴇxᴛ ᴛᴏ ᴍᴇɴᴛɪᴏɴ ᴀʟʟ.
-• /cancel ᴏʀ /ustop ➠ ᴛᴏ ᴄᴀɴᴄᴇʟ ᴍᴇɴᴛɪᴏɴɪɴɢ.
-• /tagall ➠ ꜰᴏʀ ʀᴀɴᴅᴏᴍʟʏ ꜰᴜɴɴʏ ᴛᴀɢꜱ 😁.
-• /tagoff ᴏʀ /ᴛᴀɢꜱᴛᴏᴘ ➠ ꜱᴛᴏᴘ ᴍᴇɴᴛɪᴏɴɪɴɢ ꜰᴜɴɴʏ ᴛᴀɢꜱ.
-• /gmtag ➠ ꜰᴏʀ ᴍᴏʀɴɪɴɢ ᴡɪꜱʜᴇꜱ 🥰.
-• /gmstop ➠ ꜱᴛᴏᴘ ᴍᴏʀɴɪɴɢ ᴡɪꜱʜᴇꜱ.
-• /gntag ➠ ꜰᴏʀ ɴɪɢʜᴛ ᴡɪꜱʜᴇꜱ 😴.
-• /gnstop ➠ ꜱᴛᴏᴘ ɴɪɢʜᴛ ᴡɪꜱʜᴇꜱ 😴.
-• /hitag ➠ ᴛᴀɢ ᴍᴇᴍʙᴇʀꜱ ᴡɪᴛʜ ʜɪɴᴅɪ ǫᴜᴏᴛᴇꜱ.
-• /histop ➠ ꜱᴛᴏᴘ ʜɪɴᴅɪ ǫᴜᴏᴛᴇꜱ.
-• /lifetag ➠ ᴛᴀɢ ᴍᴇᴍʙᴇʀꜱ ᴡɪᴛʜ ᴇɴɢʟɪꜱʜ ǫᴜᴏᴛᴇꜱ.
-• /lifestop ➠ ꜱᴛᴏᴘ ᴇɴɢʟɪꜱʜ ǫᴜᴏᴛᴇꜱ.
-• /shayari ➠ ᴛᴀɢ ᴀʟʟ ᴍᴇᴍʙᴇʀꜱ ᴡɪᴛʜ ꜱʜᴀʏᴀʀɪ 😜.
-• /shayarioff ➠ ꜱᴛᴏᴘ ᴍᴇɴᴛɪᴏɴɪɴɢ ꜱʜᴀʏᴀʀɪ.
+- /utag, /all, /mention [text] - mention everyone with custom text or a replied message.
+- /cancel, /ustop - stop utag mention spam.
+- /tagall - random funny tag-all mode.
+- /tagoff, /tagstop - stop random tag-all mode.
+- /gmtag, /gmstop - morning wish tag mode and stop.
+- /gntag, /gnstop - night wish tag mode and stop.
+- /hitag, /histop - Hindi quote tag mode and stop.
+- /lifetag, /lifestop - English quote tag mode and stop.
+- /shayari, /shayarioff - shayari tag mode and stop.
 """
 
-# ───────────────────────────────────────────────────────────────────────
 HELP_29 = """
-<b><u>ᴛᴇxᴛ ᴇᴅɪᴛɪɴɢ :</u></b>
+<b><u>Text Editing</u></b>
 
-ᴛʜᴇꜱᴇ ᴀʀᴇ ᴛʜᴇ ᴄᴏᴍᴍᴀɴᴅꜱ ꜰᴏʀ ᴛᴇxᴛ ᴇᴅɪᴛɪɴɢ ᴏʀ ᴅᴇꜱɪɢɴɪɴɢ:
-
-• /font ᴏʀ /fonts ➠ ᴇɴᴛᴇʀ ᴛʜᴇ ᴛᴇxᴛ ᴀꜰᴛᴇʀ ᴛʜᴇ ᴄᴏᴍᴍᴀɴᴅ ᴛᴏ ɢᴇɴᴇʀᴀᴛᴇ ꜰᴏɴᴛ ᴇꜰꜰᴇᴄᴛꜱ.
-• /figlet ➠ ᴇɴᴛᴇʀ ᴛʜᴇ ᴛᴇxᴛ ᴀꜰᴛᴇʀ ᴛʜᴇ ᴄᴏᴍᴍᴀɴᴅ ᴛᴏ ɢᴇɴᴇʀᴀᴛᴇ ᴀ ꜰɪɢʟᴇᴛ.
-• /code ➠ ᴇɴᴛᴇʀ ᴛʜᴇ ᴛᴇxᴛ ᴀꜰᴛᴇʀ ᴛʜᴇ ᴄᴏᴍᴍᴀɴᴅ ᴛᴏ ꜰᴏʀᴍᴀᴛ ɪᴛ ᴀꜱ ᴄᴏᴅᴇ.
-• /genpw ➠ ᴛᴏ ɢᴇɴᴇʀᴀᴛᴇ ᴀ ꜱᴛʀᴏɴɢ ᴘᴀꜱꜱᴡᴏʀᴅ.
-• /write ➠ ᴇɴᴛᴇʀ ᴛʜᴇ ᴛᴇxᴛ ᴀꜰᴛᴇʀ ᴛʜᴇ ᴄᴏᴍᴍᴀɴᴅ ᴛᴏ ᴡʀɪᴛᴇ ɪɴ ᴀ ɴᴏᴛᴇʙᴏᴏᴋ ꜱᴛʏʟᴇ.
-• /qr ➠ ᴇɴᴛᴇʀ ᴛʜᴇ ᴛᴇxᴛ ᴀꜰᴛᴇʀ ᴛʜᴇ ᴄᴏᴍᴍᴀɴᴅ ᴛᴏ ɢᴇɴᴇʀᴀᴛᴇ ᴀ ǫʀ ᴄᴏᴅᴇ ᴏꜰ ᴛʜᴇ ᴛᴇxᴛ.
-
-<b><u>Qᴜᴏᴛᴇ Mᴏᴅᴜʟᴇ:</b></u>
-• /q ➠ ʀᴇᴘʟʏ ᴛᴏ ᴀ ᴍᴇꜱꜱᴀɢᴇ ᴛᴏ ᴄʀᴇᴀᴛᴇ ᴀ ǫᴜᴏᴛᴇ ꜰʀᴏᴍ ɪᴛ.
-• /q r ➠ ʀᴇᴘʟʏ ᴛᴏ ᴀ ᴍᴇꜱꜱᴀɢᴇ ᴛᴏ ᴄʀᴇᴀᴛᴇ ᴀ ǫᴜᴏᴛᴇ ꜰʀᴏᴍ ᴛʜᴇ ᴍᴇꜱꜱᴀɢᴇ ᴀɴᴅ ɪᴛꜱ ʀᴇᴘʟɪᴇᴅ ᴍᴇꜱꜱᴀɢᴇ.
-• /q <count> ➠ ʀᴇᴘʟʏ ᴛᴏ ᴀ ᴍᴇꜱꜱᴀɢᴇ ᴡɪᴛʜ ᴀ ɴᴜᴍʙᴇʀ ᴛᴏ ǫᴜᴏᴛᴇ ᴛʜᴀᴛ ᴍᴇꜱꜱᴀɢᴇ ᴀɴᴅ ᴛʜᴇ ɴᴇxᴛ ᴍᴇꜱꜱᴀɢᴇꜱ ᴜᴘ ᴛᴏ 10.
-• /q <count> r ➠ ʀᴇᴘʟʏ ᴛᴏ ᴀ ᴍᴇꜱꜱᴀɢᴇ ᴡɪᴛʜ ᴀ ɴᴜᴍʙᴇʀ ᴀɴᴅ 'r' ᴛᴏ ǫᴜᴏᴛᴇ ᴛʜᴀᴛ ᴍᴇꜱꜱᴀɢᴇ, ɪᴛꜱ ʀᴇᴘʟɪᴇᴅ ᴍᴇꜱꜱᴀɢᴇ, ᴀɴᴅ ᴛʜᴇ ɴᴇxᴛ ᴍᴇꜱꜱᴀɢᴇꜱ ᴜᴘ ᴛᴏ 10.
-
+- /font, /fonts - stylize text with font buttons.
+- /figlet - generate figlet-style text.
+- /encode, /decode - convert text to and from hex.
+- /genpassword, /genpw - generate a password.
+- /write - render text in notebook style.
+- /day - convert a date to its weekday.
+- /qr - generate a QR code.
+- /q - create a quote sticker from replied messages.
 """
-# ───────────────────────────────────────────────────────────────────────
+
+HELP_30 = """
+<b><u>Gen Vid</u></b>
+
+- /genvid [prompt] - generate a short AI video from text.
+- Reply to an image with /genvid [motion prompt] - animate that image.
+- The bot automatically retries across the configured video backends.
+"""
+
+HELP_31 = """
+<b><u>Voice</u></b>
+
+- /vcinfo, /vcmembers - show current voice chat participants.
+- /activevc, /activevoice, /vc - list active voice chats.
+- /activev, /activevideo, /avc - list active video chats.
+- /ac, /av - show active voice/video chat counts.
+- /voices [text] - guided TTS voice picker.
+- /tts [voice] [text] - direct text-to-speech.
+- /voiceall - export the full voice model list.
+- /autoend [enable|disable] - auto-leave when the voice chat is empty.
+- /botschk - owner checker for monitored bot accounts.
+"""
+
+HELP_32 = """
+<b><u>Assistant</u></b>
+
+- /assistantjoin, /userbotjoin - invite the assistant account to the chat.
+- /userbotleave - remove the assistant from the current chat.
+- /link, /invitelink [group id] - export invite/details for another group.
+- /leavegroup - make the bot leave the current group.
+"""
+
+HELP_33 = """
+<b><u>Sudo / Owner</u></b>
+
+- /sudolist, /listsudo, /sudoers - show current sudo users.
+- /addsudo [reply/@user/id] - add a sudo user.
+- /delsudo, /rmsudo [reply/@user/id] - remove a sudo user.
+- /delallsudo - remove every sudo user except the owner.
+- /post - copy a replied message to the configured dump/log chat.
+- /leaveall - dev-only command to make the assistant leave all chats.
+"""
