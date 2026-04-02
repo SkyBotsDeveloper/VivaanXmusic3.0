@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import concurrent.futures
+import os
 import re
 import tempfile
+import time
 from dataclasses import dataclass
 
 import httpx
@@ -53,6 +56,13 @@ class ChatResult:
     content: str
 
 
+@dataclass(slots=True)
+class VideoResult:
+    provider: str
+    file_path: str
+    used_reference_image: bool
+
+
 def _build_data_uri(mime_type: str, image_bytes: bytes) -> str:
     encoded = base64.b64encode(image_bytes).decode("utf-8")
     return f"data:{mime_type};base64,{encoded}"
@@ -100,6 +110,156 @@ def _write_temp_image(image_bytes: bytes, mime_type: str) -> str:
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as handle:
         handle.write(image_bytes)
         return handle.name
+
+
+def _remove_file(path: str | None):
+    if path and os.path.exists(path):
+        try:
+            os.remove(path)
+        except Exception:
+            pass
+
+
+def _unwrap_gradio_media(payload):
+    current = payload
+    for _ in range(4):
+        if isinstance(current, tuple) and current:
+            current = current[0]
+            continue
+        if isinstance(current, dict) and "value" in current:
+            current = current.get("value")
+            continue
+        break
+    return current
+
+
+def _extract_video_path(payload) -> str | None:
+    current = _unwrap_gradio_media(payload)
+    if isinstance(current, dict):
+        video = current.get("video")
+        if isinstance(video, dict):
+            video = video.get("path") or video.get("url")
+        if isinstance(video, str) and video:
+            return video
+        path = current.get("path")
+        if isinstance(path, str) and path:
+            return path
+    if isinstance(current, str) and current:
+        return current
+    return None
+
+
+async def _ensure_local_video(path_or_url: str) -> str:
+    if os.path.exists(path_or_url):
+        return path_or_url
+    if not re.match(r"^https?://", path_or_url, flags=re.IGNORECASE):
+        raise FreeAIError("Generated video file was not available locally.")
+
+    async with httpx.AsyncClient(
+        timeout=HTTP_TIMEOUT,
+        headers=HTTP_HEADERS,
+        follow_redirects=True,
+        trust_env=False,
+    ) as client:
+        response = await client.get(path_or_url)
+        if response.status_code != 200:
+            raise FreeAIError("Generated video could not be downloaded.")
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as handle:
+            handle.write(response.content)
+            return handle.name
+
+
+def _run_gradio_job(client: GradioClient, timeout_seconds: int, *args, api_name: str):
+    job = client.submit(*args, api_name=api_name)
+    try:
+        return job.result(timeout=timeout_seconds)
+    except concurrent.futures.TimeoutError as exc:
+        try:
+            job.cancel()
+        except Exception:
+            pass
+        raise FreeAIError("Provider timed out.") from exc
+
+
+def _run_multimodalart_video(
+    prompt: str,
+    reference_image_path: str,
+    timeout_seconds: int,
+) -> str:
+    client = GradioClient("multimodalart/wan2-1-fast", verbose=False)
+    result = _run_gradio_job(
+        client,
+        timeout_seconds,
+        handle_file(reference_image_path),
+        prompt,
+        512,
+        512,
+        "low quality, blur, watermark, text, duplicate frames",
+        2,
+        1.0,
+        4,
+        42,
+        True,
+        api_name="/generate_video",
+    )
+    video_path = _extract_video_path(result)
+    if not video_path:
+        raise FreeAIError("Multimodalart provider returned no video.")
+    return video_path
+
+
+def _run_openking_video(
+    prompt: str,
+    reference_image_path: str | None,
+    timeout_seconds: int,
+) -> str:
+    client = GradioClient("OpenKing/wan2-video-generation", verbose=False)
+    image = handle_file(reference_image_path) if reference_image_path else None
+    result = _run_gradio_job(
+        client,
+        timeout_seconds,
+        prompt,
+        image,
+        512,
+        512,
+        25,
+        20,
+        5,
+        -1,
+        api_name="/generate_video",
+    )
+    video_path = _extract_video_path(result)
+    if video_path:
+        return video_path
+
+    status_text = ""
+    if isinstance(result, tuple) and len(result) > 1:
+        status_text = str(result[1] or "").strip()
+    raise FreeAIError(status_text or "OpenKing provider returned no video.")
+
+
+def _run_wan_async_video(prompt: str) -> str:
+    client = GradioClient("Wan-AI/Wan2.1", verbose=False)
+    client.predict(prompt, "960*960", True, -1, api_name="/t2v_generation_async")
+
+    for _ in range(12):
+        status = client.predict(api_name="/status_refresh")
+        video_path = _extract_video_path(status)
+        if video_path:
+            return video_path
+
+        estimated_wait = None
+        if isinstance(status, tuple) and len(status) > 2:
+            try:
+                estimated_wait = float(status[2])
+            except (TypeError, ValueError):
+                estimated_wait = None
+
+        if estimated_wait and estimated_wait > 240:
+            raise FreeAIError(f"Wan queue is too long ({int(estimated_wait)}s).")
+        time.sleep(8)
+
+    raise FreeAIError("Wan provider timed out.")
 
 
 async def _chat_request(
@@ -280,6 +440,80 @@ async def process_image_bytes(
         if not content_type.startswith("image/"):
             raise FreeAIError("Image processing service returned an unexpected payload.")
         return response.content
+
+
+async def generate_video(
+    prompt: str,
+    *,
+    image_bytes: bytes | None = None,
+    mime_type: str = "image/jpeg",
+    progress_callback=None,
+) -> VideoResult:
+    text_prompt = (prompt or "").strip()
+    if not text_prompt and not image_bytes:
+        raise FreeAIError("Please provide a prompt for video generation.")
+
+    if not text_prompt:
+        text_prompt = "make this image come alive, smooth cinematic motion"
+
+    reference_image_path = None
+    used_reference_image = False
+    failures: list[str] = []
+
+    try:
+        if image_bytes:
+            reference_image_path = _write_temp_image(image_bytes, mime_type)
+            used_reference_image = True
+        else:
+            try:
+                reference_image_path = _write_temp_image(
+                    await generate_image(text_prompt),
+                    "image/png",
+                )
+                used_reference_image = True
+            except Exception as exc:
+                failures.append(f"Reference image: {exc}")
+
+        providers = [
+            ("Multimodalart / Wan2.1 Fast", 180, True, _run_multimodalart_video),
+            ("OpenKing / Wan2 Video", 210, False, _run_openking_video),
+            ("Wan-AI / Wan2.1", 120, False, _run_wan_async_video),
+        ]
+
+        for provider_name, timeout_seconds, needs_reference, runner in providers:
+            if needs_reference and not reference_image_path:
+                failures.append(f"{provider_name}: no reference image available")
+                continue
+
+            if progress_callback:
+                await progress_callback(provider_name)
+
+            try:
+                if runner is _run_wan_async_video:
+                    output_path = await asyncio.to_thread(runner, text_prompt)
+                else:
+                    output_path = await asyncio.to_thread(
+                        runner,
+                        text_prompt,
+                        reference_image_path,
+                        timeout_seconds,
+                    )
+                local_path = await _ensure_local_video(output_path)
+                return VideoResult(
+                    provider=provider_name,
+                    file_path=local_path,
+                    used_reference_image=used_reference_image,
+                )
+            except Exception as exc:
+                failures.append(f"{provider_name}: {exc}")
+
+        details = "\n".join(failures[:5])
+        raise FreeAIError(
+            "Video generation service is temporarily unavailable.\n"
+            f"{details}"
+        )
+    finally:
+        _remove_file(reference_image_path)
 
 
 def vision_unavailable_message() -> str:

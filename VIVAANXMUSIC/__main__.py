@@ -24,6 +24,7 @@ BOT_COMMANDS = [
     BotCommand("gpt", "Ask the AI assistant"),
     BotCommand("geminivision", "Analyze a replied image"),
     BotCommand("getdraw", "Generate an AI image"),
+    BotCommand("genvid", "Generate a short AI video"),
     BotCommand("upscale", "Enhance a replied image"),
     BotCommand("rmbg", "Remove image background"),
     BotCommand("weather", "Get weather info"),

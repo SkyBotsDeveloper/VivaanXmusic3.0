@@ -32,8 +32,20 @@ AI_HELP_TEXT = """
 • /geminivision - analyze a replied image.
 • /mistral - alternate AI reply command.
 • /getdraw - generate an AI image from text.
+• /genvid - generate a short AI video with fallback providers.
 • /upscale - enhance a replied image.
 • /rmbg - remove image background.
+"""
+
+VIDEO_HELP_TEXT = """
+<b><u>Gen Vid:</u></b>
+
+<b><u>Short AI video generation.</u></b>
+
+• /genvid [prompt] - generate a short AI video from text.
+• Reply to an image with /genvid [motion prompt] - animate that image.
+• The bot tries multiple public free providers and automatically falls back if one fails.
+• These providers are public spaces, so speed and availability can vary.
 """
 
 # ────────────────────────────────────────────────  /help entrypoints ──
@@ -96,6 +108,14 @@ async def helper_cb(client: Client, CallbackQuery: types.CallbackQuery, _):
     if number == 11:
         await CallbackQuery.edit_message_text(
             AI_HELP_TEXT,
+            reply_markup=help_back_markup(_, current_page),
+            disable_web_page_preview=True
+        )
+        return
+
+    if number == 30:
+        await CallbackQuery.edit_message_text(
+            VIDEO_HELP_TEXT,
             reply_markup=help_back_markup(_, current_page),
             disable_web_page_preview=True
         )

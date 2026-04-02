@@ -3,7 +3,7 @@ from VIVAANXMUSIC import app
 from VIVAANXMUSIC.button_styles import danger_button, primary_button
 
 
-TOTAL_SECTIONS = 29
+TOTAL_SECTIONS = 30
 
 
 def generate_help_buttons(_, start: int, end: int, current_page: int):
