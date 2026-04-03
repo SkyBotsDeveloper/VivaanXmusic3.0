@@ -14,14 +14,17 @@ from dataclasses import dataclass
 import httpx
 from gradio_client import Client as GradioClient, handle_file
 
-from config import (
-    GENVID_USE_PUBLIC_FALLBACKS,
-    HF_TOKEN,
-    HF_TOKENS,
-    OCR_SPACE_API_KEY,
-    REPLICATE_API_TOKEN,
-    REPLICATE_API_TOKENS,
+import config as runtime_config
+
+
+GENVID_USE_PUBLIC_FALLBACKS = getattr(
+    runtime_config, "GENVID_USE_PUBLIC_FALLBACKS", "0"
 )
+HF_TOKEN = getattr(runtime_config, "HF_TOKEN", None)
+HF_TOKENS = getattr(runtime_config, "HF_TOKENS", "")
+OCR_SPACE_API_KEY = getattr(runtime_config, "OCR_SPACE_API_KEY", "helloworld")
+REPLICATE_API_TOKEN = getattr(runtime_config, "REPLICATE_API_TOKEN", None)
+REPLICATE_API_TOKENS = getattr(runtime_config, "REPLICATE_API_TOKENS", "")
 
 
 HTTP_TIMEOUT = httpx.Timeout(45.0, connect=10.0)

@@ -18,6 +18,7 @@ from VIVAANXMUSIC.misc import db
 from VIVAANXMUSIC.utils.database import (
     add_active_chat,
     add_active_video_chat,
+    get_autoplay,
     get_lang,
     get_loop,
     group_assistant,
@@ -289,6 +290,57 @@ class Call:
             if users == 1:
                 autoend[chat_id] = datetime.now() + timedelta(minutes=1)
 
+    async def _enqueue_autoplay_track(self, chat_id: int, finished_track: dict) -> bool:
+        if not finished_track or not await get_autoplay(chat_id):
+            return False
+
+        queued_file = str(finished_track.get("file") or "")
+        if queued_file.startswith("live_") or queued_file == "index_url":
+            return False
+
+        videoid = str(finished_track.get("vidid") or "")
+        if not videoid or videoid in {"telegram", "soundcloud"}:
+            return False
+
+        seed_seconds = int(finished_track.get("seconds") or 0)
+        max_duration = None
+        if seed_seconds > 0:
+            max_duration = min(max(seed_seconds * 3, 240), 900)
+
+        try:
+            recommendation = await YouTube.autoplay(
+                videoid,
+                finished_track.get("title", ""),
+                max_duration=max_duration,
+            )
+        except Exception as err:
+            LOGGER(__name__).warning(
+                "Autoplay lookup failed for chat %s on %s: %s",
+                chat_id,
+                videoid,
+                err,
+            )
+            return False
+
+        if not recommendation:
+            return False
+
+        db.setdefault(chat_id, []).append(
+            {
+                "title": recommendation["title"].title(),
+                "dur": recommendation["duration_min"],
+                "streamtype": finished_track.get("streamtype", "audio"),
+                "by": "Autoplay",
+                "user_id": 0,
+                "chat_id": finished_track.get("chat_id", chat_id),
+                "file": f"vid_{recommendation['vidid']}",
+                "vidid": recommendation["vidid"],
+                "seconds": recommendation["duration_sec"],
+                "played": 0,
+            }
+        )
+        return True
+
 
     @capture_internal_err
     async def play(self, client, chat_id: int) -> None:
@@ -303,6 +355,9 @@ class Call:
                 await set_loop(chat_id, loop)
             await auto_clean(popped)
             if not check:
+                if await self._enqueue_autoplay_track(chat_id, popped):
+                    check = db.get(chat_id)
+                if not check:
                     await _clear_(chat_id)
                     if chat_id in self.active_calls:
                         try:

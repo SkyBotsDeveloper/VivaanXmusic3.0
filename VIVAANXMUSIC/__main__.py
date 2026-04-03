@@ -21,6 +21,7 @@ BOT_COMMANDS = [
     BotCommand("song", "Download a song"),
     BotCommand("queue", "Show current queue"),
     BotCommand("player", "Open player controls"),
+    BotCommand("autoplay", "Toggle similar-song autoplay"),
     BotCommand("gpt", "Ask the AI assistant"),
     BotCommand("geminivision", "Analyze a replied image"),
     BotCommand("getdraw", "Generate an AI image"),

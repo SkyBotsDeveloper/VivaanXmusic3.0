@@ -13,12 +13,16 @@ from pyrogram.types import Message
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from youtubesearchpython.future import VideosSearch
+try:
+    from youtubesearchpython.future.extras import Recommendations
+except ImportError:
+    Recommendations = None
 import base64
 from VIVAANXMUSIC import LOGGER
 from VIVAANXMUSIC.utils.database import is_on_off
 from VIVAANXMUSIC.utils.formatters import time_to_seconds
 from VIVAANXMUSIC.security import build_subprocess_env
-from config import YT_API_KEY, YTPROXY_URL as YTPROXY
+from config import DURATION_LIMIT, YT_API_KEY, YTPROXY_URL as YTPROXY
 
 logger = LOGGER(__name__)
 
@@ -104,6 +108,56 @@ class YouTubeAPI:
 
     def _has_disallowed_url_chars(self, link: str) -> bool:
         return any(char in link for char in [";", "&", "|", "$", "\n", "\r", "`"])
+
+    def _clean_autoplay_query(self, title: str) -> str:
+        if not title:
+            return ""
+        title = re.sub(r"\[[^\]]*\]|\([^\)]*\)", " ", title)
+        title = re.sub(
+            r"\b(official|video|audio|lyrics?|lyrical|fullscreen|4k|hd|hq|remix|status|song|songs|music|feat\.?|ft\.?|prod\.?|visualizer)\b",
+            " ",
+            title,
+            flags=re.IGNORECASE,
+        )
+        title = re.sub(r"\s+", " ", title).strip()
+        return title[:100]
+
+    def _duration_to_seconds(self, duration: str) -> int:
+        if not duration or str(duration) == "None":
+            return 0
+        try:
+            return int(time_to_seconds(duration))
+        except Exception:
+            return 0
+
+    def _format_autoplay_candidate(
+        self,
+        result: dict,
+        current_videoid: str,
+        max_duration: Union[int, None] = None,
+    ) -> Union[dict, None]:
+        videoid = result.get("id")
+        duration_min = result.get("duration")
+        if not videoid or videoid == current_videoid:
+            return None
+        duration_sec = self._duration_to_seconds(duration_min)
+        if not duration_sec or duration_sec > DURATION_LIMIT:
+            return None
+        if max_duration and duration_sec > max_duration:
+            return None
+        title = result.get("title")
+        thumbnails = result.get("thumbnails") or []
+        thumbnail = thumbnails[0]["url"].split("?")[0] if thumbnails else None
+        if not title or not thumbnail:
+            return None
+        return {
+            "title": title,
+            "duration_min": duration_min,
+            "duration_sec": duration_sec,
+            "thumb": thumbnail,
+            "vidid": videoid,
+            "link": result.get("link") or f"{self.base}{videoid}",
+        }
 
 
     async def exists(self, link: str, videoid: Union[bool, str] = None):
@@ -295,6 +349,66 @@ class YouTubeAPI:
             "thumb": thumbnail,
         }
         return track_details, vidid
+
+    async def autoplay(
+        self,
+        videoid: str,
+        title: str = "",
+        max_duration: Union[int, None] = None,
+    ) -> Union[dict, None]:
+        candidates = []
+
+        if videoid and Recommendations is not None:
+            try:
+                candidates = await Recommendations.get(videoid, timeout=5) or []
+            except Exception as err:
+                logger.warning("Autoplay recommendations failed for %s: %s", videoid, err)
+
+        if not candidates:
+            query = self._clean_autoplay_query(title)
+            if not query:
+                return None
+            try:
+                search = VideosSearch(query, limit=12)
+                candidates = (await search.next()).get("result", [])
+            except Exception as err:
+                logger.warning("Autoplay fallback search failed for %s: %s", query, err)
+                return None
+
+        for candidate in candidates:
+            formatted = self._format_autoplay_candidate(candidate, videoid, max_duration)
+            if formatted:
+                return formatted
+            candidate_id = candidate.get("id")
+            if not candidate_id or candidate_id == videoid:
+                continue
+            try:
+                (
+                    resolved_title,
+                    duration_min,
+                    duration_sec,
+                    thumbnail,
+                    resolved_videoid,
+                ) = await self.details(candidate_id, videoid=True)
+            except Exception:
+                continue
+            if (
+                not resolved_videoid
+                or resolved_videoid == videoid
+                or not duration_sec
+                or duration_sec > DURATION_LIMIT
+                or (max_duration and duration_sec > max_duration)
+            ):
+                continue
+            return {
+                "title": resolved_title,
+                "duration_min": duration_min,
+                "duration_sec": duration_sec,
+                "thumb": thumbnail,
+                "vidid": resolved_videoid,
+                "link": f"{self.base}{resolved_videoid}",
+            }
+        return None
 
     async def formats(self, link: str, videoid: Union[bool, str] = None):
         if videoid:

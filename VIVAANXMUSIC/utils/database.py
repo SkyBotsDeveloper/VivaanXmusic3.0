@@ -7,6 +7,7 @@ from VIVAANXMUSIC.core.mongo import mongodb
 authdb = mongodb.adminauth
 authuserdb = mongodb.authuser
 autoenddb = mongodb.autoend
+autoplaydb = mongodb.autoplay
 assdb = mongodb.assistants
 blacklist_chatdb = mongodb.blacklistChat
 blockeddb = mongodb.blockedusers
@@ -27,6 +28,7 @@ active = []
 activevideo = []
 assistantdict = {}
 autoend = {}
+autoplay = {}
 count = {}
 channelconnect = {}
 langm = {}
@@ -193,6 +195,27 @@ async def set_upvotes(chat_id: int, mode: int):
     count[chat_id] = mode
     await countdb.update_one(
         {"chat_id": chat_id}, {"$set": {"mode": mode}}, upsert=True
+    )
+
+
+async def get_autoplay(chat_id: int) -> bool:
+    mode = autoplay.get(chat_id)
+    if mode is None:
+        data = await autoplaydb.find_one({"chat_id": chat_id})
+        if not data:
+            autoplay[chat_id] = False
+            return False
+        mode = bool(data.get("mode"))
+        autoplay[chat_id] = mode
+        return mode
+    return bool(mode)
+
+
+async def set_autoplay(chat_id: int, mode: bool):
+    enabled = bool(mode)
+    autoplay[chat_id] = enabled
+    await autoplaydb.update_one(
+        {"chat_id": chat_id}, {"$set": {"mode": enabled}}, upsert=True
     )
 
 
