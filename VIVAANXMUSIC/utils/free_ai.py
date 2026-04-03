@@ -1447,7 +1447,7 @@ async def generate_image(prompt: str) -> bytes:
         "prompt": prompt,
         "image": 1,
         "dimensions": "1:1",
-        "safety": "false",
+        "safety": "true",
         "steps": 4,
     }
     async with httpx.AsyncClient(
@@ -1457,10 +1457,21 @@ async def generate_image(prompt: str) -> bytes:
         trust_env=False,
     ) as client:
         response = await client.get(IMAGE_GEN_URL, params=params)
-        payload = response.json()
-        images = payload.get("images") or []
+        try:
+            payload = response.json()
+        except Exception as exc:
+            raise FreeAIError("Image generation service returned an invalid response.") from exc
+
+        images = payload.get("images") or [] if isinstance(payload, dict) else []
         if response.status_code != 200 or not images:
-            raise FreeAIError("Image generation service did not return an image.")
+            detail = (
+                _extract_json_error(payload)
+                if isinstance(payload, dict)
+                else "Image generation service did not return an image."
+            )
+            if not detail or detail == "Unknown upstream error.":
+                detail = "Image generation service did not return an image."
+            raise FreeAIError(detail)
 
         image_response = await client.get(images[0])
         if image_response.status_code != 200:
