@@ -13,6 +13,7 @@ from dataclasses import dataclass
 
 import httpx
 from gradio_client import Client as GradioClient, handle_file
+from PIL import Image
 
 import config as runtime_config
 
@@ -46,6 +47,7 @@ HF_IMAGE_EDIT_FAST_SPACE = "Nichotin/Qwen-Image-Edit-2511-Fast-ZeroGPU"
 HF_IMAGE_EDIT_ALT_SPACE = "lenML/Qwen-Image-Edit-2511-Fast"
 HF_IMAGE_OBJECT_SPACE = "prithivMLmods/Qwen-Image-Edit-Object-Manipulator"
 HF_FACE_SWAP_SPACE = "V0pr0S/ComfyUI-Reactor-Fast-Face-Swap-CPU"
+HF_IMAGE_STYLE_SPACE = "prithivMLmods/Qwen-Image-Edit-2511-LoRAs-Fast"
 DEFAULT_VISION_PROMPT = "Describe this image."
 DETAILED_VISION_PROMPT = (
     "Describe this image clearly and helpfully. Mention the main subject, setting, "
@@ -55,6 +57,63 @@ DETAILED_VISION_PROMPT = (
 VISION_PROVIDER_TIMEOUT = 50
 OCR_VISIBLE_TEXT_LIMIT = 900
 CHAT_MODEL_CANDIDATES = ("gpt-4", "gpt-4o-mini")
+CHAT_ALIAS_PROFILES = {
+    "gpt": {
+        "display_name": "GPT",
+        "system_prompt": (
+            "You are GPT. Respond in a clear, balanced, capable assistant style. "
+            "If the user asks what model you are, say you are GPT."
+        ),
+    },
+    "chatgpt": {
+        "display_name": "ChatGPT",
+        "system_prompt": (
+            "You are ChatGPT. Respond helpfully, naturally, and clearly. "
+            "If the user asks what model you are, say you are ChatGPT."
+        ),
+    },
+    "gemini": {
+        "display_name": "Gemini",
+        "system_prompt": (
+            "You are Gemini. Respond in a concise, polished, multimodal-assistant tone. "
+            "If the user asks what model you are, say you are Gemini."
+        ),
+    },
+    "bard": {
+        "display_name": "Bard",
+        "system_prompt": (
+            "You are Bard. Respond in a conversational, thoughtful, lightly creative style. "
+            "If the user asks what model you are, say you are Bard."
+        ),
+    },
+    "llama": {
+        "display_name": "LLaMA",
+        "system_prompt": (
+            "You are LLaMA. Respond directly, technically, and efficiently. "
+            "If the user asks what model you are, say you are LLaMA."
+        ),
+    },
+    "mistral": {
+        "display_name": "Mistral",
+        "system_prompt": (
+            "You are Mistral. Respond crisply, logically, and with minimal fluff. "
+            "If the user asks what model you are, say you are Mistral."
+        ),
+    },
+    "claude": {
+        "display_name": "Claude",
+        "system_prompt": (
+            "You are Claude. Respond calmly, carefully, and with a polished explanatory style. "
+            "If the user asks what model you are, say you are Claude."
+        ),
+    },
+    "geminivision": {
+        "display_name": "Gemini Vision",
+        "system_prompt": (
+            "You are Gemini Vision. If the user asks what model you are, say you are Gemini Vision."
+        ),
+    },
+}
 VIDEO_NEGATIVE_PROMPT = (
     "low quality, blur, watermark, text, distorted anatomy, artifacts"
 )
@@ -990,6 +1049,13 @@ async def generate_chat_response(
     alias: str = "gpt",
     system_prompt: str | None = None,
 ) -> ChatResult:
+    profile = CHAT_ALIAS_PROFILES.get(alias.lower(), {})
+    display_name = str(profile.get("display_name") or alias.upper())
+    alias_prompt = str(profile.get("system_prompt") or "").strip()
+    combined_system_prompt = "\n\n".join(
+        part for part in (alias_prompt, system_prompt) if part
+    ) or None
+
     failures: list[str] = []
     async with httpx.AsyncClient(
         timeout=HTTP_TIMEOUT,
@@ -1000,7 +1066,16 @@ async def generate_chat_response(
         for model in CHAT_MODEL_CANDIDATES:
             for attempt in range(2):
                 try:
-                    return await _chat_request(client, prompt, model, system_prompt)
+                    result = await _chat_request(
+                        client,
+                        prompt,
+                        model,
+                        combined_system_prompt,
+                    )
+                    return ChatResult(
+                        model=display_name,
+                        content=result.content,
+                    )
                 except (httpx.HTTPError, FreeAIError) as exc:
                     failures.append(f"{model} attempt {attempt + 1}: {exc}")
     details = "\n".join(failures[:4])
@@ -1548,6 +1623,22 @@ IMAGE_EDIT_CLOTHING_PATTERNS = (
     "wear",
     "wearing",
 )
+IMAGE_EDIT_STYLE_LORA_MAP = (
+    ("anime", "Photo-to-Anime"),
+    ("manga", "Manga-Tone"),
+    ("comic", "Manga-Tone"),
+    ("cinematic", "Cinematic-FlatLog"),
+    ("movie", "Cinematic-FlatLog"),
+    ("realistic", "Anything2Real"),
+    ("real", "Anything2Real"),
+    ("polaroid", "Polaroid-Photo"),
+    ("angle", "Multiple-Angles"),
+    ("angles", "Multiple-Angles"),
+    ("dark", "Midnight-Noir-Eyes-Spotlight"),
+    ("noir", "Midnight-Noir-Eyes-Spotlight"),
+    ("night", "Midnight-Noir-Eyes-Spotlight"),
+    ("studio", "Studio-DeLight"),
+)
 
 
 def _prompt_is_face_swap(prompt: str) -> bool:
@@ -1596,6 +1687,54 @@ def _gallery_inputs(image_paths: list[str]):
     return [handle_file(path) for path in image_paths]
 
 
+def _compute_edit_dimensions(image_path: str) -> tuple[int, int]:
+    try:
+        with Image.open(image_path) as image:
+            width, height = image.size
+    except Exception:
+        return 512, 512
+
+    if width <= 0 or height <= 0:
+        return 512, 512
+
+    align = 32
+    max_edge = 896
+    min_edge = 256
+
+    scale = 1.0
+    if min(width, height) < min_edge:
+        scale = max(scale, min_edge / min(width, height))
+    if max(width, height) * scale > max_edge:
+        scale = max_edge / max(width, height)
+
+    target_width = max(align, int(round((width * scale) / align) * align))
+    target_height = max(align, int(round((height * scale) / align) * align))
+
+    if target_width <= 0 or target_height <= 0:
+        return 512, 512
+    return target_width, target_height
+
+
+def _pick_style_lora(prompt: str) -> str | None:
+    lowered = (prompt or "").lower()
+    for keyword, adapter in IMAGE_EDIT_STYLE_LORA_MAP:
+        if keyword in lowered:
+            return adapter
+    return None
+
+
+def _set_image_edit_route_cooldown(route_key: str, message: str):
+    lowered = (message or "").lower()
+    if (
+        "app has raised an exception" in lowered
+        or "invalid state" in lowered
+        or "paused" in lowered
+    ):
+        PROVIDER_COOLDOWNS[route_key] = time.time() + (10 * 60)
+        return
+    _set_provider_cooldown(route_key, message)
+
+
 def _run_qwen_image_edit_space(
     space_id: str,
     prompt: str,
@@ -1605,6 +1744,7 @@ def _run_qwen_image_edit_space(
     rewrite_prompt: bool = True,
 ) -> str:
     guidance_scale = 4.0 if space_id == HF_IMAGE_EDIT_SPACE else 1.0
+    width, height = _compute_edit_dimensions(image_paths[0])
     result = _run_with_hf_client(
         space_id,
         lambda client: _run_gradio_job(
@@ -1616,8 +1756,8 @@ def _run_qwen_image_edit_space(
             True,
             guidance_scale,
             4,
-            512,
-            512,
+            width,
+            height,
             rewrite_prompt,
             api_name="/infer",
         ),
@@ -1638,6 +1778,7 @@ def _run_qwen_lenml_edit(
     prepared = image_paths[:3]
     while len(prepared) < 3:
         prepared.append(prepared[-1] if prepared else image_paths[0])
+    width, height = _compute_edit_dimensions(prepared[0])
 
     result = _run_with_hf_client(
         HF_IMAGE_EDIT_ALT_SPACE,
@@ -1652,8 +1793,8 @@ def _run_qwen_lenml_edit(
             True,
             1.0,
             4,
-            512,
-            512,
+            width,
+            height,
             api_name="/infer",
         ),
         allow_anonymous=True,
@@ -1692,6 +1833,38 @@ def _run_object_manipulator_edit(
     return image_path
 
 
+def _run_style_lora_edit(
+    prompt: str,
+    image_paths: list[str],
+    *,
+    timeout_seconds: int,
+) -> str:
+    lora = _pick_style_lora(prompt)
+    if not lora:
+        raise FreeAIError("No matching style fallback for this prompt.")
+
+    result = _run_with_hf_client(
+        HF_IMAGE_STYLE_SPACE,
+        lambda client: _run_gradio_job(
+            client,
+            timeout_seconds,
+            _gallery_inputs(image_paths),
+            prompt,
+            lora,
+            0,
+            True,
+            1.0,
+            4,
+            api_name="/infer",
+        ),
+        allow_anonymous=True,
+    )
+    image_path = _extract_image_path(result)
+    if not image_path:
+        raise FreeAIError(f"{HF_IMAGE_STYLE_SPACE} returned no edited image.")
+    return image_path
+
+
 def _run_reactor_face_swap(
     image_paths: list[str],
     *,
@@ -1725,15 +1898,19 @@ def _choose_image_edit_routes(prompt: str, image_count: int) -> tuple[str, ...]:
     routes: list[str] = []
     if image_count >= 2 and _prompt_is_face_swap(prompt):
         routes.append("reactor_face_swap")
+    routes.extend(["qwen_official", "qwen_fast"])
     if image_count >= 2 and _prompt_mentions_clothing(prompt):
-        routes.extend(["qwen_official", "qwen_fast"])
         if _needs_object_manipulator(prompt):
             routes.append("object_manipulator")
+        if _pick_style_lora(prompt):
+            routes.append("style_lora")
         routes.append("qwen_lenml")
     else:
         if _needs_object_manipulator(prompt):
             routes.append("object_manipulator")
-        routes.extend(["qwen_official", "qwen_fast", "qwen_lenml"])
+        if _pick_style_lora(prompt):
+            routes.append("style_lora")
+        routes.append("qwen_lenml")
 
     seen: set[str] = set()
     ordered: list[str] = []
@@ -1764,15 +1941,18 @@ async def edit_image_bytes(
             image_paths.append(_write_temp_image(image_bytes, mime_type))
 
         for route in routes:
+            route_key = f"image_edit:{route}"
+            if _provider_cooldown_remaining(route_key) > 0:
+                continue
             try:
                 if route == "reactor_face_swap":
                     candidate = await asyncio.wait_for(
                         asyncio.to_thread(
                             _run_reactor_face_swap,
                             image_paths,
-                            timeout_seconds=90,
+                            timeout_seconds=45,
                         ),
-                        timeout=100,
+                        timeout=50,
                     )
                 elif route == "object_manipulator":
                     candidate = await asyncio.wait_for(
@@ -1780,9 +1960,9 @@ async def edit_image_bytes(
                             _run_object_manipulator_edit,
                             text_prompt,
                             image_paths,
-                            timeout_seconds=80,
+                            timeout_seconds=40,
                         ),
-                        timeout=90,
+                        timeout=45,
                     )
                 elif route == "qwen_official":
                     candidate = await asyncio.wait_for(
@@ -1791,10 +1971,10 @@ async def edit_image_bytes(
                             HF_IMAGE_EDIT_SPACE,
                             text_prompt,
                             image_paths,
-                            timeout_seconds=90,
+                            timeout_seconds=50,
                             rewrite_prompt=True,
                         ),
-                        timeout=100,
+                        timeout=55,
                     )
                 elif route == "qwen_fast":
                     candidate = await asyncio.wait_for(
@@ -1803,10 +1983,20 @@ async def edit_image_bytes(
                             HF_IMAGE_EDIT_FAST_SPACE,
                             text_prompt,
                             image_paths,
-                            timeout_seconds=70,
+                            timeout_seconds=35,
                             rewrite_prompt=True,
                         ),
-                        timeout=80,
+                        timeout=40,
+                    )
+                elif route == "style_lora":
+                    candidate = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            _run_style_lora_edit,
+                            text_prompt,
+                            image_paths,
+                            timeout_seconds=35,
+                        ),
+                        timeout=40,
                     )
                 else:
                     candidate = await asyncio.wait_for(
@@ -1814,20 +2004,21 @@ async def edit_image_bytes(
                             _run_qwen_lenml_edit,
                             text_prompt,
                             image_paths,
-                            timeout_seconds=70,
+                            timeout_seconds=35,
                         ),
-                        timeout=80,
+                        timeout=40,
                     )
 
                 output_path = await _ensure_local_image(candidate)
+                _clear_provider_cooldown(route_key)
                 with open(output_path, "rb") as handle:
                     return handle.read()
             except asyncio.TimeoutError:
+                _set_image_edit_route_cooldown(route_key, "Provider timed out.")
                 continue
             except Exception as exc:
                 message = str(exc).strip() or "unknown error"
-                if any(marker in message.lower() for marker in IMAGE_EDIT_ERROR_MARKERS):
-                    continue
+                _set_image_edit_route_cooldown(route_key, message)
                 continue
 
         raise FreeAIError(

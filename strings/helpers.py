@@ -108,7 +108,7 @@ HELP_11 = """
 
 - jarvis [prompt] - chat with the assistant using the jarvis trigger.
 - assis [prompt] - get an AI voice reply.
-- /gpt, /bard, /gemini, /llama, /mistral - text AI replies.
+- /gpt, /claude, /bard, /gemini, /llama, /mistral - text AI replies.
 - /geminivision - analyze a replied image.
 - /chatgpt, /ai, /ask, /Master - alternate text-AI entry commands.
 """

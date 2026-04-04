@@ -136,6 +136,11 @@ async def mistral_handler(client: Client, message: Message):
     await handle_text_model(client, message, alias="mistral", command_name="Mistral")
 
 
+@app.on_message(filters.command("claude"))
+async def claude_handler(client: Client, message: Message):
+    await handle_text_model(client, message, alias="claude", command_name="Claude")
+
+
 @app.on_message(filters.command("geminivision"))
 async def geminivision_handler(client: Client, message: Message):
     file_id, mime_type = get_image_target(message)

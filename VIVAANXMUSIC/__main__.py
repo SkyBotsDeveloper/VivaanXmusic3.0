@@ -23,6 +23,7 @@ BOT_COMMANDS = [
     BotCommand("player", "Open player controls"),
     BotCommand("autoplay", "Toggle similar-song autoplay"),
     BotCommand("gpt", "Ask the AI assistant"),
+    BotCommand("claude", "Ask Claude-style AI"),
     BotCommand("geminivision", "Analyze a replied image"),
     BotCommand("editimg", "Edit a replied image with AI"),
     BotCommand("getdraw", "Generate an AI image"),
