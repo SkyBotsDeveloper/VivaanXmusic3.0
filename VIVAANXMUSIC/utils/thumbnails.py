@@ -9,7 +9,7 @@ from unidecode import unidecode
 from urllib.request import Request, urlopen
 from youtubesearchpython.future import VideosSearch
 from VIVAANXMUSIC import app
-from config import YOUTUBE_IMG_URL
+from config import BOT_NAME, YOUTUBE_IMG_URL
 from VIVAANXMUSIC.core.dir import CACHE_DIR
 
 
@@ -26,6 +26,7 @@ AVATAR_SIZE = 112
 ART_CARD_BOX = (882, 118, 1226, 560)
 PLAYBACK_BOX = (44, 566, 1236, 676)
 BRAND_BOX = (964, 38, 1236, 92)
+NOW_PLAYING_BOX = (58, 58, 220, 104)
 
 
 def fit_cover(image, width: int, height: int):
@@ -96,6 +97,12 @@ def trim_text(text: str, limit: int) -> str:
     if len(clean_text) <= limit:
         return clean_text
     return clean_text[: max(limit - 3, 0)].rstrip() + "..."
+
+
+def resolve_brand_name() -> str:
+    raw_name = getattr(app, "name", None) or BOT_NAME or "EliteMusic"
+    clean_name = trim_text(" ".join(unidecode(str(raw_name)).split()), 24)
+    return clean_name or "EliteMusic"
 
 
 def load_font(path, size: int):
@@ -295,7 +302,7 @@ def accent_palette(image):
 async def get_thumb(videoid, user_id=None):
     """Generate an enhanced glassmorphic playback thumbnail."""
     cache_user_id = user_id if user_id is not None else "blank"
-    cache_path = os.path.join(CACHE_DIR, f"{videoid}_{cache_user_id}_elite_glass_v18.png")
+    cache_path = os.path.join(CACHE_DIR, f"{videoid}_{cache_user_id}_elite_glass_v19.png")
     if os.path.isfile(cache_path):
         return cache_path
 
@@ -410,6 +417,16 @@ async def get_thumb(videoid, user_id=None):
             show_top_line=False,
             show_bottom_line=False,
         )
+        background = draw_glass_panel(
+            background,
+            NOW_PLAYING_BOX,
+            radius=22,
+            fill=(22, 31, 43, 96),
+            border=(255, 255, 255, 54),
+            blur_radius=12,
+            show_top_line=False,
+            show_bottom_line=False,
+        )
 
         art = rounded_media(youtube_thumb, ART_SIZE, radius=40, border_width=5)
         art_x = ART_CARD_BOX[0] + ((ART_CARD_BOX[2] - ART_CARD_BOX[0] - ART_SIZE) // 2)
@@ -445,14 +462,16 @@ async def get_thumb(videoid, user_id=None):
         progress_time_font = load_font(META_FONT_PATH, 18)
         brand_font = load_font(TITLE_FONT_PATH, 22)
 
-        draw.rounded_rectangle(
-            (60, 60, 214, 102),
-            radius=21,
-            fill=(255, 255, 255, 20),
-            outline=(255, 255, 255, 34),
-            width=1,
+        now_playing_text = "NOW PLAYING"
+        now_playing_center_x = (NOW_PLAYING_BOX[0] + NOW_PLAYING_BOX[2]) / 2
+        now_playing_center_y = ((NOW_PLAYING_BOX[1] + NOW_PLAYING_BOX[3]) / 2) + 1
+        draw.text(
+            (now_playing_center_x, now_playing_center_y),
+            now_playing_text,
+            fill=(238, 244, 250),
+            font=eyebrow_font,
+            anchor="mm",
         )
-        draw.text((82, 73), "NOW PLAYING", fill=(240, 246, 252), font=eyebrow_font)
 
         title_lines = wrap_text(draw, title, title_font, 690, max_lines=2)
         title_y = 148
@@ -545,7 +564,7 @@ async def get_thumb(videoid, user_id=None):
             font=progress_time_font,
         )
 
-        brand_name = "EliteMusic"
+        brand_name = resolve_brand_name()
         brand_center_x = (BRAND_BOX[0] + BRAND_BOX[2]) / 2
         brand_center_y = ((BRAND_BOX[1] + BRAND_BOX[3]) / 2) + 1
         draw.text(
