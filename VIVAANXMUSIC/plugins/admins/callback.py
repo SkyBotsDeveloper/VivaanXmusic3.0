@@ -253,6 +253,7 @@ async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: 
     queued = current_track["file"]
     title = current_track["title"].title()
     user = current_track["by"]
+    requester_id = current_track.get("user_id")
     duration = current_track["dur"]
     streamtype = current_track["streamtype"]
     videoid = current_track["vidid"]
@@ -281,7 +282,7 @@ async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: 
         except Exception:
             return await callback.message.reply_text(_["call_6"])
         buttons = stream_markup(_, chat_id)
-        img = await get_thumb(videoid)
+        img = await get_thumb(videoid, requester_id)
         run = await callback.message.reply_photo(
             photo=img,
             caption=_["stream_1"].format(f"https://t.me/{app.username}?start=info_{videoid}", title[:23], duration, user),
@@ -306,7 +307,7 @@ async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: 
         except Exception:
             return await mystic.edit_text(_["call_6"])
         buttons = stream_markup(_, chat_id)
-        img = await get_thumb(videoid)
+        img = await get_thumb(videoid, requester_id)
         run = await callback.message.reply_photo(
             photo=img,
             caption=_["stream_1"].format(f"https://t.me/{app.username}?start=info_{videoid}", title[:23], duration, user),
@@ -364,7 +365,7 @@ async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: 
             db[chat_id][0]["markup"] = "tg"
         else:
             buttons = stream_markup(_, chat_id)
-            img = await get_thumb(videoid)
+            img = await get_thumb(videoid, requester_id)
             run = await callback.message.reply_photo(
                 photo=img,
                 caption=_["stream_1"].format(f"https://t.me/{app.username}?start=info_{videoid}", title[:23], duration, user),

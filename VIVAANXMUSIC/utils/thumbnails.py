@@ -1,3 +1,4 @@
+import asyncio
 import os
 import re
 import aiofiles
@@ -5,8 +6,8 @@ import aiohttp
 import numpy as np
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 from unidecode import unidecode
+from urllib.request import Request, urlopen
 from youtubesearchpython.future import VideosSearch
-from collections import Counter
 from VIVAANXMUSIC import app
 from config import YOUTUBE_IMG_URL
 from VIVAANXMUSIC.core.dir import CACHE_DIR
@@ -15,44 +16,86 @@ from VIVAANXMUSIC.core.dir import CACHE_DIR
 # Font paths
 TITLE_FONT_PATH = "VIVAANXMUSIC/assets/thumb/font2.ttf"
 META_FONT_PATH = "VIVAANXMUSIC/assets/thumb/font.ttf"
+FALLBACK_AVATAR_URL = "https://files.catbox.moe/0ld5qc.jpg"
 
-# Constants - Professional Layout
+# Constants - Enhanced Layout
 CANVAS_WIDTH = 1280
 CANVAS_HEIGHT = 720
-CIRCLE_BIG = 280  # Thumbnail circle
-CIRCLE_SMALL = 170  # User DP circle
+ART_SIZE = 296
+AVATAR_SIZE = 112
+ART_CARD_BOX = (882, 118, 1226, 560)
+PLAYBACK_BOX = (44, 566, 1236, 676)
+BRAND_BOX = (964, 38, 1236, 92)
 
 
-def changeImageSize(maxWidth, maxHeight, image):
-    """Resize image while maintaining aspect ratio."""
-    widthRatio = maxWidth / image.size[0]
-    heightRatio = maxHeight / image.size[1]
-    newWidth = int(widthRatio * image.size[0])
-    newHeight = int(heightRatio * image.size[1])
-    newImage = image.resize((newWidth, newHeight))
-    return newImage
+def fit_cover(image, width: int, height: int):
+    """Resize and crop image to fill the target area."""
+    src = image.convert("RGBA")
+    ratio = max(width / src.size[0], height / src.size[1])
+    resized = src.resize(
+        (int(src.size[0] * ratio), int(src.size[1] * ratio)),
+        Image.LANCZOS,
+    )
+    left = max((resized.size[0] - width) // 2, 0)
+    top = max((resized.size[1] - height) // 2, 0)
+    return resized.crop((left, top, left + width, top + height))
 
 
-def circle(img):
-    """Convert image to circular shape with white border."""
-    h, w = img.size
-    a = Image.new('L', [h, w], 0)
-    b = ImageDraw.Draw(a)
-    b.pieslice([(0, 0), (h, w)], 0, 360, fill=255, outline="white")
-    c = np.array(img)
-    d = np.array(a)
-    e = np.dstack((c, d))
-    return Image.fromarray(e)
+def antialiased_circle_mask(size: int, scale: int = 4):
+    mask = Image.new("L", (size * scale, size * scale), 0)
+    ImageDraw.Draw(mask).ellipse((0, 0, size * scale, size * scale), fill=255)
+    return mask.resize((size, size), Image.LANCZOS)
 
 
-def clear(text):
-    """Truncate title to fit within 60 characters."""
-    list_words = text.split(" ")
-    title = ""
-    for i in list_words:
-        if len(title) + len(i) < 60:
-            title += " " + i
-    return title.strip()
+def antialiased_rounded_mask(size: int, radius: int, scale: int = 4):
+    mask = Image.new("L", (size * scale, size * scale), 0)
+    ImageDraw.Draw(mask).rounded_rectangle(
+        (0, 0, size * scale, size * scale),
+        radius=radius * scale,
+        fill=255,
+    )
+    return mask.resize((size, size), Image.LANCZOS)
+
+
+def masked_circle(image, size: int, border_width: int = 6, border_color=(255, 255, 255, 240)):
+    fitted = fit_cover(image, size, size)
+    mask = antialiased_circle_mask(size)
+    result = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    result.paste(fitted, (0, 0), mask)
+    if border_width > 0:
+        draw = ImageDraw.Draw(result)
+        inset = border_width // 2
+        draw.ellipse(
+            (inset, inset, size - inset - 1, size - inset - 1),
+            outline=border_color,
+            width=border_width,
+        )
+    return result
+
+
+def rounded_media(image, size: int, radius: int = 36, border_width: int = 5):
+    result = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    inner_padding = max(border_width - 1, 3)
+    inner_size = max(size - (inner_padding * 2), 1)
+    fitted = fit_cover(image, inner_size, inner_size)
+    mask = antialiased_rounded_mask(inner_size, max(radius - inner_padding, 1))
+    result.paste(fitted, (inner_padding, inner_padding), mask)
+    draw = ImageDraw.Draw(result)
+    inset = border_width // 2
+    draw.rounded_rectangle(
+        (inset, inset, size - inset - 1, size - inset - 1),
+        radius=max(radius - 2, 1),
+        outline=(255, 255, 255, 210),
+        width=border_width,
+    )
+    return result
+
+
+def trim_text(text: str, limit: int) -> str:
+    clean_text = " ".join(str(text or "").split())
+    if len(clean_text) <= limit:
+        return clean_text
+    return clean_text[: max(limit - 3, 0)].rstrip() + "..."
 
 
 def load_font(path, size: int):
@@ -63,277 +106,486 @@ def load_font(path, size: int):
         return ImageFont.load_default()
 
 
-def draw_waveform(draw, x_start, y, width, height, color, segments=80):
-    """Draw waveform visualization for progress bar."""
-    segment_width = width // segments
-    np.random.seed(42)
-    
+def cache_remote_file(url: str, output_path: str) -> bool:
+    request = Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urlopen(request, timeout=20) as response:
+        if getattr(response, "status", 200) != 200:
+            return False
+        with open(output_path, "wb") as file:
+            file.write(response.read())
+    return True
+
+
+def text_width(draw, text: str, font) -> float:
+    try:
+        return draw.textlength(text, font=font)
+    except Exception:
+        bbox = draw.textbbox((0, 0), text, font=font)
+        return bbox[2] - bbox[0]
+
+
+def wrap_text(draw, text: str, font, max_width: int, max_lines: int = 3) -> list[str]:
+    words = trim_text(text, 140).split()
+    if not words:
+        return ["Unknown Title"]
+
+    lines = []
+    current = ""
+    index = 0
+
+    while index < len(words):
+        word = words[index]
+        test_line = f"{current} {word}".strip()
+        if not current or text_width(draw, test_line, font) <= max_width:
+            current = test_line
+            index += 1
+            continue
+
+        lines.append(current)
+        current = ""
+        if len(lines) == max_lines - 1:
+            break
+
+    remaining = " ".join(words[index:]).strip()
+    last_line = current if current else remaining
+    if remaining and current and current != remaining:
+        last_line = f"{current} {remaining}".strip()
+    if text_width(draw, last_line, font) > max_width:
+        while last_line and text_width(draw, f"{last_line}...", font) > max_width:
+            last_line = last_line[:-1].rstrip()
+        last_line = f"{last_line}..." if last_line else "..."
+
+    if last_line:
+        lines.append(last_line)
+    return lines[:max_lines]
+
+
+def draw_waveform(
+    draw,
+    x_start,
+    y,
+    width,
+    height,
+    accent_color,
+    base_color,
+    progress_ratio=0.37,
+    segments=72,
+):
+    """Draw a cleaner rhythmic waveform with active/inactive regions."""
+    segment_width = width / max(segments, 1)
+    active_x = x_start + (width * progress_ratio)
+    accent_rgba = (*accent_color[:3], 205) if len(accent_color) == 4 else (*accent_color, 205)
+    base_rgba = (*base_color[:3], 92) if len(base_color) == 4 else (*base_color, 92)
+
     for i in range(segments):
-        wave_height = int(height * 0.4 * (0.5 + 0.5 * np.sin(i * 0.2)))
-        bar_x = x_start + i * segment_width
-        
+        center_x = x_start + ((i + 0.5) * segment_width)
+        motion = (
+            abs(np.sin((i * 0.31) + 0.4)) * 0.52
+            + abs(np.sin((i * 0.12) + 1.7)) * 0.28
+            + abs(np.sin((i * 0.74) + 0.2)) * 0.16
+        )
+        bar_height = max(4, int((height * 0.28) + (height * min(motion, 0.92))))
+        line_width = 2 if i % 7 else 3
+        color = accent_rgba if center_x <= active_x else base_rgba
+
         draw.line(
-            [(bar_x + segment_width // 2, y - wave_height),
-             (bar_x + segment_width // 2, y + wave_height)],
+            [
+                (center_x, y - bar_height),
+                (center_x, y + bar_height),
+            ],
             fill=color,
-            width=1
+            width=line_width,
         )
 
 
 def draw_text_with_outline(draw, position, text, font, fill_color, outline_color, outline_width=2):
     """Draw text with outline effect for better visibility."""
     x, y = position
-    
-    # Draw outline by drawing text multiple times around the position
     for adj_x in range(-outline_width, outline_width + 1):
         for adj_y in range(-outline_width, outline_width + 1):
             if adj_x != 0 or adj_y != 0:
                 draw.text((x + adj_x, y + adj_y), text, font=font, fill=outline_color)
-    
-    # Draw main text on top
     draw.text((x, y), text, font=font, fill=fill_color)
 
 
+def add_glow(base, box, color, blur_radius=70):
+    glow = Image.new("RGBA", base.size, (0, 0, 0, 0))
+    ImageDraw.Draw(glow).ellipse(box, fill=color)
+    glow = glow.filter(ImageFilter.GaussianBlur(blur_radius))
+    return Image.alpha_composite(base, glow)
+
+
+def draw_glass_panel(
+    base,
+    box,
+    radius=34,
+    fill=(18, 28, 40, 122),
+    border=(255, 255, 255, 68),
+    blur_radius=18,
+    show_top_line=True,
+    show_bottom_line=True,
+):
+    x1, y1, x2, y2 = [int(value) for value in box]
+    width = x2 - x1
+    height = y2 - y1
+
+    shadow = Image.new("RGBA", base.size, (0, 0, 0, 0))
+    shadow_draw = ImageDraw.Draw(shadow)
+    shadow_draw.rounded_rectangle(
+        (x1 + 10, y1 + 14, x2 + 10, y2 + 14),
+        radius=radius,
+        fill=(0, 0, 0, 72),
+    )
+    shadow = shadow.filter(ImageFilter.GaussianBlur(22))
+    base = Image.alpha_composite(base, shadow)
+
+    crop = base.crop((x1, y1, x2, y2)).filter(ImageFilter.GaussianBlur(blur_radius))
+    mask = Image.new("L", (width, height), 0)
+    mask_draw = ImageDraw.Draw(mask)
+    mask_draw.rounded_rectangle((0, 0, width, height), radius=radius, fill=255)
+    base.paste(crop, (x1, y1), mask)
+
+    overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    overlay_draw = ImageDraw.Draw(overlay)
+    overlay_draw.rounded_rectangle((0, 0, width, height), radius=radius, fill=fill)
+    overlay_draw.rounded_rectangle(
+        (0, 0, width - 1, height - 1),
+        radius=radius,
+        outline=border,
+        width=2,
+    )
+    if show_top_line:
+        overlay_draw.line(
+            [(26, 24), (width - 28, 24)],
+            fill=(255, 255, 255, 50),
+            width=2,
+        )
+    if show_bottom_line:
+        overlay_draw.line(
+            [(24, height - 26), (width - 24, height - 46)],
+            fill=(255, 255, 255, 20),
+            width=1,
+        )
+    base.alpha_composite(overlay, (x1, y1))
+    return base
+
+
+def draw_chip(draw, box, label, value, label_font, value_font, accent_color):
+    x1, y1, x2, y2 = box
+    draw.text((x1 + 18, y1 + 14), label.upper(), fill=(196, 211, 223), font=label_font)
+    draw.text((x1 + 18, y1 + 42), value, fill=(255, 255, 255), font=value_font)
+    draw.rounded_rectangle(
+        (x1, y1, x1 + 8, y2),
+        radius=4,
+        fill=accent_color,
+    )
+
+
+def accent_palette(image):
+    sample = np.array(image.convert("RGB").resize((40, 40))).reshape(-1, 3)
+    usable = sample[sample.mean(axis=1) > 40]
+    if usable.size == 0:
+        usable = sample
+    base = usable.mean(axis=0)
+    accent = tuple(int(max(70, min(255, channel * 1.15))) for channel in base)
+    soft = tuple(int((channel * 0.55) + 90) for channel in accent)
+    return accent, soft
+
+
 async def get_thumb(videoid, user_id=None):
-    """
-    Generate professional music player style thumbnail with:
-    - YouTube thumbnail as background (blurred)
-    - BIGGER YouTube thumbnail circle (280px) on RIGHT, vertically centered
-    - SMALLER User DP circle (170px) overlapping at BOTTOM-RIGHT (FULLY VISIBLE)
-    - Song info on LEFT SIDE with bright white text (MUCH BIGGER)
-    - Styled "NOW PLAYING" text at top (BIGGER)
-    - Waveform progress bar at LOWER POSITION
-    - Perfect 100% accurate layout
-    
-    Args:
-        videoid: YouTube video ID
-        user_id: Telegram user ID for profile picture (optional, defaults to bot ID)
-    
-    Returns:
-        Path to generated thumbnail
-    """
-    if user_id is None:
-        user_id = app.id
-    
-    cache_path = os.path.join(CACHE_DIR, f"{videoid}_{user_id}_elite.png")
+    """Generate an enhanced glassmorphic playback thumbnail."""
+    cache_user_id = user_id if user_id is not None else "blank"
+    cache_path = os.path.join(CACHE_DIR, f"{videoid}_{cache_user_id}_elite_glass_v18.png")
     if os.path.isfile(cache_path):
         return cache_path
 
     url = f"https://www.youtube.com/watch?v={videoid}"
+    temp_thumb_path = os.path.join(CACHE_DIR, f"thumb_{videoid}_glass.png")
+    fallback_avatar_path = os.path.join(CACHE_DIR, "elite_avatar_fallback.jpg")
+    sp = None
     try:
-        # Fetch YouTube video metadata
         results = VideosSearch(url, limit=1)
-        for result in (await results.next())["result"]:
-            try:
-                title = result["title"]
-                title = re.sub(r"\W+", " ", title)
-                title = title.title()
-            except:
-                title = "Unsupported Title"
-            try:
-                duration = result["duration"]
-            except:
-                duration = "Unknown Mins"
-            thumbnail = result["thumbnails"][0]["url"].split("?")[0]
-            try:
-                views = result["viewCount"]["short"]
-            except:
-                views = "Unknown Views"
-            try:
-                channel = result["channel"]["name"]
-            except:
-                channel = "Unknown Channel"
+        results_data = (await results.next()).get("result", [])
+        if not results_data:
+            return YOUTUBE_IMG_URL
 
-        # Download YouTube thumbnail
+        result = results_data[0]
+        title = trim_text(
+            re.sub(r"\s+", " ", re.sub(r"[^\w\s&\-']", " ", result.get("title", ""))).strip().title()
+            or "Unsupported Title",
+            140,
+        )
+        duration = str(result.get("duration") or "Unknown")
+        thumbnail = result.get("thumbnails", [{}])[0].get("url", "").split("?")[0]
+        views = trim_text(str((result.get("viewCount") or {}).get("short") or "Unknown Views"), 18)
+        channel = trim_text(str((result.get("channel") or {}).get("name") or "Unknown Channel"), 34)
+
+        if not thumbnail:
+            return YOUTUBE_IMG_URL
+
         async with aiohttp.ClientSession() as session:
             async with session.get(thumbnail) as resp:
-                if resp.status == 200:
-                    f = await aiofiles.open(f"{CACHE_DIR}/thumb{videoid}.png", mode="wb")
-                    await f.write(await resp.read())
-                    await f.close()
+                if resp.status != 200:
+                    return YOUTUBE_IMG_URL
+                f = await aiofiles.open(temp_thumb_path, mode="wb")
+                await f.write(await resp.read())
+                await f.close()
 
-        # Get user profile picture
-        try:
-            async for photo in app.get_chat_photos(user_id, 1):
-                sp = await app.download_media(photo.file_id, file_name=f'{user_id}.jpg')
-        except:
+        if user_id is not None:
             try:
-                async for photo in app.get_chat_photos(app.id, 1):
-                    sp = await app.download_media(photo.file_id, file_name=f'{app.id}.jpg')
-            except:
+                async for photo in app.get_chat_photos(user_id, 1):
+                    sp = await app.download_media(photo.file_id, file_name=f"{user_id}.jpg")
+                    break
+            except Exception:
                 sp = None
 
-        # Load images
         if sp:
-            user_dp = Image.open(sp)
+            user_dp = Image.open(sp).convert("RGBA")
         else:
-            user_dp = Image.new("RGBA", (200, 200), (100, 100, 100, 255))
+            if not os.path.isfile(fallback_avatar_path):
+                try:
+                    await asyncio.to_thread(
+                        cache_remote_file,
+                        FALLBACK_AVATAR_URL,
+                        fallback_avatar_path,
+                    )
+                except Exception:
+                    pass
 
-        youtube_thumb = Image.open(f"{CACHE_DIR}/thumb{videoid}.png")
+            try:
+                user_dp = Image.open(fallback_avatar_path).convert("RGBA")
+            except Exception:
+                user_dp = Image.new("RGBA", (200, 200), (100, 100, 100, 255))
 
-        # ============================================
-        # CREATE BACKGROUND (blurred YouTube thumbnail)
-        # ============================================
-        image1 = changeImageSize(CANVAS_WIDTH, CANVAS_HEIGHT, youtube_thumb)
-        image2 = image1.convert("RGBA")
-        background = image2.filter(filter=ImageFilter.BoxBlur(15))
-        enhancer = ImageEnhance.Brightness(background)
-        background = enhancer.enhance(0.55)
+        youtube_thumb = Image.open(temp_thumb_path).convert("RGBA")
+        accent_color, accent_soft = accent_palette(youtube_thumb)
+        accent_glow = (*accent_color, 78)
+        accent_wash = (*accent_soft, 54)
 
-        # Add dark overlay for better text contrast
-        overlay = Image.new("RGBA", (CANVAS_WIDTH, CANVAS_HEIGHT), (0, 0, 0, 80))
+        background = fit_cover(youtube_thumb, CANVAS_WIDTH, CANVAS_HEIGHT)
+        background = background.filter(ImageFilter.GaussianBlur(22))
+        background = ImageEnhance.Contrast(background).enhance(1.04)
+        background = ImageEnhance.Color(background).enhance(0.76)
+        background = ImageEnhance.Brightness(background).enhance(0.43)
+
+        overlay = Image.new("RGBA", (CANVAS_WIDTH, CANVAS_HEIGHT), (0, 0, 0, 0))
+        overlay_draw = ImageDraw.Draw(overlay)
+        for y in range(CANVAS_HEIGHT):
+            alpha = int(84 + (72 * y / CANVAS_HEIGHT))
+            overlay_draw.line([(0, y), (CANVAS_WIDTH, y)], fill=(7, 11, 18, alpha), width=1)
+        for x in range(CANVAS_WIDTH):
+            alpha = int(132 * (1 - (x / CANVAS_WIDTH)))
+            overlay_draw.line([(x, 0), (x, CANVAS_HEIGHT)], fill=(10, 18, 28, alpha), width=1)
         background = Image.alpha_composite(background, overlay)
+        background = add_glow(background, (-120, 450, 340, 900), accent_wash, blur_radius=120)
+        background = add_glow(background, (900, -80, 1310, 280), accent_glow, blur_radius=100)
 
-        # ============================================
-        # ADD CIRCULAR IMAGES (RIGHT SIDE - PERFECT POSITIONING)
-        # ============================================
-        # YouTube thumbnail circle (280x280) - Positioned on right, vertically centered
-        # Right margin: 35px from edge, moved DOWN slightly for better composition
-        # X position: 1280 - 35 - 280 = 965
-        # Y position: (720 - 280) / 2 = 220 (slightly lower = 200 for SOUTH adjustment)
-        thumb_circle_x = CANVAS_WIDTH - 35 - CIRCLE_BIG
-        thumb_circle_y = 180  # Moved down from 220 for SOUTH positioning
-        
-        y = changeImageSize(CIRCLE_BIG, CIRCLE_BIG, circle(youtube_thumb))
-        background.paste(y, (thumb_circle_x, thumb_circle_y), mask=y)
+        background = draw_glass_panel(
+            background,
+            ART_CARD_BOX,
+            radius=40,
+            fill=(17, 26, 37, 92),
+            border=(255, 255, 255, 62),
+            blur_radius=18,
+            show_top_line=False,
+            show_bottom_line=False,
+        )
+        background = draw_glass_panel(
+            background,
+            PLAYBACK_BOX,
+            radius=28,
+            fill=(15, 23, 34, 92),
+            border=(255, 255, 255, 56),
+            blur_radius=15,
+            show_top_line=False,
+            show_bottom_line=False,
+        )
+        background = draw_glass_panel(
+            background,
+            BRAND_BOX,
+            radius=24,
+            fill=(22, 31, 43, 94),
+            border=(255, 255, 255, 54),
+            blur_radius=12,
+            show_top_line=False,
+            show_bottom_line=False,
+        )
 
-        # User DP circle (170x170) - Overlapping at BOTTOM-RIGHT of thumbnail circle
-        # Positioned so it's FULLY VISIBLE (not cut off)
-        # X: positioned right and slightly overlapping thumbnail
-        # Y: positioned at bottom of thumbnail circle, ensuring full visibility
-        user_circle_x = thumb_circle_x + CIRCLE_BIG - (CIRCLE_SMALL // 2) - 15
-        user_circle_y = thumb_circle_y + CIRCLE_BIG - (CIRCLE_SMALL // 2) - 10
-        
-        # Ensure user DP doesn't get cut off at canvas edges
-        if user_circle_x + CIRCLE_SMALL > CANVAS_WIDTH:
-            user_circle_x = CANVAS_WIDTH - CIRCLE_SMALL - 10
-        if user_circle_y + CIRCLE_SMALL > CANVAS_HEIGHT:
-            user_circle_y = CANVAS_HEIGHT - CIRCLE_SMALL - 10
-        
-        a = changeImageSize(CIRCLE_SMALL, CIRCLE_SMALL, circle(user_dp))
-        background.paste(a, (user_circle_x, user_circle_y), mask=a)
+        art = rounded_media(youtube_thumb, ART_SIZE, radius=40, border_width=5)
+        art_x = ART_CARD_BOX[0] + ((ART_CARD_BOX[2] - ART_CARD_BOX[0] - ART_SIZE) // 2)
+        art_y = 166
+        background = add_glow(
+            background,
+            (art_x - 30, art_y - 24, art_x + ART_SIZE + 34, art_y + ART_SIZE + 42),
+            (*accent_color, 72),
+            blur_radius=74,
+        )
+        background.paste(art, (art_x, art_y), art)
 
-        # ============================================
-        # DRAW TEXT AND UI ELEMENTS
-        # ============================================
+        avatar = masked_circle(user_dp, AVATAR_SIZE, border_width=6, border_color=(255, 255, 255, 230))
+        avatar_x = art_x + ART_SIZE - AVATAR_SIZE // 2 + 2
+        avatar_y = art_y + ART_SIZE - AVATAR_SIZE // 2 + 6
+        avatar_x = min(avatar_x, CANVAS_WIDTH - AVATAR_SIZE - 28)
+        avatar_y = min(avatar_y, CANVAS_HEIGHT - AVATAR_SIZE - 28)
+        background = add_glow(
+            background,
+            (avatar_x - 18, avatar_y - 16, avatar_x + AVATAR_SIZE + 20, avatar_y + AVATAR_SIZE + 22),
+            (*accent_soft, 64),
+            blur_radius=58,
+        )
+        background.paste(avatar, (avatar_x, avatar_y), avatar)
+
         draw = ImageDraw.Draw(background)
 
-        # Load fonts - ALL BIGGER
-        now_playing_font = load_font(TITLE_FONT_PATH, 62)  # Bigger (was 56)
-        title_font = load_font(TITLE_FONT_PATH, 36)  # Bigger (was 34)
-        meta_font = load_font(META_FONT_PATH, 25)  # MUCH BIGGER (was 22)
-        time_font = load_font(META_FONT_PATH, 18)  # BIGGER (was 17)
+        eyebrow_font = load_font(META_FONT_PATH, 15)
+        title_font = load_font(TITLE_FONT_PATH, 50)
+        sub_font = load_font(META_FONT_PATH, 24)
+        meta_font = load_font(META_FONT_PATH, 20)
+        progress_label_font = load_font(META_FONT_PATH, 16)
+        progress_time_font = load_font(META_FONT_PATH, 18)
+        brand_font = load_font(TITLE_FONT_PATH, 22)
 
-        # --- NOW PLAYING text (top left - styled with effect, BIGGER & SHIFTED DOWN) ---
-        draw_text_with_outline(
-            draw,
-            (40, 25),  # Shifted down from 20
-            "NOW PLAYING",
-            now_playing_font,
-            fill_color=(255, 255, 255),
-            outline_color=(0, 0, 0),
-            outline_width=1
+        draw.rounded_rectangle(
+            (60, 60, 214, 102),
+            radius=21,
+            fill=(255, 255, 255, 20),
+            outline=(255, 255, 255, 34),
+            width=1,
+        )
+        draw.text((82, 73), "NOW PLAYING", fill=(240, 246, 252), font=eyebrow_font)
+
+        title_lines = wrap_text(draw, title, title_font, 690, max_lines=2)
+        title_y = 148
+        line_height = 60
+        for index, line in enumerate(title_lines):
+            draw_text_with_outline(
+                draw,
+                (60, title_y + (index * line_height)),
+                line,
+                title_font,
+                fill_color=(255, 255, 255),
+                outline_color=(6, 10, 14),
+                outline_width=1,
+            )
+
+        subtitle_y = title_y + (len(title_lines) * line_height) + 10
+        draw.text(
+            (60, subtitle_y),
+            trim_text(channel, 34),
+            fill=(215, 225, 235),
+            font=sub_font,
         )
 
-        # --- Song Title (left side) - BIGGER & SHIFTED DOWN ---
+        meta_text = f"{trim_text(duration, 10)}  •  {views}  •  YouTube"
         draw.text(
-            (40, 105),  # Shifted down from 100
-            clear(title),
-            fill=(255, 255, 255),
-            font=title_font,
-        )
-
-        # --- Metadata (Views, Duration, Channel) - BRIGHT WHITE, MUCH BIGGER & SHIFTED DOWN ---
-        meta_y = 170  # Shifted down from 165
-        meta_line_height = 35  # BIGGER (was 32)
-        
-        draw.text(
-            (40, meta_y),
-            f"Views : {views[:23]}",
-            fill=(255, 255, 255),
+            (60, subtitle_y + 42),
+            meta_text,
+            fill=(182, 196, 210),
             font=meta_font,
         )
-        draw.text(
-            (40, meta_y + meta_line_height),
-            f"Duration : {duration[:23]}",
-            fill=(255, 255, 255),
-            font=meta_font,
-        )
-        draw.text(
-            (40, meta_y + (meta_line_height * 2)),
-            f"Channel : {channel[:30]}",
-            fill=(255, 255, 255),
-            font=meta_font,
+        draw.rounded_rectangle(
+            (60, subtitle_y + 82, 260, subtitle_y + 88),
+            radius=3,
+            fill=(*accent_color, 190),
         )
 
-        # ============================================
-        # PROGRESS BAR WITH WAVEFORM (MOVED MORE DOWN)
-        # ============================================
-        bar_y = 560  # Moved down from 540 (MORE BOTTOM)
-        bar_x_start = 40
-        bar_x_end = thumb_circle_x - 30  # Stop before circles
+        progress_left = PLAYBACK_BOX[0] + 34
+        bar_y = PLAYBACK_BOX[1] + 57
+        bar_x_start = progress_left
+        bar_x_end = PLAYBACK_BOX[2] - 34
         bar_width = bar_x_end - bar_x_start
-        bar_height = 30
+        progress_ratio = 0.37
+        prog_x = bar_x_start + int(bar_width * progress_ratio)
 
-        # Draw waveform visualization
-        draw_waveform(draw, bar_x_start, bar_y, bar_width, bar_height, (100, 150, 200), segments=80)
-
-        # Progress line (white line showing current progress at ~35%)
-        prog_x = bar_x_start + int(bar_width * 0.35)
+        draw.line(
+            [(bar_x_start, bar_y), (bar_x_end, bar_y)],
+            fill=(255, 255, 255, 34),
+            width=2,
+        )
         draw.line(
             [(bar_x_start, bar_y), (prog_x, bar_y)],
-            fill="white",
+            fill=(*accent_color, 165),
             width=3,
         )
-        # Progress indicator circle
-        draw.ellipse(
-            [(prog_x - 7, bar_y - 7), (prog_x + 7, bar_y + 7)],
-            fill="white",
+        draw_waveform(
+            draw,
+            bar_x_start,
+            bar_y,
+            bar_width,
+            14,
+            accent_color,
+            (255, 255, 255, 255),
+            progress_ratio=progress_ratio,
+            segments=72,
         )
 
-        # ============================================
-        # TIME INDICATORS (MOVED MORE DOWN)
-        # ============================================
-        time_y = bar_y + 45  # Moved down from 40 (MORE BOTTOM)
-        
-        # Current time (left)
+        draw.ellipse(
+            [(prog_x - 13, bar_y - 13), (prog_x + 13, bar_y + 13)],
+            fill=(*accent_color, 52),
+        )
+        draw.ellipse(
+            [(prog_x - 8, bar_y - 8), (prog_x + 8, bar_y + 8)],
+            fill=(255, 255, 255),
+            outline=accent_color,
+            width=3,
+        )
+
+        time_y = PLAYBACK_BOX[1] + 77
         draw.text(
-            (40, time_y),
+            (bar_x_start, time_y),
             "00:00",
             fill=(255, 255, 255),
-            font=time_font,
+            font=progress_time_font,
         )
-        
-        # Total duration (right)
+        duration_text_width = text_width(draw, duration, progress_time_font)
         draw.text(
-            (bar_x_end - 80, time_y),
-            f"{duration[:23]}",
+            (bar_x_end - duration_text_width, time_y),
+            duration,
             fill=(255, 255, 255),
-            font=time_font,
+            font=progress_time_font,
         )
 
-        # ============================================
-        # BOT NAME AT TOP RIGHT
-        # ============================================
-        try:
-            brand_name = unidecode(app.name)
-        except:
-            brand_name = "Elite Musics"
+        brand_name = "EliteMusic"
+        brand_center_x = (BRAND_BOX[0] + BRAND_BOX[2]) / 2
+        brand_center_y = ((BRAND_BOX[1] + BRAND_BOX[3]) / 2) + 1
+        draw.text(
+            (brand_center_x, brand_center_y),
+            brand_name,
+            fill=(255, 255, 255),
+            font=brand_font,
+            anchor="mm",
+        )
 
-        brand_font = load_font(TITLE_FONT_PATH, 22)
-        draw.text((CANVAS_WIDTH - 220, 25), brand_name, fill="white", font=brand_font)
+        draw.text(
+            (ART_CARD_BOX[0] + 28, ART_CARD_BOX[3] - 74),
+            trim_text(channel, 22),
+            fill=(232, 239, 247),
+            font=sub_font,
+        )
+        draw.text(
+            (ART_CARD_BOX[0] + 28, ART_CARD_BOX[3] - 42),
+            f"{views}  •  YouTube",
+            fill=(186, 200, 214),
+            font=progress_label_font,
+        )
 
-        # ============================================
-        # CLEANUP AND SAVE
-        # ============================================
         try:
-            os.remove(f"{CACHE_DIR}/thumb{videoid}.png")
-        except:
+            os.remove(temp_thumb_path)
+        except Exception:
+            pass
+        try:
+            if sp and os.path.exists(sp):
+                os.remove(sp)
+        except Exception:
             pass
 
-        # Save final thumbnail
         background.save(cache_path)
         return cache_path
 
-    except Exception as e:
+    except Exception:
+        try:
+            if os.path.exists(temp_thumb_path):
+                os.remove(temp_thumb_path)
+        except Exception:
+            pass
         return YOUTUBE_IMG_URL
