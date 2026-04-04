@@ -88,7 +88,13 @@ async def send_chunked_reply(message: Message, text: str):
         )
 
 
-async def process_query(client: Client, message: Message, *, tts: bool = False):
+async def process_query(
+    client: Client,
+    message: Message,
+    *,
+    tts: bool = False,
+    alias: str | None = None,
+):
     _, mention = get_requester_identity(message)
 
     if len(message.command) < 2 and not message.reply_to_message:
@@ -108,10 +114,14 @@ async def process_query(client: Client, message: Message, *, tts: bool = False):
 
     audio_file = None
     typing_task = asyncio.create_task(send_typing_action(client, message.chat.id))
+    command_name = ((message.command or [""])[0] or "").lower()
+    selected_alias = alias or "chatgpt"
+    if not alias and command_name in {"ai", "ask", "master"}:
+        selected_alias = "eliteai"
 
     try:
         result = await asyncio.wait_for(
-            generate_chat_response(query, alias="chatgpt"),
+            generate_chat_response(query, alias=selected_alias),
             timeout=60,
         )
 
@@ -139,7 +149,7 @@ async def process_query(client: Client, message: Message, *, tts: bool = False):
 
 @app.on_message(filters.command(["arvis"], prefixes=["j", "J"]))
 async def jarvis_handler(client: Client, message: Message):
-    await process_query(client, message)
+    await process_query(client, message, alias="jarvis")
 
 
 @app.on_message(
@@ -154,4 +164,4 @@ async def chatgpt_handler(client: Client, message: Message):
 
 @app.on_message(filters.command(["ssis"], prefixes=["a", "A"]))
 async def vivaan_tts_handler(client: Client, message: Message):
-    await process_query(client, message, tts=True)
+    await process_query(client, message, tts=True, alias="assis")
