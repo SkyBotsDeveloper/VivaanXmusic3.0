@@ -41,6 +41,11 @@ REPLICATE_KLING_MODEL = "kwaivgi/kling-v2.1"
 HF_VISION_SPACE = "prithivMLmods/Qwen2.5-VL"
 HF_VISION_FALLBACK_SPACE = "prithivMLmods/Qwen-3.5-HF-Demo"
 HF_VISION_ALT_SPACE = "vikhyatk/moondream2"
+HF_IMAGE_EDIT_SPACE = "Qwen/Qwen-Image-Edit-2511"
+HF_IMAGE_EDIT_FAST_SPACE = "Nichotin/Qwen-Image-Edit-2511-Fast-ZeroGPU"
+HF_IMAGE_EDIT_ALT_SPACE = "lenML/Qwen-Image-Edit-2511-Fast"
+HF_IMAGE_OBJECT_SPACE = "prithivMLmods/Qwen-Image-Edit-Object-Manipulator"
+HF_FACE_SWAP_SPACE = "V0pr0S/ComfyUI-Reactor-Fast-Face-Swap-CPU"
 DEFAULT_VISION_PROMPT = "Describe this image."
 DETAILED_VISION_PROMPT = (
     "Describe this image clearly and helpfully. Mention the main subject, setting, "
@@ -84,6 +89,15 @@ VISION_UPSTREAM_ERROR_MARKERS = (
     "queue is too long",
     "try again in",
     "upstream gradio app has raised an exception",
+)
+IMAGE_EDIT_ERROR_MARKERS = (
+    "you have exceeded your gpu quota",
+    "unlogged user is runnning out of daily zerogpu quotas",
+    "queue is too long",
+    "no gpu was available",
+    "try again in",
+    "upstream gradio app has raised an exception",
+    "provider timed out",
 )
 PROMO_URL_PATTERN = re.compile(
     r"https?://(?:t\.me|op\.wtf|ar-hosting\.pages\.dev)\S*",
@@ -339,6 +353,28 @@ def _extract_video_path(payload) -> str | None:
     return None
 
 
+def _extract_image_path(payload) -> str | None:
+    current = _unwrap_gradio_media(payload)
+    if isinstance(current, list):
+        for item in current:
+            candidate = _extract_image_path(item)
+            if candidate:
+                return candidate
+        return None
+    if isinstance(current, dict):
+        image = current.get("image")
+        if isinstance(image, dict):
+            image = image.get("path") or image.get("url")
+        if isinstance(image, str) and image:
+            return image
+        path = current.get("path") or current.get("url")
+        if isinstance(path, str) and path:
+            return path
+    if isinstance(current, str) and current:
+        return current
+    return None
+
+
 async def _ensure_local_video(path_or_url: str) -> str:
     if os.path.exists(path_or_url):
         return path_or_url
@@ -355,6 +391,27 @@ async def _ensure_local_video(path_or_url: str) -> str:
         if response.status_code != 200:
             raise FreeAIError("Generated video could not be downloaded.")
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as handle:
+            handle.write(response.content)
+            return handle.name
+
+
+async def _ensure_local_image(path_or_url: str) -> str:
+    if os.path.exists(path_or_url):
+        return path_or_url
+    if not re.match(r"^https?://", path_or_url, flags=re.IGNORECASE):
+        raise FreeAIError("Edited image file was not available locally.")
+
+    async with httpx.AsyncClient(
+        timeout=HTTP_TIMEOUT,
+        headers=HTTP_HEADERS,
+        follow_redirects=True,
+        trust_env=False,
+    ) as client:
+        response = await client.get(path_or_url)
+        if response.status_code != 200:
+            raise FreeAIError("Edited image could not be downloaded.")
+        suffix = os.path.splitext(path_or_url)[1] or ".png"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as handle:
             handle.write(response.content)
             return handle.name
 
@@ -1001,6 +1058,12 @@ def _raise_if_vision_upstream_error(text: str):
         raise FreeAIError(text)
 
 
+def _raise_if_image_edit_upstream_error(text: str):
+    lowered = (text or "").lower()
+    if any(marker in lowered for marker in IMAGE_EDIT_ERROR_MARKERS):
+        raise FreeAIError(text)
+
+
 def _is_default_vision_prompt(prompt: str) -> bool:
     text = (prompt or "").strip()
     return bool(DEFAULT_VISION_PATTERN.fullmatch(text)) or text == DETAILED_VISION_PROMPT
@@ -1440,6 +1503,341 @@ async def generate_vision_response(
         "Image analysis service is temporarily unavailable.\n"
         f"{details}"
     )
+
+
+IMAGE_EDIT_FACE_SWAP_PATTERNS = (
+    "face swap",
+    "swap face",
+    "swap faces",
+    "replace face",
+    "put the second face",
+    "use the second image face",
+)
+IMAGE_EDIT_REMOVE_PATTERNS = (
+    "remove",
+    "erase",
+    "delete",
+    "hide",
+    "take away",
+    "without",
+)
+IMAGE_EDIT_ADD_PATTERNS = (
+    "add",
+    "put",
+    "place",
+    "insert",
+    "give",
+    "wear",
+    "holding",
+    "make him hold",
+    "make her hold",
+)
+IMAGE_EDIT_CLOTHING_PATTERNS = (
+    "dress",
+    "outfit",
+    "clothes",
+    "clothing",
+    "shirt",
+    "t-shirt",
+    "tshirt",
+    "jacket",
+    "hoodie",
+    "kurta",
+    "saree",
+    "lehenga",
+    "wear",
+    "wearing",
+)
+
+
+def _prompt_is_face_swap(prompt: str) -> bool:
+    lowered = (prompt or "").lower()
+    if any(pattern in lowered for pattern in IMAGE_EDIT_FACE_SWAP_PATTERNS):
+        return True
+    return ("swap" in lowered and "face" in lowered) or (
+        "replace" in lowered and "face" in lowered
+    )
+
+
+def _choose_object_lora(prompt: str) -> str:
+    lowered = (prompt or "").lower()
+    if "extract outfit" in lowered or "extract clothing" in lowered or "flat mockup" in lowered:
+        return "Extract-Outfit"
+    if "outfit layout" in lowered or "design layout" in lowered or "fashion layout" in lowered:
+        return "Outfit-Design-Layout"
+    if "zoom" in lowered or "closer" in lowered or "close up" in lowered:
+        return "Zoom-Master"
+    if any(word in lowered for word in IMAGE_EDIT_REMOVE_PATTERNS):
+        return "QIE-2511-Object-Remover-v2"
+    return "Qwen-Image-Edit-2511-Object-Adder"
+
+
+def _prompt_mentions_clothing(prompt: str) -> bool:
+    lowered = (prompt or "").lower()
+    return any(word in lowered for word in IMAGE_EDIT_CLOTHING_PATTERNS)
+
+
+def _needs_object_manipulator(prompt: str) -> bool:
+    lowered = (prompt or "").lower()
+    if "extract outfit" in lowered or "extract clothing" in lowered or "flat mockup" in lowered:
+        return True
+    if "outfit layout" in lowered or "design layout" in lowered or "fashion layout" in lowered:
+        return True
+    if "zoom" in lowered or "closer" in lowered or "close up" in lowered:
+        return True
+    if any(word in lowered for word in IMAGE_EDIT_REMOVE_PATTERNS):
+        return True
+    if any(word in lowered for word in IMAGE_EDIT_ADD_PATTERNS):
+        return not _prompt_mentions_clothing(prompt)
+    return False
+
+
+def _gallery_inputs(image_paths: list[str]):
+    return [handle_file(path) for path in image_paths]
+
+
+def _run_qwen_image_edit_space(
+    space_id: str,
+    prompt: str,
+    image_paths: list[str],
+    *,
+    timeout_seconds: int,
+    rewrite_prompt: bool = True,
+) -> str:
+    guidance_scale = 4.0 if space_id == HF_IMAGE_EDIT_SPACE else 1.0
+    result = _run_with_hf_client(
+        space_id,
+        lambda client: _run_gradio_job(
+            client,
+            timeout_seconds,
+            _gallery_inputs(image_paths),
+            prompt,
+            0,
+            True,
+            guidance_scale,
+            4,
+            512,
+            512,
+            rewrite_prompt,
+            api_name="/infer",
+        ),
+        allow_anonymous=True,
+    )
+    image_path = _extract_image_path(result)
+    if not image_path:
+        raise FreeAIError(f"{space_id} returned no edited image.")
+    return image_path
+
+
+def _run_qwen_lenml_edit(
+    prompt: str,
+    image_paths: list[str],
+    *,
+    timeout_seconds: int,
+) -> str:
+    prepared = image_paths[:3]
+    while len(prepared) < 3:
+        prepared.append(prepared[-1] if prepared else image_paths[0])
+
+    result = _run_with_hf_client(
+        HF_IMAGE_EDIT_ALT_SPACE,
+        lambda client: _run_gradio_job(
+            client,
+            timeout_seconds,
+            handle_file(prepared[0]),
+            handle_file(prepared[1]),
+            handle_file(prepared[2]),
+            prompt,
+            0,
+            True,
+            1.0,
+            4,
+            512,
+            512,
+            api_name="/infer",
+        ),
+        allow_anonymous=True,
+    )
+    image_path = _extract_image_path(result)
+    if not image_path:
+        raise FreeAIError(f"{HF_IMAGE_EDIT_ALT_SPACE} returned no edited image.")
+    return image_path
+
+
+def _run_object_manipulator_edit(
+    prompt: str,
+    image_paths: list[str],
+    *,
+    timeout_seconds: int,
+) -> str:
+    result = _run_with_hf_client(
+        HF_IMAGE_OBJECT_SPACE,
+        lambda client: _run_gradio_job(
+            client,
+            timeout_seconds,
+            _gallery_inputs(image_paths),
+            prompt,
+            _choose_object_lora(prompt),
+            0,
+            True,
+            1.0,
+            4,
+            api_name="/infer",
+        ),
+        allow_anonymous=True,
+    )
+    image_path = _extract_image_path(result)
+    if not image_path:
+        raise FreeAIError(f"{HF_IMAGE_OBJECT_SPACE} returned no edited image.")
+    return image_path
+
+
+def _run_reactor_face_swap(
+    image_paths: list[str],
+    *,
+    timeout_seconds: int,
+) -> str:
+    if len(image_paths) < 2:
+        raise FreeAIError("Face swap needs two images.")
+
+    result = _run_with_hf_client(
+        HF_FACE_SWAP_SPACE,
+        lambda client: _run_gradio_job(
+            client,
+            timeout_seconds,
+            handle_file(image_paths[1]),
+            handle_file(image_paths[0]),
+            "0",
+            "hyperswap_1b_256.onnx",
+            "none",
+            0.7,
+            api_name="/generate_image",
+        ),
+        allow_anonymous=True,
+    )
+    image_path = _extract_image_path(result)
+    if not image_path:
+        raise FreeAIError(f"{HF_FACE_SWAP_SPACE} returned no swapped image.")
+    return image_path
+
+
+def _choose_image_edit_routes(prompt: str, image_count: int) -> tuple[str, ...]:
+    routes: list[str] = []
+    if image_count >= 2 and _prompt_is_face_swap(prompt):
+        routes.append("reactor_face_swap")
+    if image_count >= 2 and _prompt_mentions_clothing(prompt):
+        routes.extend(["qwen_official", "qwen_fast"])
+        if _needs_object_manipulator(prompt):
+            routes.append("object_manipulator")
+        routes.append("qwen_lenml")
+    else:
+        if _needs_object_manipulator(prompt):
+            routes.append("object_manipulator")
+        routes.extend(["qwen_official", "qwen_fast", "qwen_lenml"])
+
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for route in routes:
+        if route not in seen:
+            seen.add(route)
+            ordered.append(route)
+    return tuple(ordered)
+
+
+async def edit_image_bytes(
+    prompt: str,
+    *,
+    images: list[tuple[bytes, str]],
+) -> bytes:
+    text_prompt = (prompt or "").strip()
+    if not text_prompt:
+        raise FreeAIError("Please describe the image edit you want.")
+    if not images:
+        raise FreeAIError("Please reply to an image first.")
+
+    image_paths: list[str] = []
+    output_path: str | None = None
+    routes = _choose_image_edit_routes(text_prompt, len(images))
+
+    try:
+        for image_bytes, mime_type in images[:3]:
+            image_paths.append(_write_temp_image(image_bytes, mime_type))
+
+        for route in routes:
+            try:
+                if route == "reactor_face_swap":
+                    candidate = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            _run_reactor_face_swap,
+                            image_paths,
+                            timeout_seconds=90,
+                        ),
+                        timeout=100,
+                    )
+                elif route == "object_manipulator":
+                    candidate = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            _run_object_manipulator_edit,
+                            text_prompt,
+                            image_paths,
+                            timeout_seconds=80,
+                        ),
+                        timeout=90,
+                    )
+                elif route == "qwen_official":
+                    candidate = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            _run_qwen_image_edit_space,
+                            HF_IMAGE_EDIT_SPACE,
+                            text_prompt,
+                            image_paths,
+                            timeout_seconds=90,
+                            rewrite_prompt=True,
+                        ),
+                        timeout=100,
+                    )
+                elif route == "qwen_fast":
+                    candidate = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            _run_qwen_image_edit_space,
+                            HF_IMAGE_EDIT_FAST_SPACE,
+                            text_prompt,
+                            image_paths,
+                            timeout_seconds=70,
+                            rewrite_prompt=True,
+                        ),
+                        timeout=80,
+                    )
+                else:
+                    candidate = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            _run_qwen_lenml_edit,
+                            text_prompt,
+                            image_paths,
+                            timeout_seconds=70,
+                        ),
+                        timeout=80,
+                    )
+
+                output_path = await _ensure_local_image(candidate)
+                with open(output_path, "rb") as handle:
+                    return handle.read()
+            except asyncio.TimeoutError:
+                continue
+            except Exception as exc:
+                message = str(exc).strip() or "unknown error"
+                if any(marker in message.lower() for marker in IMAGE_EDIT_ERROR_MARKERS):
+                    continue
+                continue
+
+        raise FreeAIError(
+            "Image editing service is temporarily unavailable right now. Try again later."
+        )
+    finally:
+        for path in image_paths:
+            _remove_file(path)
+        if output_path and output_path not in image_paths:
+            _remove_file(output_path)
 
 
 async def generate_image(prompt: str) -> bytes:

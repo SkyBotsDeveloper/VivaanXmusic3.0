@@ -126,6 +126,7 @@ HELP_12 = """
 HELP_13 = """
 <b><u>Image</u></b>
 
+- /editimg - AI edit a replied image or image album with a prompt.
 - /getdraw - generate an AI image from a prompt.
 - /upscale - upscale a replied image.
 - /rmbg - remove the background from a replied image.

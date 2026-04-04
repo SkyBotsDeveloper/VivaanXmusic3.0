@@ -24,6 +24,7 @@ BOT_COMMANDS = [
     BotCommand("autoplay", "Toggle similar-song autoplay"),
     BotCommand("gpt", "Ask the AI assistant"),
     BotCommand("geminivision", "Analyze a replied image"),
+    BotCommand("editimg", "Edit a replied image with AI"),
     BotCommand("getdraw", "Generate an AI image"),
     BotCommand("genvid", "Generate a short AI video"),
     BotCommand("upscale", "Enhance a replied image"),
