@@ -5,7 +5,7 @@ from typing import Union
 
 from ntgcalls import TelegramServerError
 from pyrogram import Client
-from pyrogram.errors import FloodWait, ChatAdminRequired
+from pyrogram.errors import ChatAdminRequired
 from pyrogram.types import InlineKeyboardMarkup
 from pytgcalls import PyTgCalls
 from pytgcalls.exceptions import NoActiveGroupCall
@@ -33,7 +33,7 @@ from VIVAANXMUSIC.utils.formatters import check_duration, seconds_to_min, speed_
 from VIVAANXMUSIC.utils.inline.play import stream_markup
 from VIVAANXMUSIC.security import build_subprocess_env
 from VIVAANXMUSIC.utils.stream.autoclear import auto_clean
-from VIVAANXMUSIC.utils.thumbnails import get_thumb
+from VIVAANXMUSIC.utils.stream.cards import schedule_stream_card
 from VIVAANXMUSIC.utils.errors import capture_internal_err, send_large_error
 
 autoend = {}
@@ -407,21 +407,21 @@ class Call:
                 except Exception:
                     return await app.send_message(original_chat_id, text=_["call_6"])
 
-                img = await get_thumb(videoid, requester_id)
                 button = stream_markup(_, chat_id)
-                run = await app.send_photo(
-                    chat_id=original_chat_id,
-                    photo=img,
+                schedule_stream_card(
+                    chat_id=chat_id,
+                    original_chat_id=original_chat_id,
+                    videoid=videoid,
+                    user_id=requester_id,
                     caption=_["stream_1"].format(
                         f"https://t.me/{app.username}?start=info_{videoid}",
                         title[:23],
                         check[0]["dur"],
                         user,
                     ),
-                    reply_markup=InlineKeyboardMarkup(button),
+                    button=button,
+                    markup="tg",
                 )
-                db[chat_id][0]["mystic"] = run
-                db[chat_id][0]["markup"] = "tg"
 
             elif "vid_" in queued:
                 mystic = await app.send_message(original_chat_id, _["call_7"])
@@ -443,22 +443,22 @@ class Call:
                 except:
                     return await app.send_message(original_chat_id, text=_["call_6"])
 
-                img = await get_thumb(videoid, requester_id)
                 button = stream_markup(_, chat_id)
                 await mystic.delete()
-                run = await app.send_photo(
-                    chat_id=original_chat_id,
-                    photo=img,
+                schedule_stream_card(
+                    chat_id=chat_id,
+                    original_chat_id=original_chat_id,
+                    videoid=videoid,
+                    user_id=requester_id,
                     caption=_["stream_1"].format(
                         f"https://t.me/{app.username}?start=info_{videoid}",
                         title[:23],
                         check[0]["dur"],
                         user,
                     ),
-                    reply_markup=InlineKeyboardMarkup(button),
+                    button=button,
+                    markup="stream",
                 )
-                db[chat_id][0]["mystic"] = run
-                db[chat_id][0]["markup"] = "stream"
 
             elif "index_" in queued:
                 stream = dynamic_media_stream(path=videoid, video=video)
@@ -515,36 +515,21 @@ class Call:
                     db[chat_id][0]["markup"] = "tg"
 
                 else:
-                    img = await get_thumb(videoid, requester_id)
                     button = stream_markup(_, chat_id)
-                    try:
-                        run = await app.send_photo(
-                            chat_id=original_chat_id,
-                            photo=img,
-                            caption=_["stream_1"].format(
-                                f"https://t.me/{app.username}?start=info_{videoid}",
-                                title[:23],
-                                check[0]["dur"],
-                                user,
-                            ),
-                            reply_markup=InlineKeyboardMarkup(button),
-                        )
-                    except FloodWait as e:
-                        LOGGER(__name__).warning(f"FloodWait: Sleeping for {e.value}")
-                        await asyncio.sleep(e.value)
-                        run = await app.send_photo(
-                            chat_id=original_chat_id,
-                            photo=img,
-                            caption=_["stream_1"].format(
-                                f"https://t.me/{app.username}?start=info_{videoid}",
-                                title[:23],
-                                check[0]["dur"],
-                                user,
-                            ),
-                            reply_markup=InlineKeyboardMarkup(button),
-                        )
-                    db[chat_id][0]["mystic"] = run
-                    db[chat_id][0]["markup"] = "stream"
+                    schedule_stream_card(
+                        chat_id=chat_id,
+                        original_chat_id=original_chat_id,
+                        videoid=videoid,
+                        user_id=requester_id,
+                        caption=_["stream_1"].format(
+                            f"https://t.me/{app.username}?start=info_{videoid}",
+                            title[:23],
+                            check[0]["dur"],
+                            user,
+                        ),
+                        button=button,
+                        markup="stream",
+                    )
 
 
     async def start(self) -> None:

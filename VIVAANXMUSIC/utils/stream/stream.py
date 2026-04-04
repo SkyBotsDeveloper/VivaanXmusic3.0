@@ -12,8 +12,8 @@ from VIVAANXMUSIC.utils.database import add_active_video_chat, is_active_chat
 from VIVAANXMUSIC.utils.exceptions import AssistantErr
 from VIVAANXMUSIC.utils.inline import aq_markup, close_markup, stream_markup
 from VIVAANXMUSIC.utils.pastebin import VIVAANBIN
+from VIVAANXMUSIC.utils.stream.cards import schedule_stream_card
 from VIVAANXMUSIC.utils.stream.queue import put_queue, put_queue_index
-from VIVAANXMUSIC.utils.thumbnails import get_thumb
 from VIVAANXMUSIC.utils.errors import capture_internal_err
 
 
@@ -107,21 +107,21 @@ async def stream(
                     "video" if is_video else "audio",
                     forceplay=forceplay,
                 )
-                img = await get_thumb(vidid, user_id)
                 button = stream_markup(_, chat_id)
-                run = await app.send_photo(
-                    original_chat_id,
-                    photo=img,
+                schedule_stream_card(
+                    chat_id=chat_id,
+                    original_chat_id=original_chat_id,
+                    videoid=vidid,
+                    user_id=user_id,
                     caption=_["stream_1"].format(
                         f"https://t.me/{app.username}?start=info_{vidid}",
                         title[:23],
                         duration_min,
                         user_name,
                     ),
-                    reply_markup=InlineKeyboardMarkup(button),
+                    button=button,
+                    markup="stream",
                 )
-                db[chat_id][0]["mystic"] = run
-                db[chat_id][0]["markup"] = "stream"
 
         if count == 0:
             return
@@ -201,21 +201,21 @@ async def stream(
                 "video" if is_video else "audio",
                 forceplay=forceplay,
             )
-            img = await get_thumb(vidid, user_id)
             button = stream_markup(_, chat_id)
-            run = await app.send_photo(
-                original_chat_id,
-                photo=img,
+            schedule_stream_card(
+                chat_id=chat_id,
+                original_chat_id=original_chat_id,
+                videoid=vidid,
+                user_id=user_id,
                 caption=_["stream_1"].format(
                     f"https://t.me/{app.username}?start=info_{vidid}",
                     title[:23],
                     duration_min,
                     user_name,
                 ),
-                reply_markup=InlineKeyboardMarkup(button),
+                button=button,
+                markup="stream",
             )
-            db[chat_id][0]["mystic"] = run
-            db[chat_id][0]["markup"] = "stream"
 
     elif streamtype == "soundcloud":
         file_path = result["filepath"]
@@ -380,21 +380,21 @@ async def stream(
                 "video" if is_video else "audio",
                 forceplay=forceplay,
             )
-            img = await get_thumb(vidid, user_id)
             button = stream_markup(_, chat_id)
-            run = await app.send_photo(
-                original_chat_id,
-                photo=img,
+            schedule_stream_card(
+                chat_id=chat_id,
+                original_chat_id=original_chat_id,
+                videoid=vidid,
+                user_id=user_id,
                 caption=_["stream_1"].format(
                     f"https://t.me/{app.username}?start=info_{vidid}",
                     title[:23],
                     duration_min,
                     user_name,
                 ),
-                reply_markup=InlineKeyboardMarkup(button),
+                button=button,
+                markup="tg",
             )
-            db[chat_id][0]["mystic"] = run
-            db[chat_id][0]["markup"] = "tg"
 
     elif streamtype == "index":
         link = result

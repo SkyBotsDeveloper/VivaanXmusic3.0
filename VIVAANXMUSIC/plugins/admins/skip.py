@@ -9,7 +9,7 @@ from VIVAANXMUSIC.utils.database import get_loop
 from VIVAANXMUSIC.utils.decorators import AdminRightsCheck
 from VIVAANXMUSIC.utils.inline import close_markup, stream_markup
 from VIVAANXMUSIC.utils.stream.autoclear import auto_clean
-from VIVAANXMUSIC.utils.thumbnails import get_thumb
+from VIVAANXMUSIC.utils.stream.cards import schedule_stream_card
 from config import BANNED_USERS
 
 
@@ -116,19 +116,20 @@ async def skip(cli, message: Message, _, chat_id):
         except:
             return await message.reply_text(_["call_6"])
         button = stream_markup(_, chat_id)
-        img = await get_thumb(videoid, requester_id)
-        run = await message.reply_photo(
-            photo=img,
+        schedule_stream_card(
+            chat_id=chat_id,
+            original_chat_id=message.chat.id,
+            videoid=videoid,
+            user_id=requester_id,
             caption=_["stream_1"].format(
                 f"https://t.me/{app.username}?start=info_{videoid}",
                 title[:23],
                 check[0]["dur"],
                 user,
             ),
-            reply_markup=InlineKeyboardMarkup(button),
+            button=button,
+            markup="tg",
         )
-        db[chat_id][0]["mystic"] = run
-        db[chat_id][0]["markup"] = "tg"
     elif "vid_" in queued:
         mystic = await message.reply_text(_["call_7"], disable_web_page_preview=True)
         try:
@@ -149,19 +150,20 @@ async def skip(cli, message: Message, _, chat_id):
         except:
             return await mystic.edit_text(_["call_6"])
         button = stream_markup(_, chat_id)
-        img = await get_thumb(videoid, requester_id)
-        run = await message.reply_photo(
-            photo=img,
+        schedule_stream_card(
+            chat_id=chat_id,
+            original_chat_id=message.chat.id,
+            videoid=videoid,
+            user_id=requester_id,
             caption=_["stream_1"].format(
                 f"https://t.me/{app.username}?start=info_{videoid}",
                 title[:23],
                 check[0]["dur"],
                 user,
             ),
-            reply_markup=InlineKeyboardMarkup(button),
+            button=button,
+            markup="stream",
         )
-        db[chat_id][0]["mystic"] = run
-        db[chat_id][0]["markup"] = "stream"
         await mystic.delete()
     elif "index_" in queued:
         try:
@@ -218,16 +220,17 @@ async def skip(cli, message: Message, _, chat_id):
             db[chat_id][0]["markup"] = "tg"
         else:
             button = stream_markup(_, chat_id)
-            img = await get_thumb(videoid, requester_id)
-            run = await message.reply_photo(
-                photo=img,
+            schedule_stream_card(
+                chat_id=chat_id,
+                original_chat_id=message.chat.id,
+                videoid=videoid,
+                user_id=requester_id,
                 caption=_["stream_1"].format(
                     f"https://t.me/{app.username}?start=info_{videoid}",
                     title[:23],
                     check[0]["dur"],
                     user,
                 ),
-                reply_markup=InlineKeyboardMarkup(button),
+                button=button,
+                markup="stream",
             )
-            db[chat_id][0]["mystic"] = run
-            db[chat_id][0]["markup"] = "stream"

@@ -1,6 +1,7 @@
 import asyncio
 import os
 import re
+from functools import lru_cache
 import aiofiles
 import aiohttp
 import numpy as np
@@ -105,6 +106,7 @@ def resolve_brand_name() -> str:
     return clean_name or "EliteMusic"
 
 
+@lru_cache(maxsize=16)
 def load_font(path, size: int):
     """Load font with fallback to default."""
     try:

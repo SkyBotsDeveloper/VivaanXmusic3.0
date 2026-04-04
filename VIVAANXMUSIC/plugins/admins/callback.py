@@ -39,7 +39,7 @@ from VIVAANXMUSIC.utils.decorators import ActualAdminCB, languageCB
 from VIVAANXMUSIC.utils.formatters import seconds_to_min
 from VIVAANXMUSIC.utils.inline import close_markup, stream_markup, stream_markup_timer
 from VIVAANXMUSIC.utils.stream.autoclear import auto_clean
-from VIVAANXMUSIC.utils.thumbnails import get_thumb
+from VIVAANXMUSIC.utils.stream.cards import schedule_stream_card
 
 
 checker = {}
@@ -282,14 +282,20 @@ async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: 
         except Exception:
             return await callback.message.reply_text(_["call_6"])
         buttons = stream_markup(_, chat_id)
-        img = await get_thumb(videoid, requester_id)
-        run = await callback.message.reply_photo(
-            photo=img,
-            caption=_["stream_1"].format(f"https://t.me/{app.username}?start=info_{videoid}", title[:23], duration, user),
-            reply_markup=InlineKeyboardMarkup(buttons)
+        schedule_stream_card(
+            chat_id=chat_id,
+            original_chat_id=callback.message.chat.id,
+            videoid=videoid,
+            user_id=requester_id,
+            caption=_["stream_1"].format(
+                f"https://t.me/{app.username}?start=info_{videoid}",
+                title[:23],
+                duration,
+                user,
+            ),
+            button=buttons,
+            markup="tg",
         )
-        db[chat_id][0]["mystic"] = run
-        db[chat_id][0]["markup"] = "tg"
         await callback.edit_message_text(text_msg, reply_markup=close_markup(_))
 
     elif "vid_" in queued:
@@ -307,14 +313,20 @@ async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: 
         except Exception:
             return await mystic.edit_text(_["call_6"])
         buttons = stream_markup(_, chat_id)
-        img = await get_thumb(videoid, requester_id)
-        run = await callback.message.reply_photo(
-            photo=img,
-            caption=_["stream_1"].format(f"https://t.me/{app.username}?start=info_{videoid}", title[:23], duration, user),
-            reply_markup=InlineKeyboardMarkup(buttons)
+        schedule_stream_card(
+            chat_id=chat_id,
+            original_chat_id=callback.message.chat.id,
+            videoid=videoid,
+            user_id=requester_id,
+            caption=_["stream_1"].format(
+                f"https://t.me/{app.username}?start=info_{videoid}",
+                title[:23],
+                duration,
+                user,
+            ),
+            button=buttons,
+            markup="stream",
         )
-        db[chat_id][0]["mystic"] = run
-        db[chat_id][0]["markup"] = "stream"
         await callback.edit_message_text(text_msg, reply_markup=close_markup(_))
         await mystic.delete()
 
@@ -365,14 +377,20 @@ async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: 
             db[chat_id][0]["markup"] = "tg"
         else:
             buttons = stream_markup(_, chat_id)
-            img = await get_thumb(videoid, requester_id)
-            run = await callback.message.reply_photo(
-                photo=img,
-                caption=_["stream_1"].format(f"https://t.me/{app.username}?start=info_{videoid}", title[:23], duration, user),
-                reply_markup=InlineKeyboardMarkup(buttons)
+            schedule_stream_card(
+                chat_id=chat_id,
+                original_chat_id=callback.message.chat.id,
+                videoid=videoid,
+                user_id=requester_id,
+                caption=_["stream_1"].format(
+                    f"https://t.me/{app.username}?start=info_{videoid}",
+                    title[:23],
+                    duration,
+                    user,
+                ),
+                button=buttons,
+                markup="stream",
             )
-            db[chat_id][0]["mystic"] = run
-            db[chat_id][0]["markup"] = "stream"
         await callback.edit_message_text(text_msg, reply_markup=close_markup(_))
 
 
