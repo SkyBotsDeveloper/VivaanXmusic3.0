@@ -26,6 +26,7 @@ from VIVAANXMUSIC.utils.inline import (
 )
 from VIVAANXMUSIC.utils.logger import play_logs
 from VIVAANXMUSIC.utils.stream.stream import stream
+from VIVAANXMUSIC.utils.url_guard import is_safe_media_url
 
 
 @app.on_message(
@@ -195,6 +196,10 @@ async def play_command(
         return
 
     if url:
+        if not is_safe_media_url(url):
+            return await mystic.edit_text(
+                "» Unsafe or invalid link rejected."
+            )
         if await YouTube.exists(url):
             if "playlist" in url:
                 try:

@@ -21,6 +21,7 @@ import base64
 from VIVAANXMUSIC import LOGGER
 from VIVAANXMUSIC.utils.database import is_on_off
 from VIVAANXMUSIC.utils.formatters import time_to_seconds
+from VIVAANXMUSIC.utils.url_guard import is_safe_media_url
 from VIVAANXMUSIC.security import build_subprocess_env
 from config import DURATION_LIMIT, YT_API_KEY, YTPROXY_URL as YTPROXY
 
@@ -163,6 +164,8 @@ class YouTubeAPI:
     async def exists(self, link: str, videoid: Union[bool, str] = None):
         if videoid:
             link = self.base + link
+        if not is_safe_media_url(link):
+            return False
         if re.search(self.regex, link):
             return True
         else:

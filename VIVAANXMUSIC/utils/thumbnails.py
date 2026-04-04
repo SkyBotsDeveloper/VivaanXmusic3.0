@@ -1,4 +1,5 @@
 import asyncio
+import math
 import os
 import re
 from functools import lru_cache
@@ -100,6 +101,14 @@ def trim_text(text: str, limit: int) -> str:
     return clean_text[: max(limit - 3, 0)].rstrip() + "..."
 
 
+def blend_rgb(color_a, color_b, ratio: float):
+    ratio = max(0.0, min(1.0, ratio))
+    return tuple(
+        int((color_a[index] * (1.0 - ratio)) + (color_b[index] * ratio))
+        for index in range(3)
+    )
+
+
 def resolve_brand_name() -> str:
     raw_name = getattr(app, "name", None) or BOT_NAME or "EliteMusic"
     clean_name = trim_text(" ".join(unidecode(str(raw_name)).split()), 24)
@@ -180,31 +189,100 @@ def draw_waveform(
     progress_ratio=0.37,
     segments=72,
 ):
-    """Draw a cleaner rhythmic waveform with active/inactive regions."""
-    segment_width = width / max(segments, 1)
+    """Draw a centered, peaked waveform above the playback line."""
+    segment_width = width / max(segments - 1, 1)
     active_x = x_start + (width * progress_ratio)
-    accent_rgba = (*accent_color[:3], 205) if len(accent_color) == 4 else (*accent_color, 205)
-    base_rgba = (*base_color[:3], 92) if len(base_color) == 4 else (*base_color, 92)
+    accent_rgb = accent_color[:3]
+    base_rgb = base_color[:3]
 
     for i in range(segments):
-        center_x = x_start + ((i + 0.5) * segment_width)
-        motion = (
-            abs(np.sin((i * 0.31) + 0.4)) * 0.52
-            + abs(np.sin((i * 0.12) + 1.7)) * 0.28
-            + abs(np.sin((i * 0.74) + 0.2)) * 0.16
-        )
-        bar_height = max(4, int((height * 0.28) + (height * min(motion, 0.92))))
-        line_width = 2 if i % 7 else 3
-        color = accent_rgba if center_x <= active_x else base_rgba
+        center_x = x_start + (i * segment_width)
+        distance = abs(center_x - active_x) / max(width, 1)
+        envelope = math.exp(-((distance / 0.135) ** 2))
+        ripple = 0.45 + (0.55 * abs(math.sin((i * 0.39) + 0.8)))
+        bar_height = max(2, int(height * (0.08 + (envelope * ripple))))
+        strength = max(0.12, min(1.0, 0.16 + (envelope * 1.1)))
+        color = (*blend_rgb(base_rgb, accent_rgb, strength), int(70 + (185 * strength)))
 
-        draw.line(
-            [
-                (center_x, y - bar_height),
-                (center_x, y + bar_height),
-            ],
+        if bar_height <= 4:
+            draw.ellipse(
+                [(center_x - 1.5, y - 1.5), (center_x + 1.5, y + 1.5)],
+                fill=color,
+            )
+            continue
+
+        draw.rounded_rectangle(
+            [(center_x - 1.5, y - bar_height), (center_x + 1.5, y)],
+            radius=2,
             fill=color,
-            width=line_width,
         )
+
+
+def draw_transport_controls(draw, center_x: int, center_y: int, accent_color):
+    ring_color = (*blend_rgb(accent_color[:3], (255, 255, 255), 0.34), 195)
+    center_ring = (*blend_rgb(accent_color[:3], (255, 255, 255), 0.18), 225)
+    fill_color = (18, 24, 34, 220)
+    inner_fill = (*blend_rgb((18, 24, 34), accent_color[:3], 0.18), 235)
+    icon_color = (242, 245, 249, 230)
+
+    positions = (
+        (center_x - 52, 16, "prev"),
+        (center_x, 18, "pause"),
+        (center_x + 52, 16, "next"),
+    )
+
+    for x, radius, icon in positions:
+        outline = center_ring if icon == "pause" else ring_color
+        draw.ellipse(
+            [(x - radius, center_y - radius), (x + radius, center_y + radius)],
+            fill=fill_color,
+            outline=outline,
+            width=2,
+        )
+        draw.ellipse(
+            [(x - radius + 3, center_y - radius + 3), (x + radius - 3, center_y + radius - 3)],
+            fill=inner_fill,
+        )
+
+        if icon == "pause":
+            draw.rounded_rectangle(
+                [(x - 6, center_y - 8), (x - 2, center_y + 8)],
+                radius=2,
+                fill=icon_color,
+            )
+            draw.rounded_rectangle(
+                [(x + 2, center_y - 8), (x + 6, center_y + 8)],
+                radius=2,
+                fill=icon_color,
+            )
+        elif icon == "prev":
+            draw.polygon(
+                [(x + 6, center_y - 8), (x - 2, center_y), (x + 6, center_y + 8)],
+                fill=icon_color,
+            )
+            draw.polygon(
+                [(x - 2, center_y - 8), (x - 10, center_y), (x - 2, center_y + 8)],
+                fill=icon_color,
+            )
+            draw.rounded_rectangle(
+                [(x + 8, center_y - 9), (x + 10, center_y + 9)],
+                radius=1,
+                fill=icon_color,
+            )
+        else:
+            draw.polygon(
+                [(x - 6, center_y - 8), (x + 2, center_y), (x - 6, center_y + 8)],
+                fill=icon_color,
+            )
+            draw.polygon(
+                [(x + 2, center_y - 8), (x + 10, center_y), (x + 2, center_y + 8)],
+                fill=icon_color,
+            )
+            draw.rounded_rectangle(
+                [(x - 10, center_y - 9), (x - 8, center_y + 9)],
+                radius=1,
+                fill=icon_color,
+            )
 
 
 def draw_text_with_outline(draw, position, text, font, fill_color, outline_color, outline_width=2):
@@ -304,7 +382,7 @@ def accent_palette(image):
 async def get_thumb(videoid, user_id=None):
     """Generate an enhanced glassmorphic playback thumbnail."""
     cache_user_id = user_id if user_id is not None else "blank"
-    cache_path = os.path.join(CACHE_DIR, f"{videoid}_{cache_user_id}_elite_glass_v19.png")
+    cache_path = os.path.join(CACHE_DIR, f"{videoid}_{cache_user_id}_elite_glass_v23.png")
     if os.path.isfile(cache_path):
         return cache_path
 
@@ -368,6 +446,7 @@ async def get_thumb(videoid, user_id=None):
 
         youtube_thumb = Image.open(temp_thumb_path).convert("RGBA")
         accent_color, accent_soft = accent_palette(youtube_thumb)
+        playback_accent = blend_rgb(accent_color, accent_soft, 0.28)
         accent_glow = (*accent_color, 78)
         accent_wash = (*accent_soft, 54)
 
@@ -510,48 +589,48 @@ async def get_thumb(videoid, user_id=None):
             fill=(*accent_color, 190),
         )
 
-        progress_left = PLAYBACK_BOX[0] + 34
-        bar_y = PLAYBACK_BOX[1] + 57
+        progress_left = PLAYBACK_BOX[0] + 30
+        bar_y = PLAYBACK_BOX[1] + 52
         bar_x_start = progress_left
-        bar_x_end = PLAYBACK_BOX[2] - 34
+        bar_x_end = PLAYBACK_BOX[2] - 30
         bar_width = bar_x_end - bar_x_start
-        progress_ratio = 0.37
+        progress_ratio = 0.50
         prog_x = bar_x_start + int(bar_width * progress_ratio)
 
         draw.line(
             [(bar_x_start, bar_y), (bar_x_end, bar_y)],
-            fill=(255, 255, 255, 34),
-            width=2,
+            fill=(255, 255, 255, 165),
+            width=3,
         )
         draw.line(
             [(bar_x_start, bar_y), (prog_x, bar_y)],
-            fill=(*accent_color, 165),
-            width=3,
+            fill=(*playback_accent, 225),
+            width=4,
         )
         draw_waveform(
             draw,
             bar_x_start,
-            bar_y,
+            bar_y - 3,
             bar_width,
-            14,
-            accent_color,
-            (255, 255, 255, 255),
+            34,
+            playback_accent,
+            (255, 255, 255),
             progress_ratio=progress_ratio,
-            segments=72,
+            segments=86,
         )
 
         draw.ellipse(
             [(prog_x - 13, bar_y - 13), (prog_x + 13, bar_y + 13)],
-            fill=(*accent_color, 52),
+            fill=(*playback_accent, 58),
         )
         draw.ellipse(
             [(prog_x - 8, bar_y - 8), (prog_x + 8, bar_y + 8)],
             fill=(255, 255, 255),
-            outline=accent_color,
+            outline=playback_accent,
             width=3,
         )
 
-        time_y = PLAYBACK_BOX[1] + 77
+        time_y = PLAYBACK_BOX[1] + 62
         draw.text(
             (bar_x_start, time_y),
             "00:00",
@@ -564,6 +643,13 @@ async def get_thumb(videoid, user_id=None):
             duration,
             fill=(255, 255, 255),
             font=progress_time_font,
+        )
+
+        draw_transport_controls(
+            draw,
+            center_x=(PLAYBACK_BOX[0] + PLAYBACK_BOX[2]) // 2,
+            center_y=PLAYBACK_BOX[1] + 86,
+            accent_color=playback_accent,
         )
 
         brand_name = resolve_brand_name()
