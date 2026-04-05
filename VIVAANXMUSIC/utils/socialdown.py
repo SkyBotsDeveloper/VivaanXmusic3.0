@@ -6,6 +6,7 @@ import shutil
 import tempfile
 import time
 from dataclasses import dataclass
+from html import unescape
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
@@ -30,6 +31,9 @@ PYBALT_API_URL = "https://dwnld.nichind.dev/"
 LEGACY_COBALT_API_URL = "https://downloadapi.stuff.solutions/api/json"
 FIXTWEET_API_URL = "https://api.fxtwitter.com"
 COBALT_INSTANCE_TRACKER_URL = "https://instances.cobalt.best/instances.json"
+TIKWM_API_URL = "https://www.tikwm.com/api/"
+X_OEMBED_URL = "https://publish.twitter.com/oembed"
+YOUTUBE_OEMBED_URL = "https://www.youtube.com/oembed"
 
 INSTAGRAM_HOSTS = {
     "instagram.com",
@@ -91,6 +95,11 @@ PHOTO_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 AUDIO_EXTENSIONS = {".mp3", ".m4a", ".aac", ".ogg", ".opus", ".wav", ".flac"}
 X_STATUS_PATTERN = re.compile(r"/status(?:es)?/(\d+)", re.IGNORECASE)
 CONTENT_DISPOSITION_FILENAME = re.compile(r'filename\*?=(?:UTF-8\'\')?"?([^";]+)')
+META_TAG_PATTERN = re.compile(
+    r"<meta[^>]+(?:property|name)\s*=\s*['\"]([^'\"]+)['\"][^>]+content\s*=\s*['\"]([^'\"]*)['\"]",
+    re.IGNORECASE,
+)
+TITLE_TAG_PATTERN = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 _TRACKER_CACHE: list[dict] = []
 _TRACKER_CACHE_AT = 0.0
 _STRATEGY_COOLDOWNS: dict[str, float] = {}
@@ -105,6 +114,7 @@ class SocialMediaItem:
     url: str
     kind: str
     filename_hint: str = ""
+    content: str = ""
 
 
 @dataclass(slots=True)
@@ -112,6 +122,7 @@ class SocialDownloadBundle:
     title: str
     source: str
     items: list[SocialMediaItem]
+    note_text: str = ""
 
 
 def _service_works(value) -> bool:
@@ -146,6 +157,13 @@ def _clean_text(value: str | None) -> str:
 def _safe_filename(value: str | None, default: str) -> str:
     cleaned = re.sub(r'[\\/*?:"<>|]+', "_", _clean_text(value) or default).strip(" .")
     return (cleaned or default)[:160]
+
+
+def _clean_html_text(value: str | None) -> str:
+    if not value:
+        return ""
+    text = re.sub(r"<[^>]+>", " ", str(value))
+    return _clean_text(unescape(text))
 
 
 def _guess_kind(filename: str, content_type: str) -> str:
@@ -278,6 +296,101 @@ def _bundle_from_cobalt_payload(payload, source_name: str) -> SocialDownloadBund
     return None
 
 
+def _extract_html_metadata(html: str) -> tuple[str, str, str]:
+    snippet = html[:350000]
+    metas: dict[str, str] = {}
+    for key, value in META_TAG_PATTERN.findall(snippet):
+        normalized = str(key or "").strip().lower()
+        if normalized and normalized not in metas:
+            metas[normalized] = _clean_html_text(value)
+
+    title_match = TITLE_TAG_PATTERN.search(snippet)
+    title = (
+        metas.get("og:title")
+        or metas.get("twitter:title")
+        or _clean_html_text(title_match.group(1) if title_match else "")
+    )
+    description = (
+        metas.get("og:description")
+        or metas.get("twitter:description")
+        or metas.get("description")
+    )
+    site_name = metas.get("og:site_name") or metas.get("application-name") or ""
+    return title, description, site_name
+
+
+async def _build_page_note(client: httpx.AsyncClient, source_url: str) -> str:
+    try:
+        response = await client.get(
+            source_url,
+            timeout=API_TIMEOUT,
+            headers={
+                **HTTP_HEADERS,
+                "Accept": "text/html,application/xhtml+xml",
+            },
+        )
+        response.raise_for_status()
+    except Exception:
+        return ""
+
+    content_type = str(response.headers.get("content-type") or "").lower()
+    if "html" not in content_type:
+        return ""
+
+    title, description, site_name = _extract_html_metadata(response.text)
+    lines: list[str] = []
+    if site_name:
+        lines.append(f"Platform: {site_name}")
+    lines.append(f"Source URL: {source_url}")
+    if title:
+        lines.append(f"Title: {title}")
+    if description and description != title:
+        lines.append("")
+        lines.append(description)
+
+    note_text = "\n".join(line for line in lines if line is not None).strip()
+    return note_text if len(note_text) >= 20 else ""
+
+
+def _append_note(bundle: SocialDownloadBundle, note_text: str) -> SocialDownloadBundle:
+    note = str(note_text or "").strip()
+    if not note:
+        return bundle
+    if bundle.note_text:
+        return bundle
+    return SocialDownloadBundle(title=bundle.title, source=bundle.source, items=bundle.items, note_text=note)
+
+
+async def _build_youtube_oembed_note(client: httpx.AsyncClient, source_url: str) -> str:
+    try:
+        data = await _request_json(
+            client,
+            "GET",
+            YOUTUBE_OEMBED_URL,
+            timeout=API_TIMEOUT,
+            headers=HTTP_HEADERS,
+            params={"url": source_url, "format": "json"},
+        )
+    except Exception:
+        return ""
+
+    title = _clean_text(data.get("title"))
+    author_name = _clean_text(data.get("author_name"))
+    author_url = _clean_text(data.get("author_url"))
+    provider_name = _clean_text(data.get("provider_name"))
+    lines: list[str] = []
+    if provider_name:
+        lines.append(f"Platform: {provider_name}")
+    lines.append(f"Source URL: {source_url}")
+    if title:
+        lines.append(f"Title: {title}")
+    if author_name:
+        lines.append(f"Author: {author_name}")
+    if author_url:
+        lines.append(f"Author URL: {author_url}")
+    return "\n".join(lines).strip()
+
+
 async def _fetch_via_cobalt_api(
     client: httpx.AsyncClient,
     source_url: str,
@@ -402,7 +515,24 @@ def _bundle_from_fixtweet_payload(data, endpoint_name: str, status_id: str) -> S
 
     tweet = data.get("tweet") or {}
     media = tweet.get("media") or {}
+    author = tweet.get("author") or {}
     title = _safe_filename(tweet.get("text") or f"X {status_id}", f"X {status_id}")
+    raw_text = (
+        ((tweet.get("raw_text") or {}).get("text"))
+        or tweet.get("text")
+        or ""
+    ).strip()
+    author_name = _clean_text(author.get("name")) or "Unknown"
+    author_handle = _clean_text(author.get("screen_name"))
+    author_line = author_name
+    if author_handle:
+        author_line += f" (@{author_handle})"
+    post_url = _clean_text(tweet.get("url")) or f"https://x.com/i/status/{status_id}"
+    note_text = (
+        f"Author: {author_line}\n"
+        f"Post URL: {post_url}\n\n"
+        f"{raw_text}\n"
+    ).strip() if raw_text else ""
     items: list[SocialMediaItem] = []
     seen_urls: set[str] = set()
 
@@ -427,8 +557,27 @@ def _bundle_from_fixtweet_payload(data, endpoint_name: str, status_id: str) -> S
     add_item(external.get("url"), "video")
 
     if not items:
+        if raw_text:
+            return SocialDownloadBundle(
+                title=title,
+                source=endpoint_name,
+                items=[
+                    SocialMediaItem(
+                        url="",
+                        kind="text",
+                        filename_hint=f"{title}.txt",
+                        content=note_text,
+                    )
+                ],
+                note_text=note_text,
+            )
         raise SocialDownloadError(f"No direct media found in that X post via {endpoint_name}.")
-    return SocialDownloadBundle(title=title, source=endpoint_name, items=items[:MAX_MEDIA_FILES])
+    return SocialDownloadBundle(
+        title=title,
+        source=endpoint_name,
+        items=items[:MAX_MEDIA_FILES],
+        note_text=note_text,
+    )
 
 
 async def _fetch_x_via_fixtweet(
@@ -466,6 +615,119 @@ async def _fetch_x_via_fixtweet_video(
     return _bundle_from_fixtweet_payload(data, "FixTweet Video", status_id)
 
 
+async def _fetch_x_via_oembed(
+    client: httpx.AsyncClient,
+    source_url: str,
+) -> SocialDownloadBundle:
+    data = await _request_json(
+        client,
+        "GET",
+        X_OEMBED_URL,
+        timeout=API_TIMEOUT,
+        headers=HTTP_HEADERS,
+        params={"url": source_url, "omit_script": 1, "dnt": 1},
+    )
+    author_name = _clean_text(data.get("author_name")) or "Unknown"
+    post_url = _clean_text(data.get("url")) or source_url
+    html = str(data.get("html") or "")
+    text_match = re.search(r"<p[^>]*>(.*?)</p>", html, re.IGNORECASE | re.DOTALL)
+    post_text = _clean_html_text(text_match.group(1) if text_match else "")
+    title = _safe_filename(post_text or f"X {post_url.rsplit('/', 1)[-1]}", "X Post")
+    note_text = (
+        f"Author: {author_name}\n"
+        f"Post URL: {post_url}\n\n"
+        f"{post_text}\n"
+    ).strip()
+    if not post_text:
+        raise SocialDownloadError("X oEmbed returned no readable post text.")
+    return SocialDownloadBundle(
+        title=title,
+        source="X oEmbed",
+        items=[
+            SocialMediaItem(
+                url="",
+                kind="text",
+                filename_hint=f"{title}.txt",
+                content=note_text,
+            )
+        ],
+        note_text=note_text,
+    )
+
+
+async def _fetch_tiktok_via_tikwm(
+    client: httpx.AsyncClient,
+    source_url: str,
+) -> SocialDownloadBundle:
+    response = await client.post(
+        TIKWM_API_URL,
+        timeout=API_TIMEOUT,
+        headers={
+            **HTTP_HEADERS,
+            "User-Agent": "Mozilla/5.0",
+        },
+        data={"url": source_url},
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if int(payload.get("code") or -1) != 0:
+        raise SocialDownloadError(str(payload.get("msg") or "TikWM lookup failed."))
+
+    data = payload.get("data") or {}
+    title = _safe_filename(data.get("title") or "TikTok Video", "TikTok Video")
+    author = data.get("author") or {}
+    author_name = _clean_text(author.get("nickname"))
+    author_handle = _clean_text(author.get("unique_id"))
+    author_line = author_name or "Unknown"
+    if author_handle:
+        author_line += f" (@{author_handle})"
+    duration = data.get("duration")
+    note_lines = [
+        f"Author: {author_line}",
+        f"Post URL: {source_url}",
+    ]
+    if duration:
+        note_lines.append(f"Duration: {duration}s")
+    if title:
+        note_lines.extend(["", title])
+    note_text = "\n".join(note_lines).strip()
+
+    items: list[SocialMediaItem] = []
+    images = data.get("images") or []
+    for image_url in images[:MAX_MEDIA_FILES]:
+        if image_url:
+            items.append(
+                SocialMediaItem(
+                    url=str(image_url),
+                    kind="photo",
+                    filename_hint=title,
+                )
+            )
+
+    play_url = str(data.get("play") or "").strip()
+    wmplay_url = str(data.get("wmplay") or "").strip()
+    music_url = str(data.get("music") or "").strip()
+
+    if not items:
+        if play_url:
+            items.append(SocialMediaItem(url=play_url, kind="video", filename_hint=title))
+        elif wmplay_url:
+            items.append(SocialMediaItem(url=wmplay_url, kind="video", filename_hint=title))
+
+    if not items and music_url:
+        items.append(SocialMediaItem(url=music_url, kind="audio", filename_hint=title))
+
+    if not items:
+        raise SocialDownloadError("TikWM returned no downloadable TikTok media.")
+
+    return SocialDownloadBundle(
+        title=title,
+        source="TikWM",
+        items=items[:MAX_MEDIA_FILES],
+        note_text=note_text,
+    )
+
+
 async def get_social_bundle(platform: str, url: str) -> SocialDownloadBundle:
     safe_url = _validate_source_url(url, platform)
     failures: list[str] = []
@@ -495,7 +757,12 @@ async def get_social_bundle(platform: str, url: str) -> SocialDownloadBundle:
                 [
                     ("FixTweet", "fixtweet:generic", lambda: _fetch_x_via_fixtweet(client, safe_url)),
                     ("FixTweet Video", "fixtweet:video", lambda: _fetch_x_via_fixtweet_video(client, safe_url)),
+                    ("X oEmbed", "x:oembed", lambda: _fetch_x_via_oembed(client, safe_url)),
                 ]
+            )
+        elif platform == "tiktok":
+            strategies.append(
+                ("TikWM", "tiktok:tikwm", lambda: _fetch_tiktok_via_tikwm(client, safe_url))
             )
 
         strategies.extend(
@@ -537,10 +804,35 @@ async def get_social_bundle(platform: str, url: str) -> SocialDownloadBundle:
             if _on_cooldown(cooldown_key):
                 continue
             try:
-                return await runner()
+                bundle = await runner()
+                if platform == "youtube":
+                    bundle = _append_note(bundle, await _build_youtube_oembed_note(client, safe_url))
+                elif platform != "x":
+                    bundle = _append_note(bundle, await _build_page_note(client, safe_url))
+                return bundle
             except Exception as exc:
                 _mark_cooldown(cooldown_key)
                 failures.append(f"{label}: {exc}")
+
+        page_note = await _build_page_note(client, safe_url)
+        if page_note:
+            fallback_title = _safe_filename(
+                page_note.splitlines()[0].replace("Title: ", "").replace("Platform: ", "") or f"{platform.title()} Post",
+                f"{platform.title()} Post",
+            )
+            return SocialDownloadBundle(
+                title=fallback_title,
+                source="Page Metadata",
+                items=[
+                    SocialMediaItem(
+                        url="",
+                        kind="text",
+                        filename_hint=f"{fallback_title}.txt",
+                        content=page_note,
+                    )
+                ],
+                note_text=page_note,
+            )
 
     details = "\n".join(failures[:3])
     raise SocialDownloadError(
@@ -561,6 +853,19 @@ async def download_bundle_files(bundle: SocialDownloadBundle) -> tuple[str, list
     ) as client:
         try:
             for index, item in enumerate(bundle.items[:MAX_MEDIA_FILES], start=1):
+                if item.kind == "text" and item.content:
+                    filename = _safe_filename(
+                        item.filename_hint or f"{bundle.title}_{index}.txt",
+                        f"{bundle.title}_{index}.txt",
+                    )
+                    if not filename.lower().endswith(".txt"):
+                        filename += ".txt"
+                    file_path = os.path.join(temp_dir, filename)
+                    with open(file_path, "w", encoding="utf-8") as handle:
+                        handle.write(item.content)
+                    downloads.append((file_path, "document"))
+                    continue
+
                 safe_remote = validate_public_http_url(item.url, allow_subdomains=True)
                 async with client.stream("GET", safe_remote) as response:
                     response.raise_for_status()
@@ -589,6 +894,16 @@ async def download_bundle_files(bundle: SocialDownloadBundle) -> tuple[str, list
                             str(response.headers.get("content-type") or ""),
                         )
                     downloads.append((file_path, media_kind))
+
+            has_text_item = any(item.kind == "text" for item in bundle.items[:MAX_MEDIA_FILES])
+            if bundle.note_text and not has_text_item:
+                note_name = _safe_filename(f"{bundle.title}_details.txt", f"{bundle.title}_details.txt")
+                if not note_name.lower().endswith(".txt"):
+                    note_name += ".txt"
+                note_path = os.path.join(temp_dir, note_name)
+                with open(note_path, "w", encoding="utf-8") as handle:
+                    handle.write(bundle.note_text)
+                downloads.append((note_path, "document"))
 
             if not downloads:
                 raise SocialDownloadError("No media could be downloaded from that link.")
