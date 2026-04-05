@@ -16,6 +16,7 @@ from gradio_client import Client as GradioClient, handle_file
 from PIL import Image
 
 import config as runtime_config
+from VIVAANXMUSIC.security import build_subprocess_env
 
 
 GENVID_USE_PUBLIC_FALLBACKS = getattr(
@@ -583,6 +584,80 @@ async def _ensure_local_image(path_or_url: str) -> str:
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as handle:
             handle.write(response.content)
             return handle.name
+
+
+async def _render_local_backup_video(image_path: str) -> str:
+    width, height = _compute_video_dimensions(image_path)
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as handle:
+        output_path = handle.name
+
+    vf = (
+        f"scale={width}:{height}:force_original_aspect_ratio=increase,"
+        f"crop={width}:{height},format=yuv420p,"
+        "fade=t=in:st=0:d=0.25,fade=t=out:st=3.75:d=0.25"
+    )
+
+    process = await asyncio.create_subprocess_exec(
+        "ffmpeg",
+        "-y",
+        "-loop",
+        "1",
+        "-i",
+        image_path,
+        "-vf",
+        vf,
+        "-t",
+        "4",
+        "-r",
+        "24",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-movflags",
+        "+faststart",
+        "-pix_fmt",
+        "yuv420p",
+        output_path,
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
+        env=build_subprocess_env(),
+    )
+    _, stderr = await process.communicate()
+    if process.returncode != 0 or not os.path.exists(output_path):
+        _remove_file(output_path)
+        error_text = (stderr or b"").decode("utf-8", "ignore").strip()
+        raise FreeAIError(error_text or "Local backup render failed.")
+    return output_path
+
+
+async def _run_local_backup_video(
+    prompt: str,
+    *,
+    reference_image_path: str | None,
+) -> VideoResult:
+    generated_image_path = None
+    try:
+        if reference_image_path:
+            image_path = reference_image_path
+            provider_name = "Local backup animation"
+            used_reference = True
+        else:
+            image_bytes = await generate_image(prompt)
+            generated_image_path = _write_temp_image(image_bytes, "image/png")
+            image_path = generated_image_path
+            provider_name = "Local backup render"
+            used_reference = False
+
+        video_path = await _render_local_backup_video(image_path)
+        return VideoResult(
+            provider=provider_name,
+            file_path=video_path,
+            used_reference_image=used_reference,
+        )
+    finally:
+        if generated_image_path:
+            _remove_file(generated_image_path)
 
 
 def _run_gradio_job(client: GradioClient, timeout_seconds: int, *args, api_name: str):
@@ -2583,6 +2658,40 @@ async def generate_video(
                     used_reference_image and result.used_reference_image
                 )
                 return result
+
+            if (
+                not REPLICATE_TOKEN_POOL
+                and not HF_TOKEN_POOL
+                and batch
+                and batch[0].name == "DeepRat / LTX Video"
+            ):
+                if progress_callback:
+                    await progress_callback("Backup render")
+                try:
+                    result = await _run_local_backup_video(
+                        text_prompt,
+                        reference_image_path=reference_image_path,
+                    )
+                    result.used_reference_image = (
+                        used_reference_image and result.used_reference_image
+                    )
+                    return result
+                except Exception as exc:
+                    failures.append(f"Local backup: {exc}")
+
+        if progress_callback:
+            await progress_callback("Backup render")
+        try:
+            result = await _run_local_backup_video(
+                text_prompt,
+                reference_image_path=reference_image_path,
+            )
+            result.used_reference_image = (
+                used_reference_image and result.used_reference_image
+            )
+            return result
+        except Exception as exc:
+            failures.append(f"Local backup: {exc}")
 
         details = "\n".join(failures[:8])
         if REPLICATE_TOKEN_POOL:
