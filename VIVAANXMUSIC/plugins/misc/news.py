@@ -21,7 +21,7 @@ NEWS_HEADERS = {
     )
 }
 GOOGLE_NEWS_RSS = (
-    "https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en"
+    "https://news.google.com/rss/search?q={query}&hl={hl}&gl={gl}&ceid={ceid}"
 )
 MAX_RESULTS = 5
 FETCH_LIMIT = 25
@@ -48,12 +48,28 @@ TRUSTED_SOURCES = {
     "TechCrunch": 82,
     "The Verge": 81,
     "Ars Technica": 81,
+    "The Hindu": 82,
+    "The Indian Express": 81,
+    "India Today": 79,
+    "NDTV": 79,
+    "NDTV Profit": 79,
+    "Hindustan Times": 78,
+    "The Times of India": 77,
+    "The Economic Times": 77,
+    "Business Standard": 76,
+    "Mint": 76,
+    "News18": 73,
+    "The Tribune India": 72,
 }
 SOURCE_ALIASES = {
     "BBC": "BBC News",
     "AP": "AP News",
     "Wall Street Journal": "WSJ",
     "Guardian": "The Guardian",
+    "BBC.com": "BBC News",
+    "The Hindu BusinessLine": "The Hindu",
+    "The Economic Times on MSN.com": "The Economic Times",
+    "The Times of India on MSN.com": "The Times of India",
 }
 TRUSTED_QUERY_GROUPS = [
     [
@@ -100,6 +116,71 @@ TOPIC_STOPWORDS = {
     "latest",
     "news",
 }
+COUNTRY_ALIASES = {
+    "india": ("en-IN", "IN", "IN:en"),
+    "indian": ("en-IN", "IN", "IN:en"),
+    "pakistan": ("en-PK", "PK", "PK:en"),
+    "pakistani": ("en-PK", "PK", "PK:en"),
+    "bangladesh": ("en-BD", "BD", "BD:en"),
+    "bangladeshi": ("en-BD", "BD", "BD:en"),
+    "nepal": ("en-NP", "NP", "NP:en"),
+    "nepali": ("en-NP", "NP", "NP:en"),
+    "sri lanka": ("en-LK", "LK", "LK:en"),
+    "sri lankan": ("en-LK", "LK", "LK:en"),
+    "uae": ("en-AE", "AE", "AE:en"),
+    "united arab emirates": ("en-AE", "AE", "AE:en"),
+    "saudi arabia": ("en-SA", "SA", "SA:en"),
+    "qatar": ("en-QA", "QA", "QA:en"),
+    "kuwait": ("en-KW", "KW", "KW:en"),
+    "oman": ("en-OM", "OM", "OM:en"),
+    "bahrain": ("en-BH", "BH", "BH:en"),
+    "united states": ("en-US", "US", "US:en"),
+    "usa": ("en-US", "US", "US:en"),
+    "america": ("en-US", "US", "US:en"),
+    "uk": ("en-GB", "GB", "GB:en"),
+    "united kingdom": ("en-GB", "GB", "GB:en"),
+    "britain": ("en-GB", "GB", "GB:en"),
+    "england": ("en-GB", "GB", "GB:en"),
+    "canada": ("en-CA", "CA", "CA:en"),
+    "australia": ("en-AU", "AU", "AU:en"),
+    "new zealand": ("en-NZ", "NZ", "NZ:en"),
+    "singapore": ("en-SG", "SG", "SG:en"),
+    "malaysia": ("en-MY", "MY", "MY:en"),
+    "philippines": ("en-PH", "PH", "PH:en"),
+    "indonesia": ("id", "ID", "ID:id"),
+    "japan": ("ja", "JP", "JP:ja"),
+    "japanese": ("ja", "JP", "JP:ja"),
+    "south korea": ("ko", "KR", "KR:ko"),
+    "korea": ("ko", "KR", "KR:ko"),
+    "china": ("zh-CN", "CN", "CN:zh-CN"),
+    "taiwan": ("zh-TW", "TW", "TW:zh-TW"),
+    "hong kong": ("zh-HK", "HK", "HK:zh-HK"),
+    "germany": ("de", "DE", "DE:de"),
+    "german": ("de", "DE", "DE:de"),
+    "france": ("fr", "FR", "FR:fr"),
+    "french": ("fr", "FR", "FR:fr"),
+    "spain": ("es", "ES", "ES:es"),
+    "italy": ("it", "IT", "IT:it"),
+    "netherlands": ("nl", "NL", "NL:nl"),
+    "sweden": ("sv", "SE", "SE:sv"),
+    "norway": ("no", "NO", "NO:no"),
+    "denmark": ("da", "DK", "DK:da"),
+    "finland": ("fi", "FI", "FI:fi"),
+    "ireland": ("en-IE", "IE", "IE:en"),
+    "south africa": ("en-ZA", "ZA", "ZA:en"),
+    "nigeria": ("en-NG", "NG", "NG:en"),
+    "kenya": ("en-KE", "KE", "KE:en"),
+    "brazil": ("pt-BR", "BR", "BR:pt-419"),
+    "mexico": ("es-419", "MX", "MX:es-419"),
+    "argentina": ("es-419", "AR", "AR:es-419"),
+    "turkey": ("tr", "TR", "TR:tr"),
+    "turkiye": ("tr", "TR", "TR:tr"),
+    "russia": ("ru", "RU", "RU:ru"),
+    "ukraine": ("uk", "UA", "UA:uk"),
+    "poland": ("pl", "PL", "PL:pl"),
+    "israel": ("en-IL", "IL", "IL:en"),
+}
+DEFAULT_LOCALE = ("en-US", "US", "US:en")
 
 
 @dataclass(slots=True)
@@ -113,6 +194,13 @@ class NewsItem:
 
 class NewsFetchError(RuntimeError):
     pass
+
+
+@dataclass(slots=True, frozen=True)
+class NewsLocale:
+    hl: str
+    gl: str
+    ceid: str
 
 
 def _normalize_source(source: str) -> str:
@@ -141,6 +229,14 @@ def _parse_pub_date(value: str | None) -> tuple[str, float]:
         return published, dt.timestamp()
     except Exception:
         return str(value), 0.0
+
+
+def _detect_locale(topic: str) -> NewsLocale:
+    text = f" {topic.lower()} "
+    for alias, config in sorted(COUNTRY_ALIASES.items(), key=lambda item: -len(item[0])):
+        if f" {alias} " in text:
+            return NewsLocale(*config)
+    return NewsLocale(*DEFAULT_LOCALE)
 
 
 def _query_variants(topic: str) -> list[str]:
@@ -230,6 +326,24 @@ def _select_news_items(items: list[NewsItem], topic: str) -> list[NewsItem]:
     return trusted[:MAX_RESULTS]
 
 
+def _select_local_fallback_items(items: list[NewsItem], topic: str) -> list[NewsItem]:
+    topic_tokens = _topic_tokens(topic)
+    ranked = items[:]
+    ranked.sort(
+        key=lambda item: (
+            -_relevance_score(item, topic_tokens),
+            -item.sort_key,
+            -item.trusted_weight,
+            item.title.lower(),
+        )
+    )
+    if topic_tokens:
+        positive = [item for item in ranked if _relevance_score(item, topic_tokens) > 0]
+        if positive:
+            ranked = positive
+    return ranked[:MAX_RESULTS]
+
+
 async def fetch_latest_news(topic: str) -> list[NewsItem]:
     variants = _query_variants(topic)
     if not variants:
@@ -237,6 +351,11 @@ async def fetch_latest_news(topic: str) -> list[NewsItem]:
 
     collected: list[NewsItem] = []
     seen_titles: set[str] = set()
+    locale = _detect_locale(topic)
+    locale_candidates = [locale]
+    default_locale = NewsLocale(*DEFAULT_LOCALE)
+    if locale != default_locale:
+        locale_candidates.append(default_locale)
 
     async with httpx.AsyncClient(
         timeout=NEWS_TIMEOUT,
@@ -244,20 +363,30 @@ async def fetch_latest_news(topic: str) -> list[NewsItem]:
         follow_redirects=True,
         trust_env=False,
     ) as client:
-        for query in variants:
-            url = GOOGLE_NEWS_RSS.format(query=quote_plus(query))
-            response = await client.get(url)
-            response.raise_for_status()
-            for item in _parse_google_feed(response.text):
-                key = item.title.lower()
-                if key in seen_titles:
-                    continue
-                seen_titles.add(key)
-                collected.append(item)
+        for feed_locale in locale_candidates:
+            for query in variants:
+                url = GOOGLE_NEWS_RSS.format(
+                    query=quote_plus(query),
+                    hl=feed_locale.hl,
+                    gl=feed_locale.gl,
+                    ceid=feed_locale.ceid,
+                )
+                response = await client.get(url)
+                response.raise_for_status()
+                for item in _parse_google_feed(response.text):
+                    key = item.title.lower()
+                    if key in seen_titles:
+                        continue
+                    seen_titles.add(key)
+                    collected.append(item)
+                if len(_select_news_items(collected, topic)) >= MAX_RESULTS:
+                    break
             if len(_select_news_items(collected, topic)) >= MAX_RESULTS:
                 break
 
     selected = _select_news_items(collected, topic)
+    if not selected and collected:
+        selected = _select_local_fallback_items(collected, topic)
     if not selected:
         raise NewsFetchError(
             "No recent coverage from reliable sources was found for that topic."

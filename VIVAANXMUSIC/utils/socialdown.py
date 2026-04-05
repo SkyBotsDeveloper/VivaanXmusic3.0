@@ -30,6 +30,7 @@ TRACKER_CACHE_TTL_SECONDS = 900
 PYBALT_API_URL = "https://dwnld.nichind.dev/"
 LEGACY_COBALT_API_URL = "https://downloadapi.stuff.solutions/api/json"
 FIXTWEET_API_URL = "https://api.fxtwitter.com"
+VXTWITTER_API_URL = "https://api.vxtwitter.com"
 COBALT_INSTANCE_TRACKER_URL = "https://instances.cobalt.best/instances.json"
 TIKWM_API_URL = "https://www.tikwm.com/api/"
 X_OEMBED_URL = "https://publish.twitter.com/oembed"
@@ -583,6 +584,98 @@ def _bundle_from_fixtweet_payload(data, endpoint_name: str, status_id: str) -> S
     )
 
 
+def _bundle_from_vxtwitter_payload(data, endpoint_name: str, status_id: str) -> SocialDownloadBundle:
+    if not isinstance(data, dict):
+        raise SocialDownloadError(f"{endpoint_name} returned an invalid response.")
+
+    raw_text = _strip_urls_from_text(data.get("text"))
+    author_name = _clean_text(data.get("user_name")) or "Unknown"
+    author_handle = _clean_text(data.get("user_screen_name"))
+    author_line = author_name
+    if author_handle:
+        author_line += f" (@{author_handle})"
+
+    title = _safe_filename(raw_text or f"X {status_id}", f"X {status_id}")
+    note_text = (
+        f"Author: {author_line}\n"
+        f"\n{raw_text}\n"
+    ).strip() if raw_text else ""
+
+    items: list[SocialMediaItem] = []
+    seen_urls: set[str] = set()
+
+    def add_item(media_url: str | None, kind: str):
+        url = str(media_url or "").strip()
+        if not url or url in seen_urls:
+            return
+        seen_urls.add(url)
+        items.append(SocialMediaItem(url=url, kind=kind, filename_hint=title))
+
+    combined_url = str(data.get("combinedMediaUrl") or "").strip()
+    media_urls = data.get("mediaURLs") or []
+    media_extended = data.get("media_extended") or []
+
+    for entry in media_extended[:MAX_MEDIA_FILES]:
+        if not isinstance(entry, dict):
+            continue
+        media_type = str(entry.get("type") or "").lower()
+        media_url = entry.get("url")
+        if media_type == "video":
+            add_item(media_url, "video")
+        elif media_type in {"photo", "image", "gif"}:
+            add_item(media_url, "photo")
+
+    for media_url in media_urls[:MAX_MEDIA_FILES]:
+        add_item(media_url, "video")
+
+    if combined_url:
+        add_item(combined_url, "video")
+
+    if not items:
+        if raw_text:
+            return SocialDownloadBundle(
+                title=title,
+                source=endpoint_name,
+                items=[
+                    SocialMediaItem(
+                        url="",
+                        kind="text",
+                        filename_hint=f"{title}.txt",
+                        content=note_text,
+                    )
+                ],
+                note_text=note_text,
+            )
+        raise SocialDownloadError(f"No direct media found in that X post via {endpoint_name}.")
+
+    return SocialDownloadBundle(
+        title=title,
+        source=endpoint_name,
+        items=items[:MAX_MEDIA_FILES],
+        note_text=note_text,
+    )
+
+
+async def _fetch_x_via_vxtwitter(
+    client: httpx.AsyncClient,
+    source_url: str,
+    *,
+    screen_name: str | None = None,
+) -> SocialDownloadBundle:
+    status_id = _extract_x_status_id(source_url)
+    endpoint = f"{VXTWITTER_API_URL}/i/status/{status_id}"
+    if screen_name:
+        endpoint = f"{VXTWITTER_API_URL}/{screen_name}/status/{status_id}"
+    data = await _request_json(
+        client,
+        "GET",
+        endpoint,
+        timeout=API_TIMEOUT,
+        headers=HTTP_HEADERS,
+    )
+    return _bundle_from_vxtwitter_payload(data, "VxTwitter", status_id)
+
+
 async def _fetch_x_via_fixtweet(
     client: httpx.AsyncClient,
     source_url: str,
@@ -745,6 +838,17 @@ async def get_social_bundle(platform: str, url: str) -> SocialDownloadBundle:
             if screen_name:
                 strategies.append(
                     (
+                        "VxTwitter",
+                        f"vxtwitter:{screen_name}",
+                        lambda: _fetch_x_via_vxtwitter(
+                            client,
+                            safe_url,
+                            screen_name=screen_name,
+                        ),
+                    )
+                )
+                strategies.append(
+                    (
                         "FixTweet",
                         f"fixtweet:{screen_name}",
                         lambda: _fetch_x_via_fixtweet(
@@ -756,6 +860,7 @@ async def get_social_bundle(platform: str, url: str) -> SocialDownloadBundle:
                 )
             strategies.extend(
                 [
+                    ("VxTwitter", "vxtwitter:generic", lambda: _fetch_x_via_vxtwitter(client, safe_url)),
                     ("FixTweet", "fixtweet:generic", lambda: _fetch_x_via_fixtweet(client, safe_url)),
                     ("FixTweet Video", "fixtweet:video", lambda: _fetch_x_via_fixtweet_video(client, safe_url)),
                     ("X oEmbed", "x:oembed", lambda: _fetch_x_via_oembed(client, safe_url)),
