@@ -27,10 +27,12 @@ LYRICS_OVH_LYRICS_URL = "https://api.lyrics.ovh/v1"
 ITUNES_SEARCH_URL = "https://itunes.apple.com/search"
 LYRICSCOM_SEARCH_URL = "https://www.lyrics.com/lyrics"
 DUCKDUCKGO_HTML_SEARCH_URL = "https://html.duckduckgo.com/html/"
+LYRICSBOGIE_SEARCH_URL = "https://www.lyricsbogie.com/wp-json/wp/v2/search"
 
 MAX_SEARCH_RESULTS = 10
 SOURCE_BASE_SCORES = {
     "lrclib": 95.0,
+    "lyricsbogie": 150.0,
     "lyricscom": 88.0,
     "allthelyrics": 86.0,
     "letras": 84.0,
@@ -222,7 +224,7 @@ def _score_candidate(query: str, candidate: LyricsCandidate, index: int) -> floa
         elif text_hits == len(query_tokens):
             score += 28
 
-        if len(query_tokens) >= 5 and candidate.source == "lyricsovh":
+        if len(query_tokens) >= 5 and candidate.source == "lyricsovh" and candidate.plain_lyrics:
             score += 150
         if len(query_tokens) >= 5 and lyrics_hits >= max(2, len(query_tokens) // 2):
             score += 45
@@ -360,6 +362,52 @@ async def _fetch_candidate_page(
         return LyricsCandidate(
             title=title,
             artist=artist,
+            source=source,
+            page_url=page_url,
+            plain_lyrics=lyrics,
+        )
+
+    if source == "lyricsbogie":
+        title = _clean_text(
+            (soup.find("meta", attrs={"property": "og:title"}) or {}).get("content")
+        )
+        if not title:
+            title = _clean_text(soup.find("h1").get_text(" ", strip=True) if soup.find("h1") else "")
+            title = re.sub(r"\s+Lyrics$", "", title, flags=re.IGNORECASE).strip()
+
+        artist = ""
+        subtitle = soup.find("h2", class_="lyrics-subtitle")
+        subtitle_text = _clean_text(subtitle.get_text(" ", strip=True) if subtitle else "")
+        match = re.match(r".+?Lyrics\s+[–-]\s+(.+)$", subtitle_text, re.IGNORECASE)
+        if match:
+            artist = _clean_text(match.group(1))
+
+        album = ""
+        movie_row = soup.find(string=re.compile(r"Movie:", re.IGNORECASE))
+        if movie_row:
+            album = _clean_text(str(movie_row).replace("Movie:", ""))
+
+        lyrics_node = soup.select_one("div.wp-block-ub-tabbed-content-tab-content-wrap.active")
+        if not lyrics_node:
+            lyrics_node = soup.select_one("div.wp-block-ub-tabbed-content-tabs-content")
+        if not lyrics_node:
+            return None
+
+        lyrics_node = BeautifulSoup(str(lyrics_node), "html.parser")
+        for junk in lyrics_node.select("script, style, [rel='domain'], .ad, .code-block"):
+            junk.decompose()
+        for br in lyrics_node.find_all("br"):
+            br.replace_with("\n")
+
+        lyrics = _clean_lyrics_text(
+            lyrics_node.get_text("\n").replace("lyricsbogie.com", " ")
+        )
+        if not title or not lyrics:
+            return None
+        return LyricsCandidate(
+            title=title,
+            artist=artist,
+            album=album,
             source=source,
             page_url=page_url,
             plain_lyrics=lyrics,
@@ -529,6 +577,42 @@ async def _search_lyricscom(client: httpx.AsyncClient, query: str) -> list[Lyric
     return candidates
 
 
+async def _search_lyricsbogie(client: httpx.AsyncClient, query: str) -> list[LyricsCandidate]:
+    payload = await _request_json(
+        client,
+        LYRICSBOGIE_SEARCH_URL,
+        params={"search": query, "per_page": 8},
+    )
+
+    urls: list[str] = []
+    for item in payload:
+        if item.get("subtype") != "post":
+            continue
+        title = _clean_text(html.unescape(item.get("title")))
+        page_url = _normalize_result_url(item.get("url"))
+        if not title or not page_url:
+            continue
+        if "lyrics" not in title.lower():
+            continue
+        if page_url not in urls:
+            urls.append(page_url)
+        if len(urls) >= 4:
+            break
+
+    if not urls:
+        return []
+
+    fetched = await asyncio.gather(
+        *[_fetch_candidate_page(client, page_url, "lyricsbogie") for page_url in urls],
+        return_exceptions=True,
+    )
+    candidates: list[LyricsCandidate] = []
+    for item in fetched:
+        if isinstance(item, LyricsCandidate):
+            candidates.append(item)
+    return candidates
+
+
 async def _search_duckduckgo_site(
     client: httpx.AsyncClient,
     query: str,
@@ -633,6 +717,7 @@ async def search_lyrics_candidates(query: str) -> list[LyricsCandidate]:
             tasks.extend(
                 (
                     _search_lrclib(client, variant),
+                    _search_lyricsbogie(client, variant),
                     _search_lyricsovh(client, variant),
                     _search_itunes(client, variant),
                     _search_lyricscom(client, variant),
@@ -812,6 +897,24 @@ async def _lyricscom_search_fetch(
     return None
 
 
+async def _lyricsbogie_fetch(
+    client: httpx.AsyncClient,
+    candidate: LyricsCandidate,
+) -> LyricsResult | None:
+    if not candidate.page_url:
+        return None
+    refreshed = await _fetch_candidate_page(client, candidate.page_url, "lyricsbogie")
+    if not refreshed or not refreshed.plain_lyrics:
+        return None
+    return LyricsResult(
+        title=refreshed.title or candidate.title,
+        artist=refreshed.artist or candidate.artist,
+        album=refreshed.album or candidate.album,
+        lyrics=refreshed.plain_lyrics,
+        source="LyricsBogie",
+    )
+
+
 async def _allthelyrics_fetch(
     client: httpx.AsyncClient,
     candidate: LyricsCandidate,
@@ -885,9 +988,14 @@ async def fetch_lyrics(candidate: LyricsCandidate) -> LyricsResult:
         follow_redirects=True,
         trust_env=False,
     ) as client:
+        if candidate.source == "lyricsbogie":
+            result = await _lyricsbogie_fetch(client, candidate)
+            if result:
+                return result
         for fetcher in (
             _lrclib_fetch_by_id,
             _lrclib_fetch_by_names,
+            _lyricsbogie_fetch,
             _lyricscom_fetch,
             _lyricscom_search_fetch,
             _allthelyrics_fetch,

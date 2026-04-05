@@ -34,6 +34,13 @@ LYRICS_CACHE_TTL = 30 * 60
 LYRICS_CACHE_LIMIT = 100
 LYRICS_RESULTS_CACHE: dict[str, "LyricsSearchSession"] = {}
 LYRICS_VIEW_CACHE: dict[str, "LyricsViewState"] = {}
+SOURCE_DISPLAY_PRIORITY = {
+    "lyricsbogie": 0,
+    "lrclib": 1,
+    "lyricscom": 2,
+    "allthelyrics": 3,
+    "letras": 4,
+}
 NOISY_RESULT_PATTERN = re.compile(
     r"\b(?:lofi|slowed|reverb|remix|cover|version|edit|status|mashup|dj|ai cover)\b",
     re.IGNORECASE,
@@ -359,7 +366,14 @@ def _filter_candidates(
     limit: int = 8,
 ) -> list[LyricsCandidate]:
     filtered: list[LyricsCandidate] = []
-    for candidate in candidates:
+    ordered = sorted(
+        candidates,
+        key=lambda candidate: (
+            SOURCE_DISPLAY_PRIORITY.get((candidate.source or "").lower(), 9),
+            -float(candidate.score or 0.0),
+        ),
+    )
+    for candidate in ordered:
         if not _is_display_candidate(candidate):
             continue
         filtered.append(candidate)
