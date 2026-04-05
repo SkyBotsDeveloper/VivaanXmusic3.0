@@ -177,20 +177,32 @@ def _chunk_lyrics(result: LyricsResult) -> list[str]:
     return chunks
 
 
-async def _send_lyrics_chunks(message: Message, result: LyricsResult):
-    chunks = _chunk_lyrics(result)
-    if not chunks:
-        raise LyricsError("Lyrics are temporarily unavailable for that selection.")
+def _fallback_result(candidate: LyricsCandidate) -> LyricsResult | None:
+    if not candidate.plain_lyrics:
+        return None
+    return LyricsResult(
+        title=candidate.title or "Unknown Track",
+        artist=candidate.artist or "Unknown Artist",
+        album=candidate.album,
+        lyrics=candidate.plain_lyrics,
+        source=(candidate.source or "fallback").upper(),
+    )
 
-    total = len(chunks)
+
+async def _send_lyrics_chunks(message: Message, chunks: list[str], start_index: int = 1):
+    if not chunks:
+        return
+
+    total = len(chunks) + start_index - 1
     reply_to_id = getattr(message, "reply_to_message_id", None) or message.id
     thread_id = getattr(message, "message_thread_id", None)
-    for index, chunk in enumerate(chunks, start=1):
+    for offset, chunk in enumerate(chunks, start=0):
+        index = start_index + offset
         text = chunk if total == 1 else f"Part {index}/{total}\n\n{chunk}"
         sent = False
         attempts = [
             {
-                "reply_to_message_id": reply_to_id if index == 1 else None,
+                "reply_to_message_id": reply_to_id if index == start_index else None,
                 "message_thread_id": thread_id,
             },
             {
@@ -198,7 +210,7 @@ async def _send_lyrics_chunks(message: Message, result: LyricsResult):
                 "message_thread_id": thread_id,
             },
             {
-                "reply_to_message_id": reply_to_id if index == 1 else None,
+                "reply_to_message_id": reply_to_id if index == start_index else None,
                 "message_thread_id": None,
             },
             {
@@ -221,6 +233,51 @@ async def _send_lyrics_chunks(message: Message, result: LyricsResult):
                 continue
         if not sent:
             raise LyricsError("Lyrics delivery failed. Please try another song.")
+
+
+async def _show_first_lyrics_chunk(
+    callback_query: CallbackQuery,
+    token: str,
+    text: str,
+):
+    attempts = [
+        {
+            "reply_markup": _build_lyrics_markup(token),
+            "disable_web_page_preview": True,
+            "parse_mode": ParseMode.DISABLED,
+        },
+        {
+            "reply_markup": None,
+            "disable_web_page_preview": True,
+            "parse_mode": ParseMode.DISABLED,
+        },
+        {
+            "reply_markup": None,
+            "disable_web_page_preview": True,
+            "parse_mode": None,
+        },
+    ]
+    for attempt in attempts:
+        try:
+            await callback_query.message.edit_text(
+                text,
+                **attempt,
+            )
+            return True
+        except Exception:
+            continue
+    try:
+        await app.send_message(
+            callback_query.message.chat.id,
+            text,
+            parse_mode=ParseMode.DISABLED,
+            disable_web_page_preview=True,
+            reply_to_message_id=callback_query.message.reply_to_message_id or callback_query.message.id,
+            message_thread_id=getattr(callback_query.message, "message_thread_id", None),
+        )
+        return True
+    except Exception:
+        return False
 
 
 @app.on_message(filters.command("lyrics") & ~BANNED_USERS)
@@ -287,21 +344,34 @@ async def lyrics_pick_callback(client, callback_query: CallbackQuery):
     await callback_query.answer("Fetching lyrics...")
     await client.send_chat_action(callback_query.message.chat.id, ChatAction.TYPING)
 
+    result: LyricsResult | None = None
     try:
         result = await fetch_lyrics(candidate)
-    except LyricsError as exc:
-        return await callback_query.answer(str(exc), show_alert=True)
+    except Exception:
+        result = _fallback_result(candidate)
 
-    await callback_query.message.edit_text(
-        (
-            f"Selected: {result.title} - {result.artist}\n"
-            f"Source: {result.source}\n\n"
-            "Lyrics sent below."
-        ),
-        reply_markup=_build_lyrics_markup(token),
-        disable_web_page_preview=True,
-    )
-    await _send_lyrics_chunks(callback_query.message, result)
+    if not result:
+        return await callback_query.answer(
+            "Lyrics are temporarily unavailable for that selection.",
+            show_alert=True,
+        )
+
+    chunks = _chunk_lyrics(result)
+    if not chunks:
+        return await callback_query.answer(
+            "Lyrics are temporarily unavailable for that selection.",
+            show_alert=True,
+        )
+
+    first_text = chunks[0] if len(chunks) == 1 else f"Part 1/{len(chunks)}\n\n{chunks[0]}"
+    shown = await _show_first_lyrics_chunk(callback_query, token, first_text)
+    if not shown:
+        return await callback_query.answer(
+            "Lyrics delivery failed. Try another result.",
+            show_alert=True,
+        )
+    if len(chunks) > 1:
+        await _send_lyrics_chunks(callback_query.message, chunks[1:], start_index=2)
 
 
 @app.on_callback_query(filters.regex(r"^lyrics_back:") & ~BANNED_USERS)
