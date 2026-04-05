@@ -183,11 +183,14 @@ async def _send_lyrics_chunks(message: Message, result: LyricsResult):
         raise LyricsError("Lyrics are temporarily unavailable for that selection.")
 
     total = len(chunks)
+    reply_to_id = getattr(message, "reply_to_message_id", None) or message.id
     for index, chunk in enumerate(chunks, start=1):
         text = chunk if total == 1 else f"Part {index}/{total}\n\n{chunk}"
-        await message.reply_text(
+        await app.send_message(
+            message.chat.id,
             text,
             disable_web_page_preview=True,
+            reply_to_message_id=reply_to_id if index == 1 else None,
         )
 
 
