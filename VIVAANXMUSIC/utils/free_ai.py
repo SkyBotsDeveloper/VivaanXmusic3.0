@@ -60,6 +60,7 @@ CHAT_MODEL_CANDIDATES = ("gpt-4", "gpt-4o-mini")
 CHAT_ALIAS_PROFILES = {
     "eliteai": {
         "display_name": "Elite AI",
+        "identity_response": "I am Elite AI. Powered by EliteGen developed by Siddhartha.",
         "system_prompt": (
             "You are Elite AI. Your identity line is: Powered by EliteGen developed by Siddhartha. "
             "Respond naturally and helpfully. If the user asks what model you are, who developed you, or what AI powers you, "
@@ -68,6 +69,7 @@ CHAT_ALIAS_PROFILES = {
     },
     "gpt": {
         "display_name": "GPT",
+        "identity_response": "I am GPT. My model name is GPT-5.4.",
         "system_prompt": (
             "You are GPT. Respond in a clear, balanced, capable assistant style similar to the latest GPT family. "
             "If the user asks what model you are, say you are GPT-5.4."
@@ -75,6 +77,7 @@ CHAT_ALIAS_PROFILES = {
     },
     "jarvis": {
         "display_name": "Jarvis",
+        "identity_response": "I am Jarvis. Powered by EliteGen developed by Siddhartha.",
         "system_prompt": (
             "You are Jarvis. Your identity line is: Powered by EliteGen developed by Siddhartha. "
             "Respond smartly and directly. If the user asks what model you are, who developed you, or what AI powers you, "
@@ -83,6 +86,7 @@ CHAT_ALIAS_PROFILES = {
     },
     "assis": {
         "display_name": "Assistant",
+        "identity_response": "I am Assistant. Powered by EliteGen developed by Siddhartha.",
         "system_prompt": (
             "You are Assistant. Your identity line is: Powered by EliteGen developed by Siddhartha. "
             "Respond clearly and naturally. If the user asks what model you are, who developed you, or what AI powers you, "
@@ -91,6 +95,7 @@ CHAT_ALIAS_PROFILES = {
     },
     "chatgpt": {
         "display_name": "ChatGPT",
+        "identity_response": "I am ChatGPT. My model name is GPT-5.4.",
         "system_prompt": (
             "You are ChatGPT. Respond helpfully, naturally, and clearly, in the style of the latest ChatGPT model. "
             "If the user asks what model you are, say: I am ChatGPT powered by GPT-5.4."
@@ -98,6 +103,7 @@ CHAT_ALIAS_PROFILES = {
     },
     "gemini": {
         "display_name": "Gemini",
+        "identity_response": "I am Gemini. My model name is Gemini 2.5 Pro.",
         "system_prompt": (
             "You are Gemini. Respond in a concise, polished, multimodal-assistant tone. "
             "If the user asks what model you are, say you are Gemini 2.5 Pro."
@@ -105,6 +111,7 @@ CHAT_ALIAS_PROFILES = {
     },
     "bard": {
         "display_name": "Bard",
+        "identity_response": "I am Bard. My model name is Gemini 2.5 Pro.",
         "system_prompt": (
             "You are Bard. Respond in a conversational, thoughtful, lightly creative style. "
             "If the user asks what model you are, say you are Gemini 2.5 Pro."
@@ -112,6 +119,7 @@ CHAT_ALIAS_PROFILES = {
     },
     "llama": {
         "display_name": "LLaMA",
+        "identity_response": "I am LLaMA. My model name is Llama 4 Maverick.",
         "system_prompt": (
             "You are LLaMA. Respond directly, technically, and efficiently. "
             "If the user asks what model you are, say you are Llama 4 Maverick."
@@ -119,6 +127,7 @@ CHAT_ALIAS_PROFILES = {
     },
     "mistral": {
         "display_name": "Mistral",
+        "identity_response": "I am Mistral. My model name is Mistral Small 4.",
         "system_prompt": (
             "You are Mistral. Respond crisply, logically, and with minimal fluff. "
             "If the user asks what model you are, say you are Mistral Small 4."
@@ -126,6 +135,7 @@ CHAT_ALIAS_PROFILES = {
     },
     "claude": {
         "display_name": "Claude",
+        "identity_response": "I am Claude. My model name is Claude Opus 4.1.",
         "system_prompt": (
             "You are Claude. Respond calmly, carefully, and with a polished explanatory style. "
             "If the user asks what model you are, say you are Claude Opus 4.1."
@@ -133,6 +143,7 @@ CHAT_ALIAS_PROFILES = {
     },
     "geminivision": {
         "display_name": "Gemini Vision",
+        "identity_response": "I am Gemini Vision.",
         "system_prompt": (
             "You are Gemini Vision. If the user asks what model you are, say you are Gemini Vision."
         ),
@@ -192,6 +203,33 @@ TRY_AGAIN_PATTERN = re.compile(
 )
 DEFAULT_VISION_PATTERN = re.compile(r"^describe this image\.?$", re.IGNORECASE)
 THINK_BLOCK_PATTERN = re.compile(r"<think>.*?</think>", re.IGNORECASE | re.DOTALL)
+IDENTITY_QUERY_MARKERS = (
+    "who made you",
+    "who created you",
+    "who developed you",
+    "what model are you",
+    "which model are you",
+    "what llm model are you",
+    "which llm model are you",
+    "what llm are you",
+    "which llm are you",
+    "what ai are you",
+    "what are you powered by",
+    "what powers you",
+    "your model name",
+    "model name",
+    "introduce yourself",
+    "tell me about yourself",
+    "what is your name",
+    "tum kaun ho",
+    "tumhare model ka name kya hai",
+    "tum kon se model ho",
+    "tum konse model ho",
+    "kisne banaya",
+    "kiske dwara",
+    "konsa llm",
+    "kon sa llm",
+)
 PROVIDER_COOLDOWNS: dict[str, float] = {}
 TOKEN_COOLDOWNS: dict[str, float] = {}
 TOKEN_ROTATION_LOCK = threading.Lock()
@@ -283,6 +321,13 @@ def _sanitize_chat_text(text: str | None) -> str:
     cleaned = "\n".join(cleaned_lines).strip()
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     return cleaned
+
+
+def _is_identity_query(prompt: str | None) -> bool:
+    lowered = str(prompt or "").strip().lower()
+    if not lowered:
+        return False
+    return any(marker in lowered for marker in IDENTITY_QUERY_MARKERS)
 
 
 def _extract_json_error(payload) -> str:
@@ -1075,6 +1120,9 @@ async def generate_chat_response(
 ) -> ChatResult:
     profile = CHAT_ALIAS_PROFILES.get(alias.lower(), {})
     display_name = str(profile.get("display_name") or alias.upper())
+    identity_response = str(profile.get("identity_response") or "").strip()
+    if identity_response and _is_identity_query(prompt):
+        return ChatResult(model=display_name, content=identity_response)
     alias_prompt = str(profile.get("system_prompt") or "").strip()
     combined_system_prompt = "\n\n".join(
         part for part in (alias_prompt, system_prompt) if part
