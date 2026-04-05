@@ -5,7 +5,7 @@ import time
 from dataclasses import dataclass
 
 from pyrogram import filters
-from pyrogram.enums import ChatAction
+from pyrogram.enums import ChatAction, ParseMode
 from pyrogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from config import BANNED_USERS
@@ -184,13 +184,16 @@ async def _send_lyrics_chunks(message: Message, result: LyricsResult):
 
     total = len(chunks)
     reply_to_id = getattr(message, "reply_to_message_id", None) or message.id
+    thread_id = getattr(message, "message_thread_id", None)
     for index, chunk in enumerate(chunks, start=1):
         text = chunk if total == 1 else f"Part {index}/{total}\n\n{chunk}"
         await app.send_message(
             message.chat.id,
             text,
             disable_web_page_preview=True,
+            parse_mode=ParseMode.DISABLED,
             reply_to_message_id=reply_to_id if index == 1 else None,
+            message_thread_id=thread_id,
         )
 
 
