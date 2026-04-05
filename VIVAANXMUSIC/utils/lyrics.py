@@ -1,33 +1,51 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import re
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import Iterable
-from urllib.parse import quote
+from urllib.parse import quote, unquote, urlparse
 
 import httpx
+from bs4 import BeautifulSoup
+from youtubesearchpython.future import VideosSearch
 
 
 HTTP_TIMEOUT = httpx.Timeout(20.0, connect=8.0)
-HTTP_HEADERS = {"User-Agent": "VivaanXLyrics/1.0"}
+HTTP_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    )
+}
 LRCLIB_SEARCH_URL = "https://lrclib.net/api/search"
 LRCLIB_GET_URL = "https://lrclib.net/api/get"
 LYRICS_OVH_SUGGEST_URL = "https://api.lyrics.ovh/suggest/"
 LYRICS_OVH_LYRICS_URL = "https://api.lyrics.ovh/v1"
 ITUNES_SEARCH_URL = "https://itunes.apple.com/search"
+LYRICSCOM_SEARCH_URL = "https://www.lyrics.com/lyrics"
+DUCKDUCKGO_HTML_SEARCH_URL = "https://html.duckduckgo.com/html/"
 
 MAX_SEARCH_RESULTS = 10
 SOURCE_BASE_SCORES = {
     "lrclib": 95.0,
+    "lyricscom": 88.0,
+    "allthelyrics": 86.0,
+    "letras": 84.0,
     "lyricsovh": 82.0,
+    "youtube": 76.0,
     "itunes": 68.0,
 }
 BRACKET_PATTERN = re.compile(r"[\(\[\{].*?[\)\]\}]")
 SPACE_PATTERN = re.compile(r"\s+")
 NON_WORD_PATTERN = re.compile(r"[^a-z0-9]+")
 FEAT_SPLIT_PATTERN = re.compile(r"\b(?:feat\.?|ft\.?|featuring|with)\b", re.IGNORECASE)
+YOUTUBE_NOISE_PATTERN = re.compile(
+    r"\b(?:official|video|audio|lyrics?|lyrical|fullscreen|4k|hd|hq|remix|status|song|songs|music|feat\.?|ft\.?|prod\.?|visualizer|lofi|slowed|reverb)\b",
+    re.IGNORECASE,
+)
 
 
 class LyricsError(RuntimeError):
@@ -43,6 +61,7 @@ class LyricsCandidate:
     source_id: str | None = None
     preview_url: str | None = None
     link: str | None = None
+    page_url: str | None = None
     plain_lyrics: str = ""
     popularity: float = 0.0
     instrumental: bool = False
@@ -89,6 +108,38 @@ def _primary_artist(value: str | None) -> str:
     parts = FEAT_SPLIT_PATTERN.split(text, maxsplit=1)
     cleaned = parts[0].strip(" ,-/")
     return cleaned or text
+
+
+def _clean_youtube_title(value: str | None) -> str:
+    text = _clean_text(value)
+    text = BRACKET_PATTERN.sub(" ", text)
+    text = YOUTUBE_NOISE_PATTERN.sub(" ", text)
+    text = text.replace("|", " ").replace("—", " ").replace("–", " ")
+    text = NON_WORD_PATTERN.sub(" ", text.lower())
+    return SPACE_PATTERN.sub(" ", text).strip().title()
+
+
+def _looks_generic_artist(value: str | None) -> bool:
+    text = _normalize_key(value)
+    if not text:
+        return True
+    generic_tokens = {
+        "lyrics",
+        "lyrical",
+        "music",
+        "official",
+        "records",
+        "records",
+        "video",
+        "songs",
+        "song",
+        "lover",
+        "channel",
+        "wave",
+        "studio",
+        "production",
+    }
+    return any(token in text.split() for token in generic_tokens)
 
 
 def _tokenize_query(query: str) -> list[str]:
@@ -183,6 +234,10 @@ def _score_candidate(query: str, candidate: LyricsCandidate, index: int) -> floa
         score -= 70
     if candidate.source == "lrclib" and not candidate.plain_lyrics:
         score -= 35
+    if candidate.page_url:
+        score += 8
+    if candidate.plain_lyrics:
+        score += 6
     return score
 
 
@@ -190,6 +245,110 @@ async def _request_json(client: httpx.AsyncClient, url: str, **kwargs):
     response = await client.get(url, **kwargs)
     response.raise_for_status()
     return response.json()
+
+
+async def _request_text(client: httpx.AsyncClient, url: str, **kwargs) -> str:
+    response = await client.get(url, **kwargs)
+    response.raise_for_status()
+    return response.text
+
+
+def _soup_text(node) -> str:
+    if not node:
+        return ""
+    for br in node.find_all("br"):
+        br.replace_with("\n")
+    for block in node.find_all(["p", "div", "li", "pre"]):
+        if block.name != "br":
+            block.append("\n")
+    return _clean_lyrics_text(node.get_text("\n"))
+
+
+def _normalize_result_url(url: str | None) -> str | None:
+    value = _clean_text(url)
+    if not value:
+        return None
+    if value.startswith("//"):
+        value = f"https:{value}"
+    if "duckduckgo.com/l/?" in value and "uddg=" in value:
+        match = re.search(r"[?&]uddg=([^&]+)", value)
+        if match:
+            value = unquote(match.group(1))
+    parsed = urlparse(value)
+    if parsed.scheme in {"http", "https"}:
+        return value
+    return None
+
+
+async def _fetch_candidate_page(
+    client: httpx.AsyncClient,
+    url: str,
+    source: str,
+) -> LyricsCandidate | None:
+    page_url = _normalize_result_url(url)
+    if not page_url:
+        return None
+
+    response = await client.get(page_url)
+    if response.status_code != 200:
+        return None
+
+    soup = BeautifulSoup(response.text, "html.parser")
+    if source == "allthelyrics":
+        title_tag = soup.find("title")
+        title_text = _clean_text(title_tag.get_text(" ", strip=True) if title_tag else "")
+        artist = ""
+        title = title_text
+        match = re.match(r"(.+?)\s+[–-]\s+(.+?)\s+\|\s+All The Lyrics", title_text)
+        if match:
+            artist = _clean_text(match.group(1))
+            title = _clean_text(match.group(2))
+        lyrics_node = soup.find("div", class_="content-text-inner")
+        lyrics = _soup_text(lyrics_node)
+        album = ""
+        album_node = soup.find("div", class_="content-text-album")
+        if album_node:
+            album = _clean_text(album_node.get_text(" ", strip=True).replace("Album:", ""))
+        if not title or not lyrics:
+            return None
+        return LyricsCandidate(
+            title=title,
+            artist=artist,
+            album=album,
+            source=source,
+            page_url=page_url,
+            plain_lyrics=lyrics,
+        )
+
+    if source == "letras":
+        title_tag = soup.find("title")
+        title_text = _clean_text(title_tag.get_text(" ", strip=True) if title_tag else "")
+        title = ""
+        artist = ""
+        match = re.match(r"(.+?)\s+-\s+(.+?)\s+-\s+LETRAS\.COM", title_text, re.IGNORECASE)
+        if match:
+            title = _clean_text(match.group(1))
+            artist = _clean_text(match.group(2))
+        lyrics_node = soup.find("div", class_="lyric-original")
+        lyrics = _soup_text(lyrics_node)
+        if not title and not artist:
+            og_title = soup.find("meta", attrs={"property": "og:title"})
+            og_text = _clean_text(og_title.get("content") if og_title else "")
+            match = re.match(r"(.+?)\s+-\s+(.+?)\s+-\s+LETRAS\.COM", og_text, re.IGNORECASE)
+            if match:
+                title = _clean_text(match.group(1))
+                artist = _clean_text(match.group(2))
+        if not title or not lyrics:
+            return None
+        return LyricsCandidate(
+            title=title,
+            artist=artist,
+            source=source,
+            page_url=page_url,
+            plain_lyrics=lyrics,
+        )
+
+    return None
 
 
 async def _search_lrclib(client: httpx.AsyncClient, query: str) -> list[LyricsCandidate]:
@@ -260,6 +419,135 @@ async def _search_itunes(client: httpx.AsyncClient, query: str) -> list[LyricsCa
     return candidates
 
 
+async def _search_youtube_titles(query: str) -> list[LyricsCandidate]:
+    results = VideosSearch(query, limit=6)
+    data = await results.next()
+    candidates: list[LyricsCandidate] = []
+    for item in data.get("result") or []:
+        raw_title = _clean_text(item.get("title"))
+        title = _clean_youtube_title(raw_title)
+        artist = _clean_text((item.get("channel") or {}).get("name"))
+        if " - " in raw_title:
+            left, right = [part.strip() for part in raw_title.split(" - ", 1)]
+            clean_left = _clean_youtube_title(left)
+            clean_right = _clean_youtube_title(right)
+            if clean_left and clean_right:
+                title = clean_left
+                if not _looks_generic_artist(clean_right):
+                    artist = clean_right
+        if not title:
+            continue
+        candidates.append(
+            LyricsCandidate(
+                title=title,
+                artist=artist,
+                source="youtube",
+                link=item.get("link"),
+            )
+        )
+    return candidates
+
+
+async def _expand_youtube_candidates(
+    client: httpx.AsyncClient,
+    query: str,
+) -> list[LyricsCandidate]:
+    youtube_candidates = await _search_youtube_titles(query)
+    expanded: list[LyricsCandidate] = list(youtube_candidates)
+    seen_queries: set[str] = set()
+    tasks = []
+
+    for candidate in youtube_candidates[:3]:
+        parts = [candidate.title]
+        if candidate.artist and not _looks_generic_artist(candidate.artist):
+            parts.append(candidate.artist)
+        search_query = _clean_text(" ".join(parts))
+        if not search_query or search_query in seen_queries:
+            continue
+        seen_queries.add(search_query)
+        tasks.extend(
+            (
+                _search_lrclib(client, search_query),
+                _search_lyricsovh(client, search_query),
+                _search_itunes(client, search_query),
+                _search_lyricscom(client, search_query),
+            )
+        )
+
+    if not tasks:
+        return expanded
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    for item in results:
+        if isinstance(item, Exception):
+            continue
+        expanded.extend(item)
+    return expanded
+
+
+async def _search_lyricscom(client: httpx.AsyncClient, query: str) -> list[LyricsCandidate]:
+    page = await _request_text(
+        client,
+        f"{LYRICSCOM_SEARCH_URL}/{quote(query)}",
+    )
+    soup = BeautifulSoup(page, "html.parser")
+    candidates: list[LyricsCandidate] = []
+    for block in soup.select("div.sec-lyric")[:12]:
+        title_link = block.select_one("p.lyric-meta-title a")
+        artist_link = block.select_one("p.lyric-meta-album-artist a")
+        snippet_node = block.select_one("pre.lyric-body")
+        href = title_link.get("href") if title_link else None
+        page_url = _normalize_result_url(f"https://www.lyrics.com/{href.lstrip('/')}" if href else "")
+        candidates.append(
+            LyricsCandidate(
+                title=_clean_text(title_link.get_text(" ", strip=True) if title_link else ""),
+                artist=_clean_text(artist_link.get_text(" ", strip=True) if artist_link else ""),
+                source="lyricscom",
+                page_url=page_url,
+                plain_lyrics=_clean_lyrics_text(
+                    html.unescape(snippet_node.get_text("\n", strip=True) if snippet_node else "")
+                ),
+            )
+        )
+    return candidates
+
+
+async def _search_duckduckgo_site(
+    client: httpx.AsyncClient,
+    query: str,
+    domain: str,
+    source: str,
+) -> list[LyricsCandidate]:
+    page = await _request_text(
+        client,
+        DUCKDUCKGO_HTML_SEARCH_URL,
+        params={"q": f'{query} lyrics site:{domain}'},
+    )
+    soup = BeautifulSoup(page, "html.parser")
+    result_urls: list[str] = []
+    for link in soup.select("a.result__a"):
+        href = _normalize_result_url(link.get("href"))
+        if not href or domain not in href.lower():
+            continue
+        if href not in result_urls:
+            result_urls.append(href)
+        if len(result_urls) >= 3:
+            break
+
+    if not result_urls:
+        return []
+
+    fetched = await asyncio.gather(
+        *[_fetch_candidate_page(client, result_url, source) for result_url in result_urls],
+        return_exceptions=True,
+    )
+    candidates: list[LyricsCandidate] = []
+    for item in fetched:
+        if isinstance(item, LyricsCandidate):
+            candidates.append(item)
+    return candidates
+
+
 def _dedupe_candidates(candidates: Iterable[LyricsCandidate]) -> list[LyricsCandidate]:
     merged: dict[str, LyricsCandidate] = {}
     for candidate in candidates:
@@ -280,6 +568,8 @@ def _dedupe_candidates(candidates: Iterable[LyricsCandidate]) -> list[LyricsCand
             existing.preview_url = candidate.preview_url
         if candidate.link and not existing.link:
             existing.link = candidate.link
+        if candidate.page_url and not existing.page_url:
+            existing.page_url = candidate.page_url
         if candidate.plain_lyrics and not existing.plain_lyrics:
             existing.plain_lyrics = candidate.plain_lyrics
         if SOURCE_BASE_SCORES.get(candidate.source, 0) > SOURCE_BASE_SCORES.get(existing.source, 0):
@@ -328,8 +618,10 @@ async def search_lyrics_candidates(query: str) -> list[LyricsCandidate]:
                     _search_lrclib(client, variant),
                     _search_lyricsovh(client, variant),
                     _search_itunes(client, variant),
+                    _search_lyricscom(client, variant),
                 )
             )
+        tasks.append(_expand_youtube_candidates(client, text))
         results = await asyncio.gather(
             *tasks,
             return_exceptions=True,
@@ -451,6 +743,124 @@ async def _lyricsovh_fetch(
     return None
 
 
+async def _lyricscom_fetch(
+    client: httpx.AsyncClient,
+    candidate: LyricsCandidate,
+) -> LyricsResult | None:
+    if not candidate.page_url:
+        return None
+    response = await client.get(candidate.page_url)
+    if response.status_code != 200:
+        return None
+    soup = BeautifulSoup(response.text, "html.parser")
+    lyrics_node = soup.find("pre", id="lyric-body-text") or soup.find("pre", class_="lyric-body")
+    lyrics = _soup_text(lyrics_node)
+    if not lyrics:
+        return None
+    title = candidate.title
+    artist = candidate.artist
+    if not title or not artist:
+        title_tag = soup.find("title")
+        title_text = _clean_text(title_tag.get_text(" ", strip=True) if title_tag else "")
+        match = re.match(r"(.+?)\s+Lyrics\s+by\s+(.+)", title_text, re.IGNORECASE)
+        if match:
+            title = title or _clean_text(match.group(1))
+            artist = artist or _clean_text(match.group(2))
+    return LyricsResult(
+        title=title or candidate.title,
+        artist=artist or candidate.artist,
+        album=candidate.album,
+        lyrics=lyrics,
+        source="Lyrics.com",
+    )
+
+
+async def _lyricscom_search_fetch(
+    client: httpx.AsyncClient,
+    candidate: LyricsCandidate,
+) -> LyricsResult | None:
+    parts = [candidate.title]
+    if candidate.artist and not _looks_generic_artist(candidate.artist):
+        parts.append(candidate.artist)
+    query = _clean_text(" ".join(parts))
+    if not query:
+        return None
+    search_results = await _search_lyricscom(client, query)
+    if not search_results:
+        return None
+    for item in search_results[:3]:
+        result = await _lyricscom_fetch(client, item)
+        if result:
+            return result
+    return None
+
+
+async def _allthelyrics_fetch(
+    client: httpx.AsyncClient,
+    candidate: LyricsCandidate,
+) -> LyricsResult | None:
+    if candidate.page_url and (candidate.plain_lyrics or candidate.title):
+        response = await client.get(candidate.page_url)
+        if response.status_code != 200:
+            return None
+        soup = BeautifulSoup(response.text, "html.parser")
+        lyrics_node = soup.find("div", class_="content-text-inner")
+        lyrics = _soup_text(lyrics_node)
+        if not lyrics:
+            return None
+        title = candidate.title
+        artist = candidate.artist
+        title_tag = soup.find("title")
+        title_text = _clean_text(title_tag.get_text(" ", strip=True) if title_tag else "")
+        match = re.match(r"(.+?)\s+[–-]\s+(.+?)\s+\|\s+All The Lyrics", title_text)
+        if match:
+            artist = artist or _clean_text(match.group(1))
+            title = title or _clean_text(match.group(2))
+        album = candidate.album
+        album_node = soup.find("div", class_="content-text-album")
+        if album_node:
+            album = _clean_text(album_node.get_text(" ", strip=True).replace("Album:", ""))
+        return LyricsResult(
+            title=title,
+            artist=artist,
+            album=album,
+            lyrics=lyrics,
+            source="All The Lyrics",
+        )
+    return None
+
+
+async def _letras_fetch(
+    client: httpx.AsyncClient,
+    candidate: LyricsCandidate,
+) -> LyricsResult | None:
+    if not candidate.page_url:
+        return None
+    response = await client.get(candidate.page_url)
+    if response.status_code != 200:
+        return None
+    soup = BeautifulSoup(response.text, "html.parser")
+    lyrics_node = soup.find("div", class_="lyric-original")
+    lyrics = _soup_text(lyrics_node)
+    if not lyrics:
+        return None
+    title = candidate.title
+    artist = candidate.artist
+    title_tag = soup.find("title")
+    title_text = _clean_text(title_tag.get_text(" ", strip=True) if title_tag else "")
+    match = re.match(r"(.+?)\s+-\s+(.+?)\s+-\s+LETRAS\.COM", title_text, re.IGNORECASE)
+    if match:
+        title = title or _clean_text(match.group(1))
+        artist = artist or _clean_text(match.group(2))
+    return LyricsResult(
+        title=title,
+        artist=artist,
+        album=candidate.album,
+        lyrics=lyrics,
+        source="Letras.com",
+    )
+
+
 async def fetch_lyrics(candidate: LyricsCandidate) -> LyricsResult:
     async with httpx.AsyncClient(
         timeout=HTTP_TIMEOUT,
@@ -458,7 +868,15 @@ async def fetch_lyrics(candidate: LyricsCandidate) -> LyricsResult:
         follow_redirects=True,
         trust_env=False,
     ) as client:
-        for fetcher in (_lrclib_fetch_by_id, _lrclib_fetch_by_names, _lyricsovh_fetch):
+        for fetcher in (
+            _lrclib_fetch_by_id,
+            _lrclib_fetch_by_names,
+            _lyricscom_fetch,
+            _lyricscom_search_fetch,
+            _allthelyrics_fetch,
+            _letras_fetch,
+            _lyricsovh_fetch,
+        ):
             result = await fetcher(client, candidate)
             if result:
                 return result
