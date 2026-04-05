@@ -8,7 +8,7 @@ import time
 from dataclasses import dataclass
 from html import unescape
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote, urljoin, urlparse
 
 import httpx
 
@@ -102,6 +102,18 @@ META_TAG_PATTERN = re.compile(
 )
 TITLE_TAG_PATTERN = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 URL_TEXT_PATTERN = re.compile(r"https?://\S+", re.IGNORECASE)
+HTML_MEDIA_META_KEYS = (
+    ("og:video:secure_url", "video"),
+    ("og:video:url", "video"),
+    ("og:video", "video"),
+    ("twitter:player:stream", "video"),
+    ("twitter:player", "video"),
+    ("og:image:secure_url", "photo"),
+    ("og:image:url", "photo"),
+    ("og:image", "photo"),
+    ("twitter:image:src", "photo"),
+    ("twitter:image", "photo"),
+)
 _TRACKER_CACHE: list[dict] = []
 _TRACKER_CACHE_AT = 0.0
 _STRATEGY_COOLDOWNS: dict[str, float] = {}
@@ -125,6 +137,15 @@ class SocialDownloadBundle:
     source: str
     items: list[SocialMediaItem]
     note_text: str = ""
+
+
+@dataclass(slots=True)
+class PageMetadata:
+    title: str
+    description: str
+    site_name: str
+    items: list[SocialMediaItem]
+    note_text: str
 
 
 def _service_works(value) -> bool:
@@ -302,12 +323,19 @@ def _bundle_from_cobalt_payload(payload, source_name: str) -> SocialDownloadBund
     return None
 
 
-def _extract_html_metadata(html: str) -> tuple[str, str, str]:
+def _extract_html_metadata(html: str) -> tuple[str, str, str, dict[str, list[str]]]:
     snippet = html[:350000]
     metas: dict[str, str] = {}
+    meta_values: dict[str, list[str]] = {}
     for key, value in META_TAG_PATTERN.findall(snippet):
         normalized = str(key or "").strip().lower()
-        if normalized and normalized not in metas:
+        cleaned = _clean_text(unescape(value))
+        if not normalized:
+            continue
+        meta_values.setdefault(normalized, [])
+        if cleaned and cleaned not in meta_values[normalized]:
+            meta_values[normalized].append(cleaned)
+        if normalized not in metas:
             metas[normalized] = _clean_html_text(value)
 
     title_match = TITLE_TAG_PATTERN.search(snippet)
@@ -322,7 +350,52 @@ def _extract_html_metadata(html: str) -> tuple[str, str, str]:
         or metas.get("description")
     )
     site_name = metas.get("og:site_name") or metas.get("application-name") or ""
-    return title, description, site_name
+    return title, description, site_name, meta_values
+
+
+def _build_page_metadata_from_html(source_url: str, html: str) -> PageMetadata:
+    title, description, site_name, meta_values = _extract_html_metadata(html)
+    description = _strip_urls_from_text(description)
+
+    items: list[SocialMediaItem] = []
+    seen_urls: set[str] = set()
+    title_hint = _safe_filename(title or site_name or "Post", "Post")
+
+    for meta_key, kind in HTML_MEDIA_META_KEYS:
+        for raw_url in meta_values.get(meta_key, []):
+            candidate = _clean_text(raw_url)
+            if not candidate:
+                continue
+            joined = urljoin(source_url, candidate)
+            try:
+                safe_url = validate_public_http_url(joined, allow_subdomains=True)
+            except Exception:
+                continue
+            if safe_url in seen_urls:
+                continue
+            seen_urls.add(safe_url)
+            items.append(SocialMediaItem(url=safe_url, kind=kind, filename_hint=title_hint))
+            if len(items) >= MAX_MEDIA_FILES:
+                break
+        if len(items) >= MAX_MEDIA_FILES:
+            break
+
+    lines: list[str] = []
+    if site_name:
+        lines.append(f"Platform: {site_name}")
+    if title:
+        lines.append(f"Title: {title}")
+    if description and description != title:
+        lines.extend(["", description])
+
+    note_text = "\n".join(lines).strip()
+    return PageMetadata(
+        title=title,
+        description=description,
+        site_name=site_name,
+        items=items,
+        note_text=note_text if len(note_text) >= 20 else "",
+    )
 
 
 async def _build_page_note(client: httpx.AsyncClient, source_url: str) -> str:
@@ -343,19 +416,45 @@ async def _build_page_note(client: httpx.AsyncClient, source_url: str) -> str:
     if "html" not in content_type:
         return ""
 
-    title, description, site_name = _extract_html_metadata(response.text)
-    description = _strip_urls_from_text(description)
-    lines: list[str] = []
-    if site_name:
-        lines.append(f"Platform: {site_name}")
-    if title:
-        lines.append(f"Title: {title}")
-    if description and description != title:
-        lines.append("")
-        lines.append(description)
+    return _build_page_metadata_from_html(source_url, response.text).note_text
 
-    note_text = "\n".join(line for line in lines if line is not None).strip()
-    return note_text if len(note_text) >= 20 else ""
+
+async def _build_page_metadata_bundle(
+    client: httpx.AsyncClient,
+    source_url: str,
+    platform: str,
+) -> SocialDownloadBundle | None:
+    try:
+        response = await client.get(
+            source_url,
+            timeout=API_TIMEOUT,
+            headers={
+                **HTTP_HEADERS,
+                "Accept": "text/html,application/xhtml+xml",
+            },
+        )
+        response.raise_for_status()
+    except Exception:
+        return None
+
+    content_type = str(response.headers.get("content-type") or "").lower()
+    if "html" not in content_type:
+        return None
+
+    metadata = _build_page_metadata_from_html(source_url, response.text)
+    if not metadata.items and not metadata.note_text:
+        return None
+
+    title = _safe_filename(
+        metadata.title or metadata.site_name or f"{platform.title()} Post",
+        f"{platform.title()} Post",
+    )
+    return SocialDownloadBundle(
+        title=title,
+        source="Page Metadata",
+        items=metadata.items,
+        note_text=metadata.note_text,
+    )
 
 
 def _append_note(bundle: SocialDownloadBundle, note_text: str) -> SocialDownloadBundle:
@@ -547,18 +646,53 @@ def _bundle_from_fixtweet_payload(data, endpoint_name: str, status_id: str) -> S
         seen_urls.add(url)
         items.append(SocialMediaItem(url=url, kind=kind, filename_hint=title))
 
-    for photo in media.get("photos") or []:
-        add_item(photo.get("url"), "photo")
+    def add_media_block(payload: dict | None):
+        if not isinstance(payload, dict):
+            return
+        media_block = payload.get("media") or {}
+        for photo in media_block.get("photos") or []:
+            add_item(photo.get("url"), "photo")
+        for video in media_block.get("videos") or []:
+            add_item(video.get("url"), "video")
+        for entry in media_block.get("all") or []:
+            media_type = str(entry.get("type") or "document").lower()
+            add_item(entry.get("url"), "video" if media_type == "video" else "photo")
+        external = media_block.get("external") or {}
+        add_item(external.get("url"), "video")
 
-    for video in media.get("videos") or []:
-        add_item(video.get("url"), "video")
-
-    for item in media.get("all") or []:
-        media_type = str(item.get("type") or "document").lower()
-        add_item(item.get("url"), "video" if media_type == "video" else "photo")
-
-    external = media.get("external") or {}
-    add_item(external.get("url"), "video")
+    add_media_block(tweet)
+    if not items:
+        for nested_key, nested_label in (
+            ("quote", "Quoted"),
+            ("quoted_tweet", "Quoted"),
+            ("retweet", "Retweeted"),
+            ("retweeted_tweet", "Retweeted"),
+        ):
+            nested = tweet.get(nested_key)
+            if not isinstance(nested, dict):
+                continue
+            add_media_block(nested)
+            if items:
+                nested_author = nested.get("author") or {}
+                nested_name = _clean_text(nested_author.get("name")) or _clean_text(
+                    nested_author.get("screen_name")
+                )
+                nested_text = _strip_urls_from_text(
+                    ((nested.get("raw_text") or {}).get("text"))
+                    or nested.get("text")
+                    or ""
+                )
+                extra_lines = ["", f"{nested_label} post media attached."]
+                if nested_name:
+                    extra_lines.append(f"{nested_label} author: {nested_name}")
+                if nested_text:
+                    extra_lines.extend(["", nested_text])
+                note_text = (
+                    "\n".join([note_text, *extra_lines]).strip()
+                    if note_text
+                    else "\n".join(extra_lines).strip()
+                )
+                break
 
     if not items:
         if raw_text:
@@ -611,25 +745,52 @@ def _bundle_from_vxtwitter_payload(data, endpoint_name: str, status_id: str) -> 
         seen_urls.add(url)
         items.append(SocialMediaItem(url=url, kind=kind, filename_hint=title))
 
-    combined_url = str(data.get("combinedMediaUrl") or "").strip()
-    media_urls = data.get("mediaURLs") or []
-    media_extended = data.get("media_extended") or []
+    def add_media_from_payload(payload: dict | None):
+        if not isinstance(payload, dict):
+            return
+        combined_url = str(payload.get("combinedMediaUrl") or "").strip()
+        media_urls = payload.get("mediaURLs") or []
+        media_extended = payload.get("media_extended") or []
 
-    for entry in media_extended[:MAX_MEDIA_FILES]:
-        if not isinstance(entry, dict):
-            continue
-        media_type = str(entry.get("type") or "").lower()
-        media_url = entry.get("url")
-        if media_type == "video":
+        for entry in media_extended[:MAX_MEDIA_FILES]:
+            if not isinstance(entry, dict):
+                continue
+            media_type = str(entry.get("type") or "").lower()
+            media_url = entry.get("url")
+            if media_type == "video":
+                add_item(media_url, "video")
+            elif media_type in {"photo", "image", "gif"}:
+                add_item(media_url, "photo")
+
+        for media_url in media_urls[:MAX_MEDIA_FILES]:
             add_item(media_url, "video")
-        elif media_type in {"photo", "image", "gif"}:
-            add_item(media_url, "photo")
 
-    for media_url in media_urls[:MAX_MEDIA_FILES]:
-        add_item(media_url, "video")
+        if combined_url:
+            add_item(combined_url, "video")
 
-    if combined_url:
-        add_item(combined_url, "video")
+    add_media_from_payload(data)
+    if not items:
+        for nested_key, nested_label in (("qrt", "Quoted"), ("retweet", "Retweeted")):
+            nested_tweet = data.get(nested_key)
+            if not isinstance(nested_tweet, dict):
+                continue
+            add_media_from_payload(nested_tweet)
+            if items:
+                nested_author = _clean_text(nested_tweet.get("user_name")) or _clean_text(
+                    nested_tweet.get("user_screen_name")
+                )
+                nested_text = _strip_urls_from_text(nested_tweet.get("text"))
+                extra_lines = ["", f"{nested_label} post media attached."]
+                if nested_author:
+                    extra_lines.append(f"{nested_label} author: {nested_author}")
+                if nested_text:
+                    extra_lines.extend(["", nested_text])
+                note_text = (
+                    "\n".join([note_text, *extra_lines]).strip()
+                    if note_text
+                    else "\n".join(extra_lines).strip()
+                )
+                break
 
     if not items:
         if raw_text:
@@ -920,25 +1081,23 @@ async def get_social_bundle(platform: str, url: str) -> SocialDownloadBundle:
                 _mark_cooldown(cooldown_key)
                 failures.append(f"{label}: {exc}")
 
-        page_note = await _build_page_note(client, safe_url)
-        if page_note:
-            fallback_title = _safe_filename(
-                page_note.splitlines()[0].replace("Title: ", "").replace("Platform: ", "") or f"{platform.title()} Post",
-                f"{platform.title()} Post",
-            )
-            return SocialDownloadBundle(
-                title=fallback_title,
-                source="Page Metadata",
-                items=[
-                    SocialMediaItem(
-                        url="",
-                        kind="text",
-                        filename_hint=f"{fallback_title}.txt",
-                        content=page_note,
-                    )
-                ],
-                note_text=page_note,
-            )
+        metadata_bundle = await _build_page_metadata_bundle(client, safe_url, platform)
+        if metadata_bundle:
+            if not metadata_bundle.items and metadata_bundle.note_text:
+                return SocialDownloadBundle(
+                    title=metadata_bundle.title,
+                    source=metadata_bundle.source,
+                    items=[
+                        SocialMediaItem(
+                            url="",
+                            kind="text",
+                            filename_hint=f"{metadata_bundle.title}.txt",
+                            content=metadata_bundle.note_text,
+                        )
+                    ],
+                    note_text=metadata_bundle.note_text,
+                )
+            return metadata_bundle
 
     details = "\n".join(failures[:3])
     raise SocialDownloadError(
