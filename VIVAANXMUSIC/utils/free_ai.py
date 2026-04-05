@@ -42,6 +42,8 @@ REPLICATE_KLING_MODEL = "kwaivgi/kling-v2.1"
 HF_VISION_SPACE = "prithivMLmods/Qwen2.5-VL"
 HF_VISION_FALLBACK_SPACE = "prithivMLmods/Qwen-3.5-HF-Demo"
 HF_VISION_ALT_SPACE = "vikhyatk/moondream2"
+HF_COGVIDEO2_SPACE = "zai-org/CogVideoX-2B-Space"
+HF_COGVIDEO5_SPACE = "zai-org/CogVideoX-5B-Space"
 HF_IMAGE_EDIT_SPACE = "Qwen/Qwen-Image-Edit-2511"
 HF_IMAGE_EDIT_FAST_SPACE = "Nichotin/Qwen-Image-Edit-2511-Fast-ZeroGPU"
 HF_IMAGE_EDIT_ALT_SPACE = "lenML/Qwen-Image-Edit-2511-Fast"
@@ -875,6 +877,57 @@ def _run_hysts_zeroscope_video(
     return video_path
 
 
+def _run_cogvideox_2b_video(
+    prompt: str,
+    reference_image_path: str | None,
+    timeout_seconds: int,
+) -> str:
+    result = _run_with_hf_client(
+        HF_COGVIDEO2_SPACE,
+        lambda client: _run_gradio_job(
+            client,
+            timeout_seconds,
+            prompt,
+            20,
+            5.0,
+            api_name="/generate",
+        ),
+        allow_anonymous=False,
+    )
+    video_path = _extract_video_path(result)
+    if not video_path:
+        raise FreeAIError(f"{HF_COGVIDEO2_SPACE} returned no video.")
+    return video_path
+
+
+def _run_cogvideox_5b_video(
+    prompt: str,
+    reference_image_path: str | None,
+    timeout_seconds: int,
+) -> str:
+    image_input = handle_file(reference_image_path) if reference_image_path else None
+    result = _run_with_hf_client(
+        HF_COGVIDEO5_SPACE,
+        lambda client: _run_gradio_job(
+            client,
+            timeout_seconds,
+            prompt,
+            image_input,
+            None,
+            0.8,
+            -1,
+            False,
+            False,
+            api_name="/generate",
+        ),
+        allow_anonymous=False,
+    )
+    video_path = _extract_video_path(result)
+    if not video_path:
+        raise FreeAIError(f"{HF_COGVIDEO5_SPACE} returned no video.")
+    return video_path
+
+
 def _run_multimodalart_video(
     prompt: str,
     reference_image_path: str,
@@ -998,6 +1051,32 @@ def _run_keen007_video(
 ) -> str:
     return _run_wan_generation_clone(
         "keen007/wan2-video-generation",
+        prompt,
+        reference_image_path,
+        timeout_seconds,
+    )
+
+
+def _run_aliothtalks_video(
+    prompt: str,
+    reference_image_path: str | None,
+    timeout_seconds: int,
+) -> str:
+    return _run_wan_generation_clone(
+        "AliothTalks/wan2-video-generation",
+        prompt,
+        reference_image_path,
+        timeout_seconds,
+    )
+
+
+def _run_bytfity_video(
+    prompt: str,
+    reference_image_path: str | None,
+    timeout_seconds: int,
+) -> str:
+    return _run_wan_generation_clone(
+        "BYTFITY/wan2-video-generation262515414142",
         prompt,
         reference_image_path,
         timeout_seconds,
@@ -2278,64 +2357,101 @@ async def generate_video(
                 )
             provider_batches.extend(replicate_batch)
 
+        if HF_TOKEN_POOL:
+            hf_batch = [
+                [
+                    VideoProvider(
+                        "HF / CogVideoX 2B",
+                        75,
+                        False,
+                        False,
+                        _run_cogvideox_2b_video,
+                    ),
+                ],
+                [
+                    VideoProvider(
+                        "HF / CogVideoX 5B",
+                        90,
+                        True,
+                        False,
+                        _run_cogvideox_5b_video,
+                    ),
+                ],
+            ]
+            provider_batches.extend(hf_batch)
+
         if not REPLICATE_TOKEN_POOL or _is_enabled(GENVID_USE_PUBLIC_FALLBACKS):
             provider_batches.extend(
                 [
                     [
                         VideoProvider(
                             "hysts / zeroscope-v2",
-                            25,
+                            22,
                             False,
                             False,
                             _run_hysts_zeroscope_video,
                         ),
                         VideoProvider(
                             "Alava01 / Wan Demo",
-                            30,
+                            24,
                             False,
                             False,
                             _run_alava_wan_demo,
                         ),
                         VideoProvider(
                             "OpenKing / Wan2 Video",
-                            35,
+                            28,
                             True,
                             False,
                             _run_openking_video,
                         ),
                         VideoProvider(
                             "Smikke / Wan2 Video",
-                            35,
+                            28,
                             True,
                             False,
                             _run_smikke_video,
                         ),
                         VideoProvider(
                             "Mrfalco / Wan2 Video",
-                            35,
+                            28,
                             True,
                             False,
                             _run_mrfalco_video,
                         ),
                         VideoProvider(
                             "ChanPoin / Wan2 Video",
-                            35,
+                            28,
                             True,
                             False,
                             _run_chanpoin_video,
                         ),
                         VideoProvider(
                             "Keen007 / Wan2 Video",
-                            35,
+                            28,
                             True,
                             False,
                             _run_keen007_video,
+                        ),
+                        VideoProvider(
+                            "AliothTalks / Wan2 Video",
+                            28,
+                            True,
+                            False,
+                            _run_aliothtalks_video,
+                        ),
+                        VideoProvider(
+                            "BYTFITY / Wan2 Video",
+                            28,
+                            True,
+                            False,
+                            _run_bytfity_video,
                         ),
                     ],
                     [
                         VideoProvider(
                             "Wan-AI / Wan2.1",
-                            20,
+                            18,
                             False,
                             False,
                             _run_wan_async_video,
@@ -2349,7 +2465,7 @@ async def generate_video(
                     [
                         VideoProvider(
                             "Multimodalart / Wan2.1 Fast",
-                            45,
+                            35,
                             True,
                             True,
                             _run_multimodalart_video,
