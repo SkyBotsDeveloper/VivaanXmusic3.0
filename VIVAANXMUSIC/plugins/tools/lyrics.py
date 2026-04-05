@@ -6,6 +6,8 @@ import secrets
 import time
 from dataclasses import dataclass
 
+from indic_transliteration import sanscript
+from indic_transliteration.sanscript import transliterate
 from pyrogram import filters
 from pyrogram.enums import ChatAction, ParseMode
 from pyrogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
@@ -29,6 +31,30 @@ LYRICS_VIEW_CACHE: dict[str, "LyricsViewState"] = {}
 NOISY_RESULT_PATTERN = re.compile(
     r"\b(?:lofi|slowed|reverb|remix|cover|version|edit|status|mashup|dj|ai cover)\b",
     re.IGNORECASE,
+)
+DEVANAGARI_PATTERN = re.compile(r"[\u0900-\u097F]")
+ROMAN_WORD_PATTERN = re.compile(r"[A-Za-z]+")
+ROMAN_REPLACEMENTS = (
+    ("RRi", "ri"),
+    ("RRI", "ri"),
+    ("R^i", "ri"),
+    ("R^I", "ri"),
+    ("L^i", "li"),
+    ("L^I", "li"),
+    ("~N", "n"),
+    ("~n", "n"),
+    ("N^", "n"),
+    ("Ch", "chh"),
+    ("GY", "gy"),
+    ("j~n", "gy"),
+    ("kSh", "ksh"),
+    ("Sh", "sh"),
+    ("S", "sh"),
+    ("A", "aa"),
+    ("I", "ee"),
+    ("U", "oo"),
+    ("M", "n"),
+    ("H", "h"),
 )
 
 
@@ -120,7 +146,7 @@ def _result_label(candidate: LyricsCandidate) -> str:
     title = _truncate_label(candidate.title, 22)
     artist = _truncate_label(candidate.artist, 14)
     if artist:
-        return f"{title} - {artist}"
+        return f"{title} • {artist}"
     return title or "Unknown Track"
 
 
@@ -134,7 +160,7 @@ def _build_results_markup(token: str, session: LyricsSearchSession) -> InlineKey
         ]
         for index, candidate in enumerate(session.candidates[:10])
     ]
-    rows.append([InlineKeyboardButton("Band", callback_data="close")])
+    rows.append([InlineKeyboardButton("Close", callback_data="close")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -143,14 +169,14 @@ def _build_lyrics_markup(token: str, selected_index: int, page: int, total: int)
     if total > 1 and page > 0:
         nav_row.append(
             InlineKeyboardButton(
-                "Prev",
+                "‹ Prev",
                 callback_data=f"lyrics_page:{token}:{selected_index}:{page - 1}",
             )
         )
     if total > 1 and page < (total - 1):
         nav_row.append(
             InlineKeyboardButton(
-                "Next",
+                "Next ›",
                 callback_data=f"lyrics_page:{token}:{selected_index}:{page + 1}",
             )
         )
@@ -160,8 +186,8 @@ def _build_lyrics_markup(token: str, selected_index: int, page: int, total: int)
         rows.append(nav_row)
     rows.append(
         [
-            InlineKeyboardButton("Wapas", callback_data=f"lyrics_back:{token}"),
-            InlineKeyboardButton("Band", callback_data="close"),
+            InlineKeyboardButton("Back", callback_data=f"lyrics_back:{token}"),
+            InlineKeyboardButton("Close", callback_data="close"),
         ]
     )
     return InlineKeyboardMarkup(rows)
@@ -169,10 +195,10 @@ def _build_lyrics_markup(token: str, selected_index: int, page: int, total: int)
 
 def _format_results_text(query: str, candidates: list[LyricsCandidate]) -> str:
     lines = [
-        "Lyrics search result",
-        f"Search: {query}",
+        "Lyrics search results",
+        f"Query: {query}",
         "",
-        "Neeche sahi gaana select karo.",
+        "Tap the matching song below.",
     ]
     top = candidates[:5]
     if top:
@@ -184,17 +210,36 @@ def _format_results_text(query: str, candidates: list[LyricsCandidate]) -> str:
     return "\n".join(lines)
 
 
+def _romanize_word(word: str) -> str:
+    for source, target in ROMAN_REPLACEMENTS:
+        word = word.replace(source, target)
+    word = re.sub(r"ph", "f", word)
+    if len(word) > 2 and word.endswith("a") and not word.endswith(
+        ("aa", "ia", "ua", "oa", "ea")
+    ):
+        word = word[:-1]
+    return word
+
+
+def _romanize_if_needed(text: str | None) -> str:
+    value = str(text or "")
+    if not value or not DEVANAGARI_PATTERN.search(value):
+        return value
+    romanized = transliterate(value, sanscript.DEVANAGARI, sanscript.ITRANS)
+    return ROMAN_WORD_PATTERN.sub(lambda match: _romanize_word(match.group(0)), romanized)
+
+
 def _chunk_lyrics(result: LyricsResult) -> list[str]:
-    body = result.lyrics.strip()
+    body = _romanize_if_needed(result.lyrics).strip()
     if not body:
         return []
 
     header = [
-        f"Lyrics: {result.title}",
-        f"Singer: {result.artist}",
+        f"Lyrics: {_romanize_if_needed(result.title)}",
+        f"Artist: {_romanize_if_needed(result.artist)}",
     ]
     if result.album:
-        header.append(f"Album: {result.album}")
+        header.append(f"Album: {_romanize_if_needed(result.album)}")
     header.append(f"Source: {result.source}")
     header.append("")
     prefix = "\n".join(header)
@@ -231,7 +276,7 @@ def _fallback_result(candidate: LyricsCandidate) -> LyricsResult | None:
         return None
     return LyricsResult(
         title=candidate.title or "Unknown Track",
-        artist=candidate.artist or "Unknown Singer",
+        artist=candidate.artist or "Unknown Artist",
         album=candidate.album,
         lyrics=lyrics,
         source=(candidate.source or "FALLBACK").upper(),
@@ -243,7 +288,7 @@ def _render_chunk(chunks: list[str], page: int) -> str:
     chunk = chunks[page]
     if total == 1:
         return chunk
-    return f"Hissa {page + 1}/{total}\n\n{chunk}"
+    return f"Part {page + 1}/{total}\n\n{chunk}"
 
 
 async def _edit_lyrics_message(
@@ -321,11 +366,11 @@ async def lyrics_command(client, message: Message):
     query = _get_query(message)
     if not query:
         return await message.reply_text(
-            "Use karo: /lyrics song name ya gaane ki koi line."
+            "Use /lyrics song name or /lyrics some line from the song."
         )
 
     await client.send_chat_action(message.chat.id, ChatAction.TYPING)
-    search_message = await message.reply_text("Matching songs dhoond raha hoon...")
+    search_message = await message.reply_text("Searching matching songs...")
 
     try:
         candidates = await search_lyrics_candidates(query)
@@ -335,8 +380,8 @@ async def lyrics_command(client, message: Message):
     filtered_candidates = _filter_candidates(candidates)
     if not filtered_candidates:
         return await search_message.edit_text(
-            "Is search ke liye koi reliable lyrics result nahi mila.\n"
-            "Song name ya thodi unique line try karo."
+            "No reliable lyrics results were found for that query.\n"
+            "Try a clearer song name or a more unique lyric line."
         )
 
     _cleanup_cache()
@@ -363,40 +408,40 @@ async def lyrics_pick_callback(client, callback_query: CallbackQuery):
         _, token, index_text = callback_query.data.split(":")
         selected_index = int(index_text)
     except Exception:
-        return await callback_query.answer("Ye lyrics selection valid nahi hai.", show_alert=True)
+        return await callback_query.answer("Invalid lyrics selection.", show_alert=True)
 
     session = LYRICS_RESULTS_CACHE.get(token)
     if not session:
         return await callback_query.answer(
-            "Ye lyrics search expire ho gayi. Dobara search karo.",
+            "This lyrics search has expired. Search again.",
             show_alert=True,
         )
 
     if callback_query.from_user.id != session.requester_id:
         return await callback_query.answer(
-            "Ye buttons sirf wahi user use kar sakta hai jisne search kiya tha.",
+            "Only the user who searched can use these buttons.",
             show_alert=True,
         )
 
     try:
         candidate = session.candidates[selected_index]
     except Exception:
-        return await callback_query.answer("Ye song selection valid nahi hai.", show_alert=True)
+        return await callback_query.answer("Song selection is invalid.", show_alert=True)
 
-    await callback_query.answer("Lyrics la raha hoon...")
+    await callback_query.answer("Fetching lyrics...")
     await client.send_chat_action(callback_query.message.chat.id, ChatAction.TYPING)
 
     result = await _resolve_result(candidate)
     if not result:
         return await callback_query.answer(
-            "Is selection ke lyrics abhi available nahi hain.",
+            "Lyrics are temporarily unavailable for that selection.",
             show_alert=True,
         )
 
     chunks = _chunk_lyrics(result)
     if not chunks:
         return await callback_query.answer(
-            "Is selection ke lyrics abhi available nahi hain.",
+            "Lyrics are temporarily unavailable for that selection.",
             show_alert=True,
         )
 
@@ -416,7 +461,7 @@ async def lyrics_pick_callback(client, callback_query: CallbackQuery):
     )
     if not ok:
         return await callback_query.answer(
-            "Lyrics bhejne me problem aayi. Koi aur result try karo.",
+            "Lyrics delivery failed. Try another result.",
             show_alert=True,
         )
 
@@ -430,24 +475,24 @@ async def lyrics_page_callback(client, callback_query: CallbackQuery):
         selected_index = int(index_text)
         page = int(page_text)
     except Exception:
-        return await callback_query.answer("Ye lyrics page valid nahi hai.", show_alert=True)
+        return await callback_query.answer("Invalid lyrics page.", show_alert=True)
 
     session = LYRICS_RESULTS_CACHE.get(token)
     view = LYRICS_VIEW_CACHE.get(_view_key(token, selected_index))
     if not session or not view:
         return await callback_query.answer(
-            "Ye lyrics view expire ho gaya. Dobara search karo.",
+            "This lyrics view has expired. Search again.",
             show_alert=True,
         )
 
     if callback_query.from_user.id != view.requester_id:
         return await callback_query.answer(
-            "Ye buttons sirf wahi user use kar sakta hai jisne search kiya tha.",
+            "Only the user who searched can use these buttons.",
             show_alert=True,
         )
 
     if page < 0 or page >= len(view.chunks):
-        return await callback_query.answer("Ye lyrics page valid nahi hai.", show_alert=True)
+        return await callback_query.answer("Invalid lyrics page.", show_alert=True)
 
     ok = await _edit_lyrics_message(
         callback_query,
@@ -456,7 +501,7 @@ async def lyrics_page_callback(client, callback_query: CallbackQuery):
     )
     if not ok:
         return await callback_query.answer(
-            "Ye lyrics page khul nahi paya.",
+            "Unable to open that lyrics page.",
             show_alert=True,
         )
 
@@ -468,18 +513,18 @@ async def lyrics_back_callback(client, callback_query: CallbackQuery):
     try:
         _, token = callback_query.data.split(":")
     except ValueError:
-        return await callback_query.answer("Ye request valid nahi hai.", show_alert=True)
+        return await callback_query.answer("Invalid request.", show_alert=True)
 
     session = LYRICS_RESULTS_CACHE.get(token)
     if not session:
         return await callback_query.answer(
-            "Ye lyrics search expire ho gayi. Dobara search karo.",
+            "This lyrics search has expired. Search again.",
             show_alert=True,
         )
 
     if callback_query.from_user.id != session.requester_id:
         return await callback_query.answer(
-            "Ye buttons sirf wahi user use kar sakta hai jisne search kiya tha.",
+            "Only the user who searched can use these buttons.",
             show_alert=True,
         )
 
@@ -490,6 +535,6 @@ async def lyrics_back_callback(client, callback_query: CallbackQuery):
     )
     if not ok:
         return await callback_query.answer(
-            "Results par wapas nahi ja paya.",
+            "Unable to return to results.",
             show_alert=True,
         )
