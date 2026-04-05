@@ -216,6 +216,7 @@ HELP_22 = """
 
 - /anime [query] - search anime details.
 - /movie [query] - fetch movie information.
+- /news [topic] - show the latest headlines on a topic from reliable sources.
 - /domain [name] - inspect a domain.
 - /ip [address] - inspect IP information.
 - /mongochk [mongo url] - check a MongoDB URI.

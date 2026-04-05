@@ -39,6 +39,7 @@ BOT_COMMANDS = [
     BotCommand("snap", "Download Snapchat media"),
     BotCommand("tiktok", "Download TikTok media"),
     BotCommand("movie", "Search movie info"),
+    BotCommand("news", "Get latest topic news"),
     BotCommand("settings", "Open group settings"),
     BotCommand("ping", "Check bot status"),
 ]

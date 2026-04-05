@@ -100,6 +100,7 @@ META_TAG_PATTERN = re.compile(
     re.IGNORECASE,
 )
 TITLE_TAG_PATTERN = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
+URL_TEXT_PATTERN = re.compile(r"https?://\S+", re.IGNORECASE)
 _TRACKER_CACHE: list[dict] = []
 _TRACKER_CACHE_AT = 0.0
 _STRATEGY_COOLDOWNS: dict[str, float] = {}
@@ -164,6 +165,10 @@ def _clean_html_text(value: str | None) -> str:
         return ""
     text = re.sub(r"<[^>]+>", " ", str(value))
     return _clean_text(unescape(text))
+
+
+def _strip_urls_from_text(value: str | None) -> str:
+    return _clean_text(URL_TEXT_PATTERN.sub("", str(value or "")))
 
 
 def _guess_kind(filename: str, content_type: str) -> str:
@@ -338,10 +343,10 @@ async def _build_page_note(client: httpx.AsyncClient, source_url: str) -> str:
         return ""
 
     title, description, site_name = _extract_html_metadata(response.text)
+    description = _strip_urls_from_text(description)
     lines: list[str] = []
     if site_name:
         lines.append(f"Platform: {site_name}")
-    lines.append(f"Source URL: {source_url}")
     if title:
         lines.append(f"Title: {title}")
     if description and description != title:
@@ -378,16 +383,15 @@ async def _build_youtube_oembed_note(client: httpx.AsyncClient, source_url: str)
     author_name = _clean_text(data.get("author_name"))
     author_url = _clean_text(data.get("author_url"))
     provider_name = _clean_text(data.get("provider_name"))
+    title = _strip_urls_from_text(title)
+    author_name = _strip_urls_from_text(author_name)
     lines: list[str] = []
     if provider_name:
         lines.append(f"Platform: {provider_name}")
-    lines.append(f"Source URL: {source_url}")
     if title:
         lines.append(f"Title: {title}")
     if author_name:
         lines.append(f"Author: {author_name}")
-    if author_url:
-        lines.append(f"Author URL: {author_url}")
     return "\n".join(lines).strip()
 
 
@@ -522,16 +526,15 @@ def _bundle_from_fixtweet_payload(data, endpoint_name: str, status_id: str) -> S
         or tweet.get("text")
         or ""
     ).strip()
+    raw_text = _strip_urls_from_text(raw_text)
     author_name = _clean_text(author.get("name")) or "Unknown"
     author_handle = _clean_text(author.get("screen_name"))
     author_line = author_name
     if author_handle:
         author_line += f" (@{author_handle})"
-    post_url = _clean_text(tweet.get("url")) or f"https://x.com/i/status/{status_id}"
     note_text = (
         f"Author: {author_line}\n"
-        f"Post URL: {post_url}\n\n"
-        f"{raw_text}\n"
+        f"\n{raw_text}\n"
     ).strip() if raw_text else ""
     items: list[SocialMediaItem] = []
     seen_urls: set[str] = set()
@@ -628,15 +631,13 @@ async def _fetch_x_via_oembed(
         params={"url": source_url, "omit_script": 1, "dnt": 1},
     )
     author_name = _clean_text(data.get("author_name")) or "Unknown"
-    post_url = _clean_text(data.get("url")) or source_url
     html = str(data.get("html") or "")
     text_match = re.search(r"<p[^>]*>(.*?)</p>", html, re.IGNORECASE | re.DOTALL)
-    post_text = _clean_html_text(text_match.group(1) if text_match else "")
-    title = _safe_filename(post_text or f"X {post_url.rsplit('/', 1)[-1]}", "X Post")
+    post_text = _strip_urls_from_text(_clean_html_text(text_match.group(1) if text_match else ""))
+    title = _safe_filename(post_text or f"X {source_url.rsplit('/', 1)[-1]}", "X Post")
     note_text = (
         f"Author: {author_name}\n"
-        f"Post URL: {post_url}\n\n"
-        f"{post_text}\n"
+        f"\n{post_text}\n"
     ).strip()
     if not post_text:
         raise SocialDownloadError("X oEmbed returned no readable post text.")
@@ -675,6 +676,7 @@ async def _fetch_tiktok_via_tikwm(
 
     data = payload.get("data") or {}
     title = _safe_filename(data.get("title") or "TikTok Video", "TikTok Video")
+    title = _strip_urls_from_text(title)
     author = data.get("author") or {}
     author_name = _clean_text(author.get("nickname"))
     author_handle = _clean_text(author.get("unique_id"))
@@ -684,7 +686,6 @@ async def _fetch_tiktok_via_tikwm(
     duration = data.get("duration")
     note_lines = [
         f"Author: {author_line}",
-        f"Post URL: {source_url}",
     ]
     if duration:
         note_lines.append(f"Duration: {duration}s")
