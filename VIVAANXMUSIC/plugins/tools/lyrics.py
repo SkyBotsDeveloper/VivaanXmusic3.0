@@ -187,14 +187,40 @@ async def _send_lyrics_chunks(message: Message, result: LyricsResult):
     thread_id = getattr(message, "message_thread_id", None)
     for index, chunk in enumerate(chunks, start=1):
         text = chunk if total == 1 else f"Part {index}/{total}\n\n{chunk}"
-        await app.send_message(
-            message.chat.id,
-            text,
-            disable_web_page_preview=True,
-            parse_mode=ParseMode.DISABLED,
-            reply_to_message_id=reply_to_id if index == 1 else None,
-            message_thread_id=thread_id,
-        )
+        sent = False
+        attempts = [
+            {
+                "reply_to_message_id": reply_to_id if index == 1 else None,
+                "message_thread_id": thread_id,
+            },
+            {
+                "reply_to_message_id": None,
+                "message_thread_id": thread_id,
+            },
+            {
+                "reply_to_message_id": reply_to_id if index == 1 else None,
+                "message_thread_id": None,
+            },
+            {
+                "reply_to_message_id": None,
+                "message_thread_id": None,
+            },
+        ]
+        for attempt in attempts:
+            try:
+                await app.send_message(
+                    message.chat.id,
+                    text,
+                    disable_web_page_preview=True,
+                    parse_mode=ParseMode.DISABLED,
+                    **attempt,
+                )
+                sent = True
+                break
+            except Exception:
+                continue
+        if not sent:
+            raise LyricsError("Lyrics delivery failed. Please try another song.")
 
 
 @app.on_message(filters.command("lyrics") & ~BANNED_USERS)
