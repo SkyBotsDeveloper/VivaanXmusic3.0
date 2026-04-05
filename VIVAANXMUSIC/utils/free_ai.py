@@ -27,6 +27,9 @@ HF_TOKENS = getattr(runtime_config, "HF_TOKENS", "")
 OCR_SPACE_API_KEY = getattr(runtime_config, "OCR_SPACE_API_KEY", "helloworld")
 REPLICATE_API_TOKEN = getattr(runtime_config, "REPLICATE_API_TOKEN", None)
 REPLICATE_API_TOKENS = getattr(runtime_config, "REPLICATE_API_TOKENS", "")
+DASHSCOPE_API_KEY = getattr(runtime_config, "DASHSCOPE_API_KEY", None)
+DASHSCOPE_API_TOKENS = getattr(runtime_config, "DASHSCOPE_API_KEYS", "")
+DASHSCOPE_REGION = getattr(runtime_config, "DASHSCOPE_REGION", "sg")
 
 
 HTTP_TIMEOUT = httpx.Timeout(45.0, connect=10.0)
@@ -37,9 +40,16 @@ IMAGE_ENHANCE_URL = "https://arimagex.netlify.app/api/enhance"
 IMAGE_REMOVEBG_URL = "https://arimagex.netlify.app/api/removebg"
 OCR_SPACE_API_URL = "https://api.ocr.space/parse/image"
 REPLICATE_API_URL = "https://api.replicate.com/v1"
+VIDEO_DASHSCOPE_ENDPOINTS = {
+    "sg": "https://dashscope-intl.aliyuncs.com/api/v1",
+    "us": "https://dashscope-us.aliyuncs.com/api/v1",
+    "cn": "https://dashscope.aliyuncs.com/api/v1",
+}
 REPLICATE_SEEDANCE_MODEL = "bytedance/seedance-1-lite"
 REPLICATE_MINIMAX_MODEL = "minimax/video-01"
 REPLICATE_KLING_MODEL = "kwaivgi/kling-v2.1"
+DASHSCOPE_T2V_MODEL = "wan2.2-t2v-plus"
+DASHSCOPE_I2V_MODEL = "wan2.1-i2v-turbo"
 HF_VISION_SPACE = "prithivMLmods/Qwen2.5-VL"
 HF_VISION_FALLBACK_SPACE = "prithivMLmods/Qwen-3.5-HF-Demo"
 HF_VISION_ALT_SPACE = "vikhyatk/moondream2"
@@ -329,6 +339,7 @@ def _parse_token_pool(*values: str | None) -> tuple[str, ...]:
 
 REPLICATE_TOKEN_POOL = _parse_token_pool(REPLICATE_API_TOKENS, REPLICATE_API_TOKEN)
 HF_TOKEN_POOL = _parse_token_pool(HF_TOKENS, HF_TOKEN)
+DASHSCOPE_TOKEN_POOL = _parse_token_pool(DASHSCOPE_API_TOKENS, DASHSCOPE_API_KEY)
 
 
 def _is_enabled(value) -> bool:
@@ -491,6 +502,15 @@ def _get_replicate_tokens() -> tuple[str, ...]:
 
 def _get_hf_tokens() -> tuple[str, ...]:
     return _rotate_tokens("hf", HF_TOKEN_POOL)
+
+
+def _get_dashscope_tokens() -> tuple[str, ...]:
+    return _rotate_tokens("dashscope", DASHSCOPE_TOKEN_POOL)
+
+
+def _dashscope_base_url() -> str:
+    region = str(DASHSCOPE_REGION or "sg").strip().lower()
+    return VIDEO_DASHSCOPE_ENDPOINTS.get(region, VIDEO_DASHSCOPE_ENDPOINTS["sg"])
 
 
 def _unwrap_gradio_media(payload):
@@ -917,6 +937,148 @@ def _run_replicate_kling_video(
     return _run_replicate_prediction(
         REPLICATE_KLING_MODEL,
         input_payload,
+        timeout_seconds,
+    )
+
+
+def _dashscope_error_message(response: httpx.Response) -> str:
+    try:
+        payload = response.json()
+    except Exception:
+        return response.text.strip() or "DashScope request failed."
+    return _extract_json_error(payload)
+
+
+def _run_dashscope_video_task_once(
+    token: str,
+    model: str,
+    input_payload: dict,
+    parameters: dict,
+    timeout_seconds: int,
+) -> str:
+    base_url = _dashscope_base_url()
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+        "X-DashScope-Async": "enable",
+    }
+    request_timeout = httpx.Timeout(max(timeout_seconds + 20, 60), connect=10.0)
+    with httpx.Client(
+        timeout=request_timeout,
+        headers=HTTP_HEADERS,
+        follow_redirects=True,
+        trust_env=False,
+    ) as client:
+        response = client.post(
+            f"{base_url}/services/aigc/video-generation/video-synthesis",
+            headers=headers,
+            json={
+                "model": model,
+                "input": input_payload,
+                "parameters": parameters,
+            },
+        )
+        if response.status_code >= 400:
+            raise FreeAIError(_dashscope_error_message(response))
+
+        payload = response.json()
+        task_id = (((payload or {}).get("output") or {}).get("task_id") or "").strip()
+        if not task_id:
+            raise FreeAIError("DashScope did not return a task ID.")
+
+        deadline = time.time() + timeout_seconds
+        while True:
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                raise FreeAIError("DashScope provider timed out.")
+
+            poll = client.get(
+                f"{base_url}/tasks/{task_id}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if poll.status_code >= 400:
+                raise FreeAIError(_dashscope_error_message(poll))
+
+            payload = poll.json()
+            output = (payload or {}).get("output") or {}
+            status = str(output.get("task_status") or "").upper()
+            if status == "SUCCEEDED":
+                video_url = str(output.get("video_url") or "").strip()
+                if video_url:
+                    return video_url
+                raise FreeAIError("DashScope returned no video URL.")
+            if status in {"FAILED", "CANCELED", "CANCELLED", "UNKNOWN"}:
+                error_code = str(output.get("code") or "").strip()
+                error_message = str(output.get("message") or "").strip()
+                detail = ": ".join(part for part in (error_code, error_message) if part)
+                raise FreeAIError(detail or f"DashScope task {status.lower()}.")
+
+            time.sleep(min(4, max(1, remaining)))
+
+
+def _run_dashscope_video_task(
+    model: str,
+    input_payload: dict,
+    parameters: dict,
+    timeout_seconds: int,
+) -> str:
+    tokens = _get_dashscope_tokens()
+    if not tokens:
+        raise FreeAIError("DashScope API key is not configured.")
+
+    failures: list[str] = []
+    for token in tokens:
+        try:
+            output = _run_dashscope_video_task_once(
+                token,
+                model,
+                input_payload,
+                parameters,
+                timeout_seconds,
+            )
+            _clear_token_cooldown("dashscope", token)
+            return output
+        except FreeAIError as exc:
+            message = str(exc)
+            _set_token_cooldown("dashscope", token, message)
+            failures.append(message)
+
+    details = "\n".join(failures[:3])
+    raise FreeAIError(details or "DashScope request failed.")
+
+
+def _run_dashscope_t2v_video(
+    prompt: str,
+    reference_image_path: str | None,
+    timeout_seconds: int,
+) -> str:
+    input_payload = {"prompt": prompt}
+    parameters = {"size": "1280*720", "duration": 5}
+    return _run_dashscope_video_task(
+        DASHSCOPE_T2V_MODEL,
+        input_payload,
+        parameters,
+        timeout_seconds,
+    )
+
+
+def _run_dashscope_i2v_video(
+    prompt: str,
+    reference_image_path: str | None,
+    timeout_seconds: int,
+) -> str:
+    if not reference_image_path:
+        raise FreeAIError("DashScope image-to-video requires a reference image.")
+
+    input_payload = {
+        "prompt": prompt,
+        "img_url": _path_to_data_uri(reference_image_path),
+    }
+    parameters = {"resolution": "720P", "duration": 5}
+    return _run_dashscope_video_task(
+        DASHSCOPE_I2V_MODEL,
+        input_payload,
+        parameters,
         timeout_seconds,
     )
 
@@ -2684,6 +2846,32 @@ async def generate_video(
                 )
             provider_batches.extend(replicate_batch)
 
+        if DASHSCOPE_TOKEN_POOL:
+            dashscope_batch = [
+                [
+                    VideoProvider(
+                        "Alibaba / Wan T2V",
+                        180,
+                        False,
+                        False,
+                        _run_dashscope_t2v_video,
+                    ),
+                ]
+            ]
+            if reference_image_path:
+                dashscope_batch.append(
+                    [
+                        VideoProvider(
+                            "Alibaba / Wan I2V",
+                            180,
+                            True,
+                            True,
+                            _run_dashscope_i2v_video,
+                        )
+                    ]
+                )
+            provider_batches.extend(dashscope_batch)
+
         if HF_TOKEN_POOL:
             hf_batch = [
                 [
@@ -2896,7 +3084,7 @@ async def generate_video(
         else:
             headline = (
                 "Public no-key video providers are temporarily unavailable.\n"
-                "Tip: set HF_TOKEN/HF_TOKENS or REPLICATE_API_TOKEN/REPLICATE_API_TOKENS for more reliable /genvid output."
+                "Tip: set DASHSCOPE_API_KEY, HF_TOKEN/HF_TOKENS, or REPLICATE_API_TOKEN/REPLICATE_API_TOKENS for more reliable /genvid output."
             )
         raise FreeAIError(
             f"{headline}\n{details}"
