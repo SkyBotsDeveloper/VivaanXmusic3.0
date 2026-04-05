@@ -238,7 +238,7 @@ HELP_24 = """
 """
 
 HELP_25 = """
-<b><u>Song / Download</u></b>
+<b><u>Download</u></b>
 
 - /song [title/url] - download a song from YouTube.
 - /lyrics [title or lyric line] - search matching songs, then fetch full lyrics by button.

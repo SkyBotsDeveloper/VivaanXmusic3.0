@@ -5,6 +5,9 @@ from VIVAANXMUSIC.button_styles import danger_button, primary_button
 
 
 TOTAL_SECTIONS = 33
+BUTTON_LABEL_OVERRIDES = {
+    25: "Dᴏᴡɴʟᴏᴀᴅ",
+}
 
 
 def generate_help_buttons(_, start: int, end: int, current_page: int):
@@ -15,7 +18,7 @@ def generate_help_buttons(_, start: int, end: int, current_page: int):
             buttons.append([])
         buttons[-1].append(
             InlineKeyboardButton(
-                text=_[f"H_B_{section}"],
+                text=BUTTON_LABEL_OVERRIDES.get(section, _[f"H_B_{section}"]),
                 callback_data=f"help_callback hb{section}_p{current_page}",
             )
         )
