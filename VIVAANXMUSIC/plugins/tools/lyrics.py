@@ -6,11 +6,17 @@ import secrets
 import time
 from dataclasses import dataclass
 
-from indic_transliteration import sanscript
-from indic_transliteration.sanscript import transliterate
 from pyrogram import filters
 from pyrogram.enums import ChatAction, ParseMode
 from pyrogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from unidecode import unidecode
+
+try:
+    from indic_transliteration import sanscript
+    from indic_transliteration.sanscript import transliterate
+except Exception:
+    sanscript = None
+    transliterate = None
 
 from config import BANNED_USERS
 from VIVAANXMUSIC import app
@@ -225,8 +231,10 @@ def _romanize_if_needed(text: str | None) -> str:
     value = str(text or "")
     if not value or not DEVANAGARI_PATTERN.search(value):
         return value
-    romanized = transliterate(value, sanscript.DEVANAGARI, sanscript.ITRANS)
-    return ROMAN_WORD_PATTERN.sub(lambda match: _romanize_word(match.group(0)), romanized)
+    if transliterate and sanscript:
+        romanized = transliterate(value, sanscript.DEVANAGARI, sanscript.ITRANS)
+        return ROMAN_WORD_PATTERN.sub(lambda match: _romanize_word(match.group(0)), romanized)
+    return unidecode(value)
 
 
 def _chunk_lyrics(result: LyricsResult) -> list[str]:
