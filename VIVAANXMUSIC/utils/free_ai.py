@@ -46,6 +46,11 @@ HF_VISION_ALT_SPACE = "vikhyatk/moondream2"
 HF_COGVIDEO2_SPACE = "zai-org/CogVideoX-2B-Space"
 HF_COGVIDEO5_SPACE = "zai-org/CogVideoX-5B-Space"
 HF_LTX_VIDEO_SPACE = "DeepRat/LTX-Video-ZeroGPU-Optimized"
+HF_WAN22_FAST_I2V_SPACE = "zerogpu-aoti/wan2-2-fp8da-aoti-faster"
+HF_WAN22_PREVIEW_SPACE = "r3gm/wan2-2-fp8da-aoti-preview"
+HF_WAN22_PREVIEW2_SPACE = "r3gm/wan2-2-fp8da-aoti-preview2"
+HF_WAN22_OBSXRVER_SPACE = "obsxrver/WAN22-I2V-Demo"
+HF_WAN22_DREAM_SPACE = "dream2589632147/Dream-wan2-2-faster-Pro"
 HF_IMAGE_EDIT_SPACE = "Qwen/Qwen-Image-Edit-2511"
 HF_IMAGE_EDIT_FAST_SPACE = "Nichotin/Qwen-Image-Edit-2511-Fast-ZeroGPU"
 HF_IMAGE_EDIT_ALT_SPACE = "lenML/Qwen-Image-Edit-2511-Fast"
@@ -1114,6 +1119,163 @@ def _run_deeprat_ltx_video(
     if not video_path:
         raise FreeAIError(f"{HF_LTX_VIDEO_SPACE} returned no video.")
     return video_path
+
+
+def _run_wan22_basic_i2v_space(
+    space_id: str,
+    prompt: str,
+    reference_image_path: str | None,
+    timeout_seconds: int,
+) -> str:
+    if not reference_image_path:
+        raise FreeAIError("Reference image required.")
+
+    result = _run_with_hf_client(
+        space_id,
+        lambda client: _run_gradio_job(
+            client,
+            timeout_seconds,
+            handle_file(reference_image_path),
+            prompt,
+            6,
+            VIDEO_NEGATIVE_PROMPT,
+            2,
+            1,
+            1,
+            42,
+            True,
+            api_name="/generate_video",
+        ),
+        allow_anonymous=True,
+    )
+    video_path = _extract_video_path(result)
+    if not video_path:
+        raise FreeAIError(f"{space_id} returned no video.")
+    return video_path
+
+
+def _run_wan22_preview_i2v_space(
+    space_id: str,
+    prompt: str,
+    reference_image_path: str | None,
+    timeout_seconds: int,
+) -> str:
+    if not reference_image_path:
+        raise FreeAIError("Reference image required.")
+
+    result = _run_with_hf_client(
+        space_id,
+        lambda client: _run_gradio_job(
+            client,
+            timeout_seconds,
+            handle_file(reference_image_path),
+            handle_file(reference_image_path),
+            prompt,
+            6,
+            VIDEO_NEGATIVE_PROMPT,
+            2,
+            1,
+            1,
+            42,
+            True,
+            6,
+            "UniPCMultistep",
+            3.0,
+            16,
+            True,
+            api_name="/generate_video",
+        ),
+        allow_anonymous=True,
+    )
+    video_path = _extract_video_path(result)
+    if not video_path:
+        raise FreeAIError(f"{space_id} returned no video.")
+    return video_path
+
+
+def _run_wan22_dream_i2v_space(
+    prompt: str,
+    reference_image_path: str | None,
+    timeout_seconds: int,
+) -> str:
+    if not reference_image_path:
+        raise FreeAIError("Reference image required.")
+
+    result = _run_with_hf_client(
+        HF_WAN22_DREAM_SPACE,
+        lambda client: _run_gradio_job(
+            client,
+            timeout_seconds,
+            handle_file(reference_image_path),
+            prompt,
+            6,
+            "static, blurry, low quality, watermark, text",
+            2,
+            1,
+            1,
+            42,
+            True,
+            False,
+            api_name="/generate_video",
+        ),
+        allow_anonymous=True,
+    )
+    video_path = _extract_video_path(result)
+    if not video_path:
+        raise FreeAIError(f"{HF_WAN22_DREAM_SPACE} returned no video.")
+    return video_path
+
+
+def _run_wan22_fast_i2v_video(
+    prompt: str,
+    reference_image_path: str | None,
+    timeout_seconds: int,
+) -> str:
+    return _run_wan22_basic_i2v_space(
+        HF_WAN22_FAST_I2V_SPACE,
+        prompt,
+        reference_image_path,
+        timeout_seconds,
+    )
+
+
+def _run_wan22_preview_video(
+    prompt: str,
+    reference_image_path: str | None,
+    timeout_seconds: int,
+) -> str:
+    return _run_wan22_preview_i2v_space(
+        HF_WAN22_PREVIEW_SPACE,
+        prompt,
+        reference_image_path,
+        timeout_seconds,
+    )
+
+
+def _run_wan22_preview2_video(
+    prompt: str,
+    reference_image_path: str | None,
+    timeout_seconds: int,
+) -> str:
+    return _run_wan22_preview_i2v_space(
+        HF_WAN22_PREVIEW2_SPACE,
+        prompt,
+        reference_image_path,
+        timeout_seconds,
+    )
+
+
+def _run_wan22_obsxrver_video(
+    prompt: str,
+    reference_image_path: str | None,
+    timeout_seconds: int,
+) -> str:
+    return _run_wan22_basic_i2v_space(
+        HF_WAN22_OBSXRVER_SPACE,
+        prompt,
+        reference_image_path,
+        timeout_seconds,
+    )
 
 
 def _run_wan_generation_clone(
@@ -2555,6 +2717,41 @@ async def generate_video(
                             True,
                             False,
                             _run_deeprat_ltx_video,
+                        ),
+                        VideoProvider(
+                            "ZeroGPU AOTI / Wan2.2 Fast",
+                            32,
+                            True,
+                            True,
+                            _run_wan22_fast_i2v_video,
+                        ),
+                        VideoProvider(
+                            "r3gm / Wan2.2 Preview",
+                            34,
+                            True,
+                            True,
+                            _run_wan22_preview_video,
+                        ),
+                        VideoProvider(
+                            "r3gm / Wan2.2 Preview2",
+                            34,
+                            True,
+                            True,
+                            _run_wan22_preview2_video,
+                        ),
+                        VideoProvider(
+                            "obsxrver / WAN22 I2V",
+                            38,
+                            True,
+                            True,
+                            _run_wan22_obsxrver_video,
+                        ),
+                        VideoProvider(
+                            "Dream / Wan2.2 Faster Pro",
+                            40,
+                            True,
+                            True,
+                            _run_wan22_dream_i2v_space,
                         ),
                         VideoProvider(
                             "hysts / zeroscope-v2",
