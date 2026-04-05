@@ -46,6 +46,10 @@ YOUTUBE_NOISE_PATTERN = re.compile(
     r"\b(?:official|video|audio|lyrics?|lyrical|fullscreen|4k|hd|hq|remix|status|song|songs|music|feat\.?|ft\.?|prod\.?|visualizer|lofi|slowed|reverb)\b",
     re.IGNORECASE,
 )
+LYRICS_NOISE_PATTERN = re.compile(
+    r"\b(?:lofi|slowed|reverb|remix|cover|version|edit|status|mashup|dj|ai)\b",
+    re.IGNORECASE,
+)
 
 
 class LyricsError(RuntimeError):
@@ -157,6 +161,10 @@ def _query_variants(query: str) -> list[str]:
             variants.append(value)
 
     add(cleaned)
+    if len(tokens) >= 2:
+        add(" ".join(tokens[:2]))
+    if len(tokens) >= 3:
+        add(" ".join(tokens[:3]))
     if len(tokens) >= 4:
         add(" ".join(tokens[:5]))
     if len(tokens) >= 6:
@@ -164,7 +172,7 @@ def _query_variants(query: str) -> list[str]:
     if len(tokens) >= 8:
         mid = max(0, (len(tokens) // 2) - 2)
         add(" ".join(tokens[mid : mid + 5]))
-    return variants[:3]
+    return variants[:5]
 
 
 def _best_texts(candidate: LyricsCandidate) -> tuple[str, str]:
@@ -185,6 +193,7 @@ def _score_candidate(query: str, candidate: LyricsCandidate, index: int) -> floa
     title_key = _normalize_key(candidate.title)
     artist_key = _normalize_key(candidate.artist)
     album_key = _normalize_key(candidate.album)
+    title_words = title_key.split()
     text_blob = " ".join(part for part in (title_key, artist_key, album_key) if part)
     lyrics_key = _normalize_key(candidate.plain_lyrics[:800] if candidate.plain_lyrics else "")
     title_similarity = _text_similarity(query_key, title_key)
@@ -217,6 +226,10 @@ def _score_candidate(query: str, candidate: LyricsCandidate, index: int) -> floa
             score += 150
         if len(query_tokens) >= 5 and lyrics_hits >= max(2, len(query_tokens) // 2):
             score += 45
+        if title_hits >= min(2, len(query_tokens)) and len(title_words) <= 5:
+            score += 70
+        if title_hits >= 2 and len(title_words) <= 3:
+            score += 35
         popularity_multiplier = max(
             title_hits / len(query_tokens),
             (text_hits / len(query_tokens)) * 0.85,
@@ -232,12 +245,16 @@ def _score_candidate(query: str, candidate: LyricsCandidate, index: int) -> floa
         score -= 90
     if not artist_key:
         score -= 70
+    if candidate.source_id:
+        score += 55
+    if candidate.page_url:
+        score += 18
     if candidate.source == "lrclib" and not candidate.plain_lyrics:
         score -= 35
-    if candidate.page_url:
-        score += 8
     if candidate.plain_lyrics:
         score += 6
+    if LYRICS_NOISE_PATTERN.search(f"{candidate.title} {candidate.artist} {candidate.album}"):
+        score -= 120
     return score
 
 

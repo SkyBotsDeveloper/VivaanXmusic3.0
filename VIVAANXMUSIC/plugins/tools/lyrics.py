@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import secrets
 import time
 from dataclasses import dataclass
@@ -25,6 +26,10 @@ LYRICS_CACHE_TTL = 30 * 60
 LYRICS_CACHE_LIMIT = 100
 LYRICS_RESULTS_CACHE: dict[str, "LyricsSearchSession"] = {}
 LYRICS_VIEW_CACHE: dict[str, "LyricsViewState"] = {}
+NOISY_RESULT_PATTERN = re.compile(
+    r"\b(?:lofi|slowed|reverb|remix|cover|version|edit|status|mashup|dj|ai cover)\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass(slots=True)
@@ -274,6 +279,42 @@ async def _resolve_result(candidate: LyricsCandidate) -> LyricsResult | None:
         return fallback
 
 
+def _is_display_candidate(candidate: LyricsCandidate) -> bool:
+    source = (candidate.source or "").lower()
+    blob = " ".join(
+        part.strip()
+        for part in (candidate.title or "", candidate.artist or "", candidate.album or "")
+        if part and part.strip()
+    )
+    blob_lower = blob.lower()
+
+    if source in {"youtube", "itunes"}:
+        return False
+    if candidate.instrumental and "instrumental" not in blob_lower:
+        return False
+    if candidate.source_id or candidate.page_url or candidate.plain_lyrics:
+        return True
+    if source == "lyricsovh":
+        return False
+    if NOISY_RESULT_PATTERN.search(blob):
+        return False
+    return source in {"lrclib", "lyricscom", "allthelyrics", "letras"}
+
+
+def _filter_candidates(
+    candidates: list[LyricsCandidate],
+    limit: int = 8,
+) -> list[LyricsCandidate]:
+    filtered: list[LyricsCandidate] = []
+    for candidate in candidates:
+        if not _is_display_candidate(candidate):
+            continue
+        filtered.append(candidate)
+        if len(filtered) >= limit:
+            break
+    return filtered
+
+
 @app.on_message(filters.command("lyrics") & ~BANNED_USERS)
 @capture_err
 async def lyrics_command(client, message: Message):
@@ -291,6 +332,13 @@ async def lyrics_command(client, message: Message):
     except LyricsError as exc:
         return await search_message.edit_text(str(exc))
 
+    filtered_candidates = _filter_candidates(candidates)
+    if not filtered_candidates:
+        return await search_message.edit_text(
+            "No reliable lyrics results were found for that query.\n"
+            "Try a clearer song name or a more unique lyric line."
+        )
+
     _cleanup_cache()
     token = _new_session_token()
     requester_id = message.from_user.id if message.from_user else message.chat.id
@@ -298,10 +346,10 @@ async def lyrics_command(client, message: Message):
         requester_id=requester_id,
         query=query,
         created_at=time.time(),
-        candidates=candidates,
+        candidates=filtered_candidates,
     )
     await search_message.edit_text(
-        _format_results_text(query, candidates),
+        _format_results_text(query, filtered_candidates),
         reply_markup=_build_results_markup(token, LYRICS_RESULTS_CACHE[token]),
         disable_web_page_preview=True,
     )
