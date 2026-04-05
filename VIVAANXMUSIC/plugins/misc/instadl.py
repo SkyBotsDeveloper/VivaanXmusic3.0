@@ -84,6 +84,48 @@ async def _send_bundle_text(message: Message, bundle: SocialDownloadBundle, plat
         await message.reply_text(chunk, disable_web_page_preview=True)
 
 
+def _prepare_media_caption(
+    platform: str,
+    bundle: SocialDownloadBundle,
+    total: int,
+    limit: int = 900,
+) -> tuple[str | None, str]:
+    header_parts = [f"Downloaded from {platform.title()}"]
+    if total > 1:
+        header_parts.append(f"Showing {total} media items.")
+    header = "\n".join(part for part in header_parts if part).strip()
+
+    note_text = str(bundle.note_text or "").strip()
+    title_text = str(bundle.title or "").strip()
+    text_body = note_text or title_text
+
+    if not text_body:
+        return (header or None), ""
+
+    if header:
+        combined = f"{header}\n\n{text_body}".strip()
+    else:
+        combined = text_body
+
+    if len(combined) <= limit:
+        return combined, ""
+
+    if len(header) <= limit:
+        available = max(0, limit - len(header) - 2)
+        if available > 80:
+            split_at = text_body.rfind("\n", 0, available)
+            if split_at < max(120, available // 3):
+                split_at = text_body.rfind(" ", 0, available)
+            if split_at < max(80, available // 4):
+                split_at = available
+            first_part = text_body[:split_at].strip()
+            remainder = text_body[split_at:].strip()
+            caption = f"{header}\n\n{first_part}".strip() if first_part else header
+            return caption, remainder
+
+    return header[:limit].strip() or None, text_body
+
+
 async def _download_youtube_video(source_url: str) -> tuple[str, str]:
     if not await YouTube.exists(source_url):
         raise SocialDownloadError("Invalid YouTube URL.")
@@ -160,17 +202,13 @@ async def social_download(_, message: Message):
         temp_dir, downloaded = await download_bundle_files(media_bundle)
 
         total = len(downloaded)
+        first_caption, overflow_text = _prepare_media_caption(platform, bundle, total)
         for index, (file_path, media_kind) in enumerate(downloaded, start=1):
-            caption = None
-            if index == 1:
-                title = bundle.title or f"{platform.title()} Media"
-                caption = f"Downloaded from {platform.title()}\n{title}"
-                if total > 1:
-                    caption += f"\nShowing {total} media items."
+            caption = first_caption if index == 1 else None
             await _send_downloaded_file(message, file_path, media_kind, caption)
 
-        if bundle.note_text:
-            for chunk in _chunk_text(bundle.note_text):
+        if overflow_text:
+            for chunk in _chunk_text(overflow_text):
                 await message.reply_text(chunk, disable_web_page_preview=True)
 
         await status.delete()
