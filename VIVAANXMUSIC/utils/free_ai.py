@@ -44,6 +44,7 @@ HF_VISION_FALLBACK_SPACE = "prithivMLmods/Qwen-3.5-HF-Demo"
 HF_VISION_ALT_SPACE = "vikhyatk/moondream2"
 HF_COGVIDEO2_SPACE = "zai-org/CogVideoX-2B-Space"
 HF_COGVIDEO5_SPACE = "zai-org/CogVideoX-5B-Space"
+HF_LTX_VIDEO_SPACE = "DeepRat/LTX-Video-ZeroGPU-Optimized"
 HF_IMAGE_EDIT_SPACE = "Qwen/Qwen-Image-Edit-2511"
 HF_IMAGE_EDIT_FAST_SPACE = "Nichotin/Qwen-Image-Edit-2511-Fast-ZeroGPU"
 HF_IMAGE_EDIT_ALT_SPACE = "lenML/Qwen-Image-Edit-2511-Fast"
@@ -958,6 +959,88 @@ def _run_multimodalart_video(
     return video_path
 
 
+def _compute_video_dimensions(image_path: str | None) -> tuple[int, int]:
+    if not image_path:
+        return 576, 384
+
+    try:
+        with Image.open(image_path) as image:
+            width, height = image.size
+    except Exception:
+        return 576, 384
+
+    if width <= 0 or height <= 0:
+        return 576, 384
+
+    aspect = width / max(1, height)
+    if aspect >= 1.2:
+        return 576, 384
+    if aspect <= 0.83:
+        return 384, 576
+    return 480, 480
+
+
+def _run_deeprat_ltx_video(
+    prompt: str,
+    reference_image_path: str | None,
+    timeout_seconds: int,
+) -> str:
+    width, height = _compute_video_dimensions(reference_image_path)
+    if reference_image_path:
+        result = _run_with_hf_client(
+            HF_LTX_VIDEO_SPACE,
+            lambda client: _run_gradio_job(
+                client,
+                timeout_seconds,
+                prompt,
+                VIDEO_NEGATIVE_PROMPT,
+                handle_file(reference_image_path),
+                None,
+                height,
+                width,
+                "image-to-video",
+                1.0,
+                9,
+                42,
+                True,
+                1,
+                False,
+                False,
+                api_name="/image_to_video",
+            ),
+            allow_anonymous=True,
+        )
+    else:
+        result = _run_with_hf_client(
+            HF_LTX_VIDEO_SPACE,
+            lambda client: _run_gradio_job(
+                client,
+                timeout_seconds,
+                prompt,
+                VIDEO_NEGATIVE_PROMPT,
+                None,
+                None,
+                height,
+                width,
+                "text-to-video",
+                1.0,
+                9,
+                42,
+                True,
+                1,
+                False,
+                False,
+                api_name="/text_to_video",
+            ),
+            allow_anonymous=True,
+        )
+
+    video_path = _extract_video_path(result)
+    if not video_path:
+        raise FreeAIError(f"{HF_LTX_VIDEO_SPACE} returned no video.")
+    return video_path
+
+
 def _run_wan_generation_clone(
     space_id: str,
     prompt: str,
@@ -1167,11 +1250,14 @@ async def _run_video_provider_batch(
 
     tasks = {
         asyncio.create_task(
-            asyncio.to_thread(
-                provider.runner,
-                prompt,
-                reference_image_path if provider.supports_reference else None,
-                provider.timeout_seconds,
+            asyncio.wait_for(
+                asyncio.to_thread(
+                    provider.runner,
+                    prompt,
+                    reference_image_path if provider.supports_reference else None,
+                    provider.timeout_seconds,
+                ),
+                timeout=provider.timeout_seconds + 12,
             )
         ): provider
         for provider in eligible
@@ -1200,6 +1286,10 @@ async def _run_video_provider_batch(
                         reference_image_path and provider.supports_reference
                     ),
                 )
+            except asyncio.TimeoutError:
+                error_text = "Provider hard timed out."
+                _set_provider_cooldown(provider.name, error_text)
+                failures.append(f"{provider.name}: {error_text}")
             except Exception as exc:
                 error_text = str(exc)
                 _set_provider_cooldown(provider.name, error_text)
@@ -2385,6 +2475,13 @@ async def generate_video(
                 [
                     [
                         VideoProvider(
+                            "DeepRat / LTX Video",
+                            70 if reference_image_path else 55,
+                            True,
+                            False,
+                            _run_deeprat_ltx_video,
+                        ),
+                        VideoProvider(
                             "hysts / zeroscope-v2",
                             22,
                             False,
@@ -2493,7 +2590,7 @@ async def generate_video(
         else:
             headline = (
                 "Public no-key video providers are temporarily unavailable.\n"
-                "Tip: set REPLICATE_API_TOKEN or REPLICATE_API_TOKENS for reliable /genvid output."
+                "Tip: set HF_TOKEN/HF_TOKENS or REPLICATE_API_TOKEN/REPLICATE_API_TOKENS for more reliable /genvid output."
             )
         raise FreeAIError(
             f"{headline}\n{details}"
