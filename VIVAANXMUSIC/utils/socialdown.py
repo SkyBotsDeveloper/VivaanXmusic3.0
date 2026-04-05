@@ -895,16 +895,6 @@ async def download_bundle_files(bundle: SocialDownloadBundle) -> tuple[str, list
                         )
                     downloads.append((file_path, media_kind))
 
-            has_text_item = any(item.kind == "text" for item in bundle.items[:MAX_MEDIA_FILES])
-            if bundle.note_text and not has_text_item:
-                note_name = _safe_filename(f"{bundle.title}_details.txt", f"{bundle.title}_details.txt")
-                if not note_name.lower().endswith(".txt"):
-                    note_name += ".txt"
-                note_path = os.path.join(temp_dir, note_name)
-                with open(note_path, "w", encoding="utf-8") as handle:
-                    handle.write(bundle.note_text)
-                downloads.append((note_path, "document"))
-
             if not downloads:
                 raise SocialDownloadError("No media could be downloaded from that link.")
             return temp_dir, downloads

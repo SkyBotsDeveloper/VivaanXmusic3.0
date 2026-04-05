@@ -10,6 +10,7 @@ from VIVAANXMUSIC import app
 from VIVAANXMUSIC.security import SecurityError
 from VIVAANXMUSIC.utils.socialdown import (
     SocialDownloadError,
+    SocialDownloadBundle,
     download_bundle_files,
     get_social_bundle,
 )
@@ -53,6 +54,36 @@ async def _send_downloaded_file(message: Message, file_path: str, media_kind: st
     return await message.reply_document(file_path, caption=caption)
 
 
+def _chunk_text(text: str, limit: int = 3500) -> list[str]:
+    text = str(text or "").strip()
+    if not text:
+        return []
+    chunks: list[str] = []
+    remaining = text
+    while len(remaining) > limit:
+        split_at = remaining.rfind("\n", 0, limit)
+        if split_at < max(400, limit // 3):
+            split_at = remaining.rfind(" ", 0, limit)
+        if split_at < max(200, limit // 4):
+            split_at = limit
+        chunks.append(remaining[:split_at].strip())
+        remaining = remaining[split_at:].strip()
+    if remaining:
+        chunks.append(remaining)
+    return chunks
+
+
+async def _send_bundle_text(message: Message, bundle: SocialDownloadBundle, platform: str):
+    text_items = [item.content for item in bundle.items if item.kind == "text" and item.content]
+    export_text = "\n\n".join(part.strip() for part in text_items if part.strip()) or bundle.note_text
+    export_text = str(export_text or "").strip()
+    if not export_text:
+        raise SocialDownloadError(f"No readable {platform} post text was found.")
+
+    for chunk in _chunk_text(export_text):
+        await message.reply_text(chunk, disable_web_page_preview=True)
+
+
 @app.on_message(
     filters.command(
         [
@@ -87,7 +118,19 @@ async def social_download(_, message: Message):
     try:
         await app.send_chat_action(message.chat.id, ChatAction.TYPING)
         bundle = await get_social_bundle(platform, source_url)
-        temp_dir, downloaded = await download_bundle_files(bundle)
+        media_items = [item for item in bundle.items if item.kind != "text"]
+
+        if not media_items:
+            await _send_bundle_text(message, bundle, platform)
+            return await status.delete()
+
+        media_bundle = SocialDownloadBundle(
+            title=bundle.title,
+            source=bundle.source,
+            items=media_items,
+            note_text=bundle.note_text,
+        )
+        temp_dir, downloaded = await download_bundle_files(media_bundle)
 
         total = len(downloaded)
         for index, (file_path, media_kind) in enumerate(downloaded, start=1):
@@ -98,6 +141,10 @@ async def social_download(_, message: Message):
                 if total > 1:
                     caption += f"\nShowing {total} media items."
             await _send_downloaded_file(message, file_path, media_kind, caption)
+
+        if bundle.note_text:
+            for chunk in _chunk_text(bundle.note_text):
+                await message.reply_text(chunk, disable_web_page_preview=True)
 
         await status.delete()
     except SecurityError as exc:
