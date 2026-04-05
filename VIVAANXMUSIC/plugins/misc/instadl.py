@@ -6,7 +6,7 @@ from pyrogram import filters
 from pyrogram.enums import ChatAction
 from pyrogram.types import Message
 
-from VIVAANXMUSIC import app
+from VIVAANXMUSIC import YouTube, app
 from VIVAANXMUSIC.security import SecurityError
 from VIVAANXMUSIC.utils.socialdown import (
     SocialDownloadError,
@@ -84,6 +84,24 @@ async def _send_bundle_text(message: Message, bundle: SocialDownloadBundle, plat
         await message.reply_text(chunk, disable_web_page_preview=True)
 
 
+async def _download_youtube_video(source_url: str) -> tuple[str, str]:
+    if not await YouTube.exists(source_url):
+        raise SocialDownloadError("Invalid YouTube URL.")
+
+    details, video_id = await YouTube.track(source_url)
+    file_path, _ = await YouTube.download(
+        video_id,
+        None,
+        video=True,
+        videoid=True,
+    )
+    if not file_path or not os.path.exists(file_path):
+        raise SocialDownloadError("YouTube video could not be downloaded.")
+
+    title = (details or {}).get("title") or "YouTube Video"
+    return file_path, title
+
+
 @app.on_message(
     filters.command(
         [
@@ -117,6 +135,15 @@ async def social_download(_, message: Message):
 
     try:
         await app.send_chat_action(message.chat.id, ChatAction.TYPING)
+        if platform == "youtube":
+            file_path, title = await _download_youtube_video(source_url)
+            await message.reply_video(
+                file_path,
+                caption=f"Downloaded from YouTube\n{title}",
+                supports_streaming=True,
+            )
+            return await status.delete()
+
         bundle = await get_social_bundle(platform, source_url)
         media_items = [item for item in bundle.items if item.kind != "text"]
 
