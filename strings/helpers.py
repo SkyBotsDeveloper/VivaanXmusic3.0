@@ -242,6 +242,8 @@ HELP_25 = """
 <b><u>Download</u></b>
 
 - /song [title/url] - download a song from YouTube.
+- /spotify [spotify track link] - fetch the track title and send the song as audio.
+- /apple [apple music track link] - fetch the track title and send the song as audio.
 - /lyrics [title or lyric line] - search matching songs, then fetch full lyrics by button.
 - /insta, /ig [instagram url] - download Instagram media.
 - /youtube, /yt [youtube url] - download YouTube media with audio.

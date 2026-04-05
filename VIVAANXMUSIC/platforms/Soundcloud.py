@@ -3,6 +3,7 @@ import re
 from typing import Any, Dict, Optional, Tuple, Union
 
 from yt_dlp import YoutubeDL
+from youtubesearchpython.future import VideosSearch
 
 from VIVAANXMUSIC.utils.downloader import download_audio_concurrent
 from VIVAANXMUSIC.utils.formatters import seconds_to_min
@@ -28,6 +29,36 @@ class SoundAPI:
 
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, _run)
+
+    async def track(self, url: str) -> Union[Tuple[Dict[str, Any], str], bool]:
+        try:
+            info = await self._extract_info(url)
+        except Exception:
+            return False
+
+        if not info or info.get("_type") == "playlist":
+            return False
+
+        title = str(info.get("title") or "").strip()
+        uploader = str(info.get("uploader") or "").strip()
+        query = f"{title} {uploader}".strip()
+        if not query:
+            return False
+
+        results = VideosSearch(query, limit=1)
+        data = await results.next()
+        if not data.get("result"):
+            return False
+
+        result = data["result"][0]
+        track_details = {
+            "title": result.get("title", ""),
+            "link": result.get("link", ""),
+            "vidid": result.get("id", ""),
+            "duration_min": result.get("duration"),
+            "thumb": result.get("thumbnails", [{}])[0].get("url", "").split("?")[0],
+        }
+        return track_details, track_details["vidid"]
 
     async def download(self, url: str) -> Union[Tuple[Dict[str, Any], str], bool]:
         try:

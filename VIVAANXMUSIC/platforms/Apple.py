@@ -10,6 +10,7 @@ class AppleAPI:
     def __init__(self):
         self.regex = r"^https:\/\/music\.apple\.com\/.+"
         self.base = "https://music.apple.com/in/playlist/"
+        self.track_id_regex = re.compile(r"(?:[?&]i=|/song/[^/]+/)(\d+)", re.IGNORECASE)
 
     async def valid(self, link: str) -> bool:
         return bool(re.search(self.regex, link or ""))
@@ -18,18 +19,44 @@ class AppleAPI:
         if playid:
             url = self.base + url
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as response:
-                if response.status != 200:
-                    return False
-                html = await response.text()
-
-        soup = BeautifulSoup(html, "html.parser")
         title_query: Optional[str] = None
-        for tag in soup.find_all("meta"):
-            if tag.get("property") == "og:title":
-                title_query = tag.get("content")
-                break
+        track_match = self.track_id_regex.search(url or "")
+
+        async with aiohttp.ClientSession() as session:
+            if track_match:
+                track_id = track_match.group(1)
+                async with session.get(
+                    "https://itunes.apple.com/lookup",
+                    params={"id": track_id, "entity": "song"},
+                ) as response:
+                    if response.status == 200:
+                        payload = await response.json(content_type=None)
+                        results = payload.get("results") or []
+                        song = next(
+                            (
+                                item
+                                for item in results
+                                if str(item.get("wrapperType") or "").lower() == "track"
+                                or str(item.get("kind") or "").lower() == "song"
+                            ),
+                            None,
+                        )
+                        if song:
+                            track_name = str(song.get("trackName") or "").strip()
+                            artist_name = str(song.get("artistName") or "").strip()
+                            title_query = f"{track_name} {artist_name}".strip()
+
+            if not title_query:
+                async with session.get(url) as response:
+                    if response.status != 200:
+                        return False
+                    html = await response.text()
+
+                soup = BeautifulSoup(html, "html.parser")
+                for tag in soup.find_all("meta"):
+                    if tag.get("property") == "og:title":
+                        title_query = tag.get("content")
+                        break
 
         if not title_query:
             return False

@@ -231,11 +231,7 @@ async def play_command(
                 log_label = "Youtube shorts" if "youtube.com/shorts/" in u else "Youtube Track"
 
         elif await Spotify.valid(url):
-            spotify = True
-            if not config.SPOTIFY_CLIENT_ID or not config.SPOTIFY_CLIENT_SECRET:
-                return await mystic.edit_text(
-                    "»  sᴘᴏᴛɪғʏ ɪs ɴᴏᴛ sᴜᴘᴘᴏʀᴛᴇᴅ ʏᴇᴛ.\n\nᴘʟᴇᴀsᴇ ᴛʀʏ ᴀɢᴀɪɴ ʟᴀᴛᴇʀ."
-                )
+            spotify = False
 
             if "track" in url:
                 try:
@@ -249,6 +245,9 @@ async def play_command(
                 log_label = "Spotify Track"
 
             elif "playlist" in url:
+                spotify = True
+                if not config.SPOTIFY_CLIENT_ID or not config.SPOTIFY_CLIENT_SECRET:
+                    return await mystic.edit_text(_["play_3"])
                 try:
                     details, plist_id = await Spotify.playlist(url)
                 except Exception:
@@ -261,6 +260,9 @@ async def play_command(
                 log_label = "Spotify playlist"
 
             elif "album" in url:
+                spotify = True
+                if not config.SPOTIFY_CLIENT_ID or not config.SPOTIFY_CLIENT_SECRET:
+                    return await mystic.edit_text(_["play_3"])
                 try:
                     details, plist_id = await Spotify.album(url)
                 except Exception:
@@ -273,6 +275,9 @@ async def play_command(
                 log_label = "Spotify album"
 
             elif "artist" in url:
+                spotify = True
+                if not config.SPOTIFY_CLIENT_ID or not config.SPOTIFY_CLIENT_SECRET:
+                    return await mystic.edit_text(_["play_3"])
                 try:
                     details, plist_id = await Spotify.artist(url)
                 except Exception:
@@ -288,7 +293,7 @@ async def play_command(
                 return await mystic.edit_text(_["play_15"])
 
         elif await Apple.valid(url):
-            if "album" in url or "/song/" in url:
+            if "playlist" not in url:
                 try:
                     details, track_id = await Apple.track(url)
                 except Exception:
@@ -328,38 +333,14 @@ async def play_command(
 
         elif await SoundCloud.valid(url):
             try:
-                details, track_path = await SoundCloud.download(url)
+                details, track_id = await SoundCloud.track(url)
             except Exception:
                 return await mystic.edit_text(_["play_3"])
 
-            if details["duration_sec"] > config.DURATION_LIMIT:
-                return await mystic.edit_text(
-                    _["play_6"].format(config.DURATION_LIMIT_MIN, app.mention)
-                )
-
-            try:
-                internal_type = "soundcloud"
-                await stream(
-                    _,
-                    mystic,
-                    user_id,
-                    details,
-                    chat_id,
-                    user_name,
-                    message.chat.id,
-                    streamtype=internal_type,
-                    forceplay=bool(fplay),
-                )
-            except Exception as e:
-                err = (
-                    e
-                    if type(e).__name__ == "AssistantErr"
-                    else _["general_2"].format(type(e).__name__)
-                )
-                return await mystic.edit_text(err)
-
-            await play_logs(message, streamtype="Soundcloud")
-            return await mystic.delete()
+            img = details["thumb"]
+            cap = _["play_10"].format(details["title"], details["duration_min"])
+            internal_type = "youtube"
+            log_label = "Soundcloud"
 
         else:
             try:

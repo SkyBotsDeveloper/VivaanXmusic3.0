@@ -8,47 +8,50 @@ from youtubesearchpython.future import VideosSearch
 
 class RessoAPI:
     def __init__(self):
-        self.regex = r"^(https:\/\/m.resso.com\/)(.*)$"
+        self.regex = r"^(https:\/\/m\.resso\.com\/)(.*)$"
         self.base = "https://m.resso.com/"
 
     async def valid(self, link: str):
-        if re.search(self.regex, link):
-            return True
-        else:
-            return False
+        return bool(re.search(self.regex, link or ""))
 
     async def track(self, url, playid: Union[bool, str] = None):
         if playid:
             url = self.base + url
+
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as response:
                 if response.status != 200:
                     return False
                 html = await response.text()
+
         soup = BeautifulSoup(html, "html.parser")
+        title = ""
+        des = ""
         for tag in soup.find_all("meta"):
             if tag.get("property", None) == "og:title":
-                title = tag.get("content", None)
+                title = str(tag.get("content", None) or "").strip()
             if tag.get("property", None) == "og:description":
-                des = tag.get("content", None)
+                des = str(tag.get("content", None) or "").strip()
                 try:
-                    des = des.split("·")[0]
-                except:
+                    des = des.split("·")[0].strip()
+                except Exception:
                     pass
-        if des == "":
-            return
-        results = VideosSearch(title, limit=1)
-        for result in (await results.next())["result"]:
-            title = result["title"]
-            ytlink = result["link"]
-            vidid = result["id"]
-            duration_min = result["duration"]
-            thumbnail = result["thumbnails"][0]["url"].split("?")[0]
+
+        query = f"{title} {des}".strip() or title
+        if not query:
+            return False
+
+        results = VideosSearch(query, limit=1)
+        data = await results.next()
+        if not data.get("result"):
+            return False
+
+        result = data["result"][0]
         track_details = {
-            "title": title,
-            "link": ytlink,
-            "vidid": vidid,
-            "duration_min": duration_min,
-            "thumb": thumbnail,
+            "title": result["title"],
+            "link": result["link"],
+            "vidid": result["id"],
+            "duration_min": result["duration"],
+            "thumb": result["thumbnails"][0]["url"].split("?")[0],
         }
-        return track_details, vidid
+        return track_details, track_details["vidid"]

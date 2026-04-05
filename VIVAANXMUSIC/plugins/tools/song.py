@@ -1,5 +1,6 @@
 import os
 import re
+import httpx
 from pyrogram import filters
 from pyrogram.enums import ChatAction
 from pyrogram.types import (
@@ -22,6 +23,18 @@ from VIVAANXMUSIC.utils.formatters import convert_bytes, time_to_seconds
 from VIVAANXMUSIC.utils.inline.song import song_markup
 
 SONG_COMMAND = ["song"]
+APPLE_SPOTIFY_COMMANDS = ["apple", "spotify"]
+SPOTIFY_TRACK_URL = re.compile(r"^https://open\.spotify\.com/track/", re.IGNORECASE)
+APPLE_TRACK_URL = re.compile(r"^https://music\.apple\.com/.+", re.IGNORECASE)
+SPOTIFY_OG_TITLE = re.compile(
+    r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']',
+    re.IGNORECASE,
+)
+SPOTIFY_OG_DESC = re.compile(
+    r'<meta[^>]+property=["\']og:description["\'][^>]+content=["\']([^"\']+)["\']',
+    re.IGNORECASE,
+)
+APPLE_TRACK_ID = re.compile(r"(?:[?&]i=|/song/[^/]+/)(\d+)", re.IGNORECASE)
 
 
 class InlineKeyboardBuilder(list):
@@ -29,24 +42,7 @@ class InlineKeyboardBuilder(list):
         self.append(list(buttons))
 
 
-# ───────────────────────────── COMMANDS ───────────────────────────── #
-@app.on_message(filters.command(SONG_COMMAND) & filters.group & ~BANNED_USERS)
-@capture_err
-@language
-async def song_command_group(client, message: Message, lang):
-    await message.reply_text(
-        lang["song_1"],
-        reply_markup=InlineKeyboardMarkup(
-            [[InlineKeyboardButton(lang["SG_B_1"], url=f"https://t.me/{app.username}?start=song")]]
-        ),
-    )
-
-
-@app.on_message(filters.command(SONG_COMMAND) & filters.private & ~BANNED_USERS)
-@capture_err
-@language
-async def song_command_private(client, message: Message, lang):
-    await message.delete()
+async def _handle_song_audio_request(message: Message, lang):
     mystic = await message.reply_text(lang["play_1"])
 
     url = await YouTube.url(message)
@@ -58,7 +54,7 @@ async def song_command_private(client, message: Message, lang):
         return await mystic.edit_text(lang["song_5"])
 
     try:
-        title, dur_min, dur_sec, thumb, vidid = await YouTube.details(query)
+        title, dur_min, dur_sec, _thumb, vidid = await YouTube.details(query)
     except Exception:
         return await mystic.edit_text(lang["play_3"])
 
@@ -67,12 +63,191 @@ async def song_command_private(client, message: Message, lang):
     if int(dur_sec) > SONG_DOWNLOAD_DURATION_LIMIT:
         return await mystic.edit_text(lang["play_4"].format(SONG_DOWNLOAD_DURATION, dur_min))
 
-    await mystic.delete()
-    await message.reply_photo(
-        thumb,
-        caption=lang["song_4"].format(title),
-        reply_markup=InlineKeyboardMarkup(song_markup(lang, vidid)),
+    file_path = None
+    try:
+        await mystic.edit_text(lang["song_8"])
+        file_path, _ = await YouTube.download(vidid, mystic, videoid=True)
+        if not file_path:
+            raise RuntimeError("no audio file")
+
+        await app.send_chat_action(message.chat.id, ChatAction.UPLOAD_AUDIO)
+        await message.reply_audio(
+            file_path,
+            caption=title,
+            title=title,
+        )
+        await mystic.delete()
+    except Exception:
+        await mystic.edit_text(lang["song_10"])
+    finally:
+        if file_path and os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except Exception:
+                pass
+
+
+async def _resolve_spotify_query(link: str) -> str | None:
+    if not SPOTIFY_TRACK_URL.search(link or ""):
+        return None
+    async with httpx.AsyncClient(
+        timeout=httpx.Timeout(20.0, connect=10.0),
+        follow_redirects=True,
+        trust_env=False,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+            )
+        },
+    ) as client:
+        response = await client.get(
+            "https://open.spotify.com/oembed",
+            params={"url": link},
+        )
+        response.raise_for_status()
+    payload = response.json()
+    title = re.sub(
+        r"\s*\|\s*Spotify\s*$",
+        "",
+        str(payload.get("title") or "").strip(),
+        flags=re.IGNORECASE,
     )
+    if not title:
+        return None
+    title = re.sub(r"\s+", " ", title).strip()
+    return title or None
+
+
+async def _resolve_apple_query(link: str) -> str | None:
+    if not APPLE_TRACK_URL.search(link or ""):
+        return None
+    match = APPLE_TRACK_ID.search(link)
+    if not match:
+        return None
+    track_id = match.group(1)
+    async with httpx.AsyncClient(
+        timeout=httpx.Timeout(20.0, connect=10.0),
+        follow_redirects=True,
+        trust_env=False,
+        headers={"User-Agent": "Mozilla/5.0"},
+    ) as client:
+        response = await client.get(
+            "https://itunes.apple.com/lookup",
+            params={"id": track_id, "entity": "song"},
+        )
+        response.raise_for_status()
+        payload = response.json()
+    results = payload.get("results") or []
+    if not results:
+        return None
+    song = next(
+        (
+            item
+            for item in results
+            if str(item.get("wrapperType") or "").lower() == "track"
+            or str(item.get("kind") or "").lower() == "song"
+        ),
+        None,
+    )
+    if not song:
+        song = results[0]
+    track_name = str(song.get("trackName") or "").strip()
+    artist_name = str(song.get("artistName") or "").strip()
+    query = f"{track_name} {artist_name}".strip()
+    return query or None
+
+
+async def _resolve_link_query(query: str) -> str | None:
+    query = str(query or "").strip()
+    if not query:
+        return None
+    if SPOTIFY_TRACK_URL.search(query):
+        return await _resolve_spotify_query(query)
+    if APPLE_TRACK_URL.search(query):
+        return await _resolve_apple_query(query)
+    return query
+
+
+async def _handle_platform_song_request(message: Message, lang, platform_name: str):
+    mystic = await message.reply_text(lang["play_1"])
+    query = message.text.split(None, 1)[1] if len(message.command) > 1 else None
+    if not query:
+        return await mystic.edit_text(f"Usage: /{platform_name} [link]")
+
+    try:
+        resolved_query = await _resolve_link_query(query)
+    except Exception:
+        resolved_query = None
+
+    if not resolved_query:
+        return await mystic.edit_text(f"Could not read that {platform_name} link.")
+
+    try:
+        title, dur_min, dur_sec, _thumb, vidid = await YouTube.details(resolved_query)
+    except Exception:
+        return await mystic.edit_text(lang["play_3"])
+
+    if not dur_min:
+        return await mystic.edit_text(lang["song_3"])
+    if int(dur_sec) > SONG_DOWNLOAD_DURATION_LIMIT:
+        return await mystic.edit_text(lang["play_4"].format(SONG_DOWNLOAD_DURATION, dur_min))
+
+    file_path = None
+    try:
+        await mystic.edit_text(lang["song_8"])
+        file_path, _ = await YouTube.download(vidid, mystic, videoid=True)
+        if not file_path:
+            raise RuntimeError("no audio file")
+
+        await app.send_chat_action(message.chat.id, ChatAction.UPLOAD_AUDIO)
+        await message.reply_audio(
+            file_path,
+            caption=title,
+            title=title,
+        )
+        await mystic.delete()
+    except Exception:
+        await mystic.edit_text(lang["song_10"])
+    finally:
+        if file_path and os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except Exception:
+                pass
+
+
+# ───────────────────────────── COMMANDS ───────────────────────────── #
+@app.on_message(filters.command(SONG_COMMAND) & filters.group & ~BANNED_USERS)
+@capture_err
+@language
+async def song_command_group(client, message: Message, lang):
+    await _handle_song_audio_request(message, lang)
+
+
+@app.on_message(filters.command(SONG_COMMAND) & filters.private & ~BANNED_USERS)
+@capture_err
+@language
+async def song_command_private(client, message: Message, lang):
+    try:
+        await message.delete()
+    except Exception:
+        pass
+    await _handle_song_audio_request(message, lang)
+
+
+@app.on_message(filters.command(APPLE_SPOTIFY_COMMANDS) & ~BANNED_USERS)
+@capture_err
+@language
+async def apple_spotify_song_command(client, message: Message, lang):
+    command = ((message.command or [""])[0] or "").lower()
+    platform_name = "spotify" if command == "spotify" else "apple"
+    try:
+        if message.chat.type.name.lower() == "private":
+            await message.delete()
+    except Exception:
+        pass
+    await _handle_platform_song_request(message, lang, platform_name)
 
 
 # ───────────────────────────── CALLBACKS ───────────────────────────── #
