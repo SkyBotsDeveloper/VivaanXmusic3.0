@@ -19,6 +19,7 @@ BOT_COMMANDS = [
     BotCommand("play", "Play audio in voice chat"),
     BotCommand("vplay", "Play video in voice chat"),
     BotCommand("song", "Download a song"),
+    BotCommand("lyrics", "Search and fetch song lyrics"),
     BotCommand("queue", "Show current queue"),
     BotCommand("player", "Open player controls"),
     BotCommand("autoplay", "Toggle similar-song autoplay"),

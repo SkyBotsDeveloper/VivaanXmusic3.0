@@ -241,6 +241,7 @@ HELP_25 = """
 <b><u>Song / Download</u></b>
 
 - /song [title/url] - download a song from YouTube.
+- /lyrics [title or lyric line] - search matching songs, then fetch full lyrics by button.
 - /insta, /ig [instagram url] - download Instagram media.
 - /remove [audio|video] - remove audio or video from a replied media file.
 """
