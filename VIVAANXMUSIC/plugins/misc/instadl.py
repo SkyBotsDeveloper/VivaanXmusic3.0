@@ -1,119 +1,109 @@
-import asyncio
 import os
 import shutil
-import tempfile
 from pathlib import Path
 
-import yt_dlp
-from pyrogram import Client, filters
+from pyrogram import filters
+from pyrogram.enums import ChatAction
 from pyrogram.types import Message
 
 from VIVAANXMUSIC import app
-from VIVAANXMUSIC.security import SecurityError, validate_public_http_url
+from VIVAANXMUSIC.security import SecurityError
+from VIVAANXMUSIC.utils.socialdown import (
+    SocialDownloadError,
+    download_bundle_files,
+    get_social_bundle,
+)
 
 
-INSTAGRAM_HOSTS = {
-    "instagram.com",
-    "www.instagram.com",
-    "m.instagram.com",
-    "instagr.am",
-    "www.instagr.am",
+COMMAND_PLATFORMS = {
+    "ig": "instagram",
+    "insta": "instagram",
+    "facebook": "facebook",
+    "fb": "facebook",
+    "snap": "snapchat",
+    "snapchat": "snapchat",
+    "youtube": "youtube",
+    "yt": "youtube",
+    "x": "x",
+    "twitter": "x",
+    "tiktok": "tiktok",
+    "tt": "tiktok",
 }
-VIDEO_EXTENSIONS = {".mp4", ".mkv", ".mov", ".webm"}
-PHOTO_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
-MAX_MEDIA_FILES = 10
+
+USAGE_TEXT = {
+    "instagram": "Usage: /insta [Instagram URL]",
+    "facebook": "Usage: /facebook [Facebook URL]",
+    "snapchat": "Usage: /snap [Snapchat URL]",
+    "youtube": "Usage: /youtube [YouTube URL]",
+    "x": "Usage: /x [X/Twitter post URL]",
+    "tiktok": "Usage: /tiktok [TikTok URL]",
+}
 
 
-def _validate_instagram_url(url: str) -> str:
-    return validate_public_http_url(
-        url,
-        allowed_hosts=INSTAGRAM_HOSTS,
-        allow_subdomains=True,
+async def _send_downloaded_file(message: Message, file_path: str, media_kind: str, caption: str | None):
+    suffix = Path(file_path).suffix.lower()
+    if media_kind == "video":
+        return await message.reply_video(file_path, caption=caption, supports_streaming=True)
+    if media_kind == "photo":
+        return await message.reply_photo(file_path, caption=caption)
+    if media_kind == "audio":
+        return await message.reply_audio(file_path, caption=caption)
+    if suffix in {".mp3", ".m4a", ".aac", ".ogg", ".opus", ".wav", ".flac"}:
+        return await message.reply_audio(file_path, caption=caption)
+    return await message.reply_document(file_path, caption=caption)
+
+
+@app.on_message(
+    filters.command(
+        [
+            "ig",
+            "insta",
+            "facebook",
+            "fb",
+            "snap",
+            "snapchat",
+            "youtube",
+            "yt",
+            "x",
+            "twitter",
+            "tiktok",
+            "tt",
+        ]
     )
+)
+async def social_download(_, message: Message):
+    command = ((message.command or [""])[0] or "").lower()
+    platform = COMMAND_PLATFORMS.get(command)
+    if not platform:
+        return
 
-
-def _download_instagram_media(instagram_url: str) -> tuple[str, list[str], str, bool]:
-    safe_url = _validate_instagram_url(instagram_url)
-    temp_dir = tempfile.mkdtemp(prefix="vivaan_insta_")
-    output_template = os.path.join(temp_dir, "%(id)s.%(ext)s")
-
-    ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "noprogress": True,
-        "restrictfilenames": True,
-        "outtmpl": output_template,
-        "format": "best",
-        "http_headers": {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-            )
-        },
-    }
-
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(safe_url, download=True)
-    except Exception:
-        shutil.rmtree(temp_dir, ignore_errors=True)
-        raise
-
-    files = []
-    for item in sorted(Path(temp_dir).iterdir(), key=lambda path: path.stat().st_mtime):
-        if not item.is_file():
-            continue
-        if item.suffix.lower() in {".part", ".ytdl", ".json"}:
-            continue
-        files.append(str(item))
-
-    if not files:
-        shutil.rmtree(temp_dir, ignore_errors=True)
-        raise RuntimeError("No downloadable media was found for that Instagram link.")
-
-    title = info.get("title") or "Instagram Media"
-    truncated = len(files) > MAX_MEDIA_FILES
-    return temp_dir, files[:MAX_MEDIA_FILES], title, truncated
-
-
-async def _send_instagram_file(message: Message, file_path: str, caption: str | None):
-    ext = Path(file_path).suffix.lower()
-    if ext in VIDEO_EXTENSIONS:
-        await message.reply_video(file_path, caption=caption)
-    elif ext in PHOTO_EXTENSIONS:
-        await message.reply_photo(file_path, caption=caption)
-    else:
-        await message.reply_document(file_path, caption=caption)
-
-
-@app.on_message(filters.command(["ig", "insta"]))
-async def insta_download(client: Client, message: Message):
     if len(message.command) < 2:
-        return await message.reply_text("Usage: /insta [Instagram URL]")
+        return await message.reply_text(USAGE_TEXT[platform])
 
-    processing_message = await message.reply_text("Processing Instagram media...")
+    source_url = message.command[1].strip()
+    status = await message.reply_text(f"Fetching {platform} media...")
     temp_dir = None
 
     try:
-        instagram_url = message.command[1]
-        temp_dir, file_paths, title, truncated = await asyncio.to_thread(
-            _download_instagram_media,
-            instagram_url,
-        )
+        await app.send_chat_action(message.chat.id, ChatAction.TYPING)
+        bundle = await get_social_bundle(platform, source_url)
+        temp_dir, downloaded = await download_bundle_files(bundle)
 
-        for index, file_path in enumerate(file_paths):
+        total = len(downloaded)
+        for index, (file_path, media_kind) in enumerate(downloaded, start=1):
             caption = None
-            if index == 0:
-                caption = f"Downloaded from Instagram\n{title}"
-                if truncated:
-                    caption += "\nShowing the first 10 media files."
-            await _send_instagram_file(message, file_path, caption)
+            if index == 1:
+                title = bundle.title or f"{platform.title()} Media"
+                caption = f"Downloaded from {platform.title()}\n{title}"
+                if total > 1:
+                    caption += f"\nShowing {total} media items."
+            await _send_downloaded_file(message, file_path, media_kind, caption)
 
-        await processing_message.delete()
+        await status.delete()
     except SecurityError as exc:
-        await processing_message.edit(f"Blocked by security policy: {exc}")
-    except Exception as exc:
-        await processing_message.edit(f"Error downloading Instagram media: {exc}")
+        await status.edit_text(f"Blocked by security policy: {exc}")
+    except (SocialDownloadError, Exception) as exc:
+        await status.edit_text(f"Error downloading {platform} media: {exc}")
     finally:
         if temp_dir and os.path.exists(temp_dir):
             shutil.rmtree(temp_dir, ignore_errors=True)

@@ -243,6 +243,11 @@ HELP_25 = """
 - /song [title/url] - download a song from YouTube.
 - /lyrics [title or lyric line] - search matching songs, then fetch full lyrics by button.
 - /insta, /ig [instagram url] - download Instagram media.
+- /youtube, /yt [youtube url] - download YouTube media with audio.
+- /facebook, /fb [facebook url] - download Facebook media.
+- /x, /twitter [post url] - download X/Twitter post media.
+- /snap, /snapchat [snapchat url] - download Snapchat media.
+- /tiktok, /tt [tiktok url] - download TikTok media.
 - /remove [audio|video] - remove audio or video from a replied media file.
 """
 
