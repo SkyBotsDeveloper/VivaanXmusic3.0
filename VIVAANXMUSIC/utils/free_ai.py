@@ -701,7 +701,7 @@ def _run_gradio_job(client: GradioClient, timeout_seconds: int, *args, api_name:
             raise FreeAIError(status_message or "Provider cancelled the request.")
         if status_message and TRY_AGAIN_PATTERN.search(status_message):
             raise FreeAIError(status_message)
-        if eta is not None and float(eta) > (remaining + 5):
+        if eta is not None and float(eta) > max(120, remaining + 20):
             try:
                 job.cancel()
             except Exception:
@@ -1502,7 +1502,7 @@ def _run_wan_async_video(
                 except (TypeError, ValueError):
                     estimated_wait = None
 
-            if estimated_wait and estimated_wait > max(45, remaining + 5):
+            if estimated_wait and estimated_wait > max(120, remaining + 20):
                 raise FreeAIError(f"Wan queue is too long ({int(estimated_wait)}s).")
             time.sleep(min(6, max(1, remaining)))
 
@@ -1560,14 +1560,14 @@ async def _run_video_provider_batch(
 
     tasks = {
         asyncio.create_task(
-            asyncio.wait_for(
-                asyncio.to_thread(
-                    provider.runner,
-                    prompt,
-                    reference_image_path if provider.supports_reference else None,
-                    provider.timeout_seconds,
-                ),
-                timeout=provider.timeout_seconds + 12,
+                asyncio.wait_for(
+                    asyncio.to_thread(
+                        provider.runner,
+                        prompt,
+                        reference_image_path if provider.supports_reference else None,
+                        provider.timeout_seconds,
+                    ),
+                timeout=provider.timeout_seconds + 30,
             )
         ): provider
         for provider in eligible
@@ -2722,19 +2722,178 @@ async def generate_video(
 
         provider_batches: list[list[VideoProvider]] = []
 
-        if not reference_image_path:
+        if reference_image_path:
+            if REPLICATE_TOKEN_POOL:
+                provider_batches.extend(
+                    [
+                        [
+                            VideoProvider(
+                                "Replicate / Seedance 1 Lite",
+                                240,
+                                True,
+                                False,
+                                _run_replicate_seedance_video,
+                            ),
+                        ],
+                        [
+                            VideoProvider(
+                                "Replicate / MiniMax Video-01",
+                                240,
+                                True,
+                                False,
+                                _run_replicate_minimax_video,
+                            ),
+                        ],
+                        [
+                            VideoProvider(
+                                "Replicate / Kling v2.1",
+                                240,
+                                True,
+                                True,
+                                _run_replicate_kling_video,
+                            )
+                        ],
+                    ]
+                )
+
+            if HF_TOKEN_POOL:
+                provider_batches.extend(
+                    [
+                        [
+                            VideoProvider(
+                                "HF / CogVideoX 5B",
+                                180,
+                                True,
+                                False,
+                                _run_cogvideox_5b_video,
+                            ),
+                        ],
+                    ]
+                )
+
+            provider_batches.extend(
+                [
+                    [
+                        VideoProvider(
+                            "DeepRat / LTX Video",
+                            120,
+                            True,
+                            False,
+                            _run_deeprat_ltx_video,
+                        ),
+                        VideoProvider(
+                            "Multimodalart / Wan2.1 Fast",
+                            70,
+                            True,
+                            True,
+                            _run_multimodalart_video,
+                        ),
+                    ],
+                    [
+                        VideoProvider(
+                            "ZeroGPU AOTI / Wan2.2 Fast",
+                            65,
+                            True,
+                            True,
+                            _run_wan22_fast_i2v_video,
+                        ),
+                        VideoProvider(
+                            "r3gm / Wan2.2 Preview",
+                            70,
+                            True,
+                            True,
+                            _run_wan22_preview_video,
+                        ),
+                        VideoProvider(
+                            "r3gm / Wan2.2 Preview2",
+                            70,
+                            True,
+                            True,
+                            _run_wan22_preview2_video,
+                        ),
+                    ],
+                    [
+                        VideoProvider(
+                            "obsxrver / WAN22 I2V",
+                            80,
+                            True,
+                            True,
+                            _run_wan22_obsxrver_video,
+                        ),
+                        VideoProvider(
+                            "Dream / Wan2.2 Faster Pro",
+                            85,
+                            True,
+                            True,
+                            _run_wan22_dream_i2v_space,
+                        ),
+                    ],
+                    [
+                        VideoProvider(
+                            "OpenKing / Wan2 Video",
+                            55,
+                            True,
+                            False,
+                            _run_openking_video,
+                        ),
+                        VideoProvider(
+                            "Smikke / Wan2 Video",
+                            55,
+                            True,
+                            False,
+                            _run_smikke_video,
+                        ),
+                        VideoProvider(
+                            "Mrfalco / Wan2 Video",
+                            55,
+                            True,
+                            False,
+                            _run_mrfalco_video,
+                        ),
+                        VideoProvider(
+                            "ChanPoin / Wan2 Video",
+                            55,
+                            True,
+                            False,
+                            _run_chanpoin_video,
+                        ),
+                        VideoProvider(
+                            "Keen007 / Wan2 Video",
+                            55,
+                            True,
+                            False,
+                            _run_keen007_video,
+                        ),
+                        VideoProvider(
+                            "AliothTalks / Wan2 Video",
+                            55,
+                            True,
+                            False,
+                            _run_aliothtalks_video,
+                        ),
+                        VideoProvider(
+                            "BYTFITY / Wan2 Video",
+                            55,
+                            True,
+                            False,
+                            _run_bytfity_video,
+                        ),
+                    ],
+                ]
+            )
+        else:
             provider_batches.append(
                 [
                     VideoProvider(
                         "VidForge / MJ T2V",
-                        35,
+                        70,
                         False,
                         False,
                         _run_vidforge_text_video,
                     ),
                     VideoProvider(
                         "VidForge Proxy / MJ T2V",
-                        40,
+                        80,
                         False,
                         False,
                         _run_vidforge_proxy_text_video,
@@ -2742,200 +2901,89 @@ async def generate_video(
                 ]
             )
 
-        if REPLICATE_TOKEN_POOL:
-            replicate_batch = [
-                [
-                    VideoProvider(
-                        "Replicate / Seedance 1 Lite",
-                        150,
-                        True,
-                        False,
-                        _run_replicate_seedance_video,
-                    ),
-                ],
-                [
-                    VideoProvider(
-                        "Replicate / MiniMax Video-01",
-                        150,
-                        True,
-                        False,
-                        _run_replicate_minimax_video,
-                    ),
-                ],
-            ]
-            if reference_image_path:
-                replicate_batch.append(
+            if REPLICATE_TOKEN_POOL:
+                provider_batches.extend(
                     [
-                        VideoProvider(
-                            "Replicate / Kling v2.1",
-                            150,
-                            True,
-                            True,
-                            _run_replicate_kling_video,
-                        )
+                        [
+                            VideoProvider(
+                                "Replicate / Seedance 1 Lite",
+                                240,
+                                True,
+                                False,
+                                _run_replicate_seedance_video,
+                            ),
+                        ],
+                        [
+                            VideoProvider(
+                                "Replicate / MiniMax Video-01",
+                                240,
+                                True,
+                                False,
+                                _run_replicate_minimax_video,
+                            ),
+                        ],
                     ]
                 )
-            provider_batches.extend(replicate_batch)
 
-        if HF_TOKEN_POOL:
-            hf_batch = [
-                [
-                    VideoProvider(
-                        "HF / CogVideoX 2B",
-                        75,
-                        False,
-                        False,
-                        _run_cogvideox_2b_video,
-                    ),
-                ],
-                [
-                    VideoProvider(
-                        "HF / CogVideoX 5B",
-                        90,
-                        True,
-                        False,
-                        _run_cogvideox_5b_video,
-                    ),
-                ],
-            ]
-            provider_batches.extend(hf_batch)
-
-        if not REPLICATE_TOKEN_POOL or _is_enabled(GENVID_USE_PUBLIC_FALLBACKS):
-            public_primary: list[VideoProvider] = []
-            public_primary.extend(
-                [
-                    VideoProvider(
-                        "DeepRat / LTX Video",
-                        70 if reference_image_path else 55,
-                        True,
-                        False,
-                        _run_deeprat_ltx_video,
-                    ),
-                    VideoProvider(
-                        "ZeroGPU AOTI / Wan2.2 Fast",
-                        32,
-                        True,
-                        True,
-                        _run_wan22_fast_i2v_video,
-                    ),
-                    VideoProvider(
-                        "r3gm / Wan2.2 Preview",
-                        34,
-                        True,
-                        True,
-                        _run_wan22_preview_video,
-                    ),
-                    VideoProvider(
-                        "r3gm / Wan2.2 Preview2",
-                        34,
-                        True,
-                        True,
-                        _run_wan22_preview2_video,
-                    ),
-                    VideoProvider(
-                        "obsxrver / WAN22 I2V",
-                        38,
-                        True,
-                        True,
-                        _run_wan22_obsxrver_video,
-                    ),
-                    VideoProvider(
-                        "Dream / Wan2.2 Faster Pro",
-                        40,
-                        True,
-                        True,
-                        _run_wan22_dream_i2v_space,
-                    ),
-                    VideoProvider(
-                        "hysts / zeroscope-v2",
-                        22,
-                        False,
-                        False,
-                        _run_hysts_zeroscope_video,
-                    ),
-                    VideoProvider(
-                        "Alava01 / Wan Demo",
-                        24,
-                        False,
-                        False,
-                        _run_alava_wan_demo,
-                    ),
-                    VideoProvider(
-                        "OpenKing / Wan2 Video",
-                        28,
-                        True,
-                        False,
-                        _run_openking_video,
-                    ),
-                    VideoProvider(
-                        "Smikke / Wan2 Video",
-                        28,
-                        True,
-                        False,
-                        _run_smikke_video,
-                    ),
-                    VideoProvider(
-                        "Mrfalco / Wan2 Video",
-                        28,
-                        True,
-                        False,
-                        _run_mrfalco_video,
-                    ),
-                    VideoProvider(
-                        "ChanPoin / Wan2 Video",
-                        28,
-                        True,
-                        False,
-                        _run_chanpoin_video,
-                    ),
-                    VideoProvider(
-                        "Keen007 / Wan2 Video",
-                        28,
-                        True,
-                        False,
-                        _run_keen007_video,
-                    ),
-                    VideoProvider(
-                        "AliothTalks / Wan2 Video",
-                        28,
-                        True,
-                        False,
-                        _run_aliothtalks_video,
-                    ),
-                    VideoProvider(
-                        "BYTFITY / Wan2 Video",
-                        28,
-                        True,
-                        False,
-                        _run_bytfity_video,
-                    ),
-                ]
-            )
-            provider_batches.extend(
-                [
-                    public_primary,
+            if HF_TOKEN_POOL:
+                provider_batches.extend(
                     [
-                        VideoProvider(
-                            "Wan-AI / Wan2.1",
-                            18,
-                            False,
-                            False,
-                            _run_wan_async_video,
-                        ),
-                    ],
-                ]
-            )
+                        [
+                            VideoProvider(
+                                "HF / CogVideoX 2B",
+                                140,
+                                False,
+                                False,
+                                _run_cogvideox_2b_video,
+                            ),
+                        ],
+                        [
+                            VideoProvider(
+                                "HF / CogVideoX 5B",
+                                180,
+                                True,
+                                False,
+                                _run_cogvideox_5b_video,
+                            ),
+                        ],
+                    ]
+                )
 
-            if reference_image_path:
-                provider_batches.append(
+            if not REPLICATE_TOKEN_POOL or _is_enabled(GENVID_USE_PUBLIC_FALLBACKS):
+                provider_batches.extend(
                     [
-                        VideoProvider(
-                            "Multimodalart / Wan2.1 Fast",
-                            35,
-                            True,
-                            True,
-                            _run_multimodalart_video,
-                        )
+                        [
+                            VideoProvider(
+                                "DeepRat / LTX Video",
+                                90,
+                                True,
+                                False,
+                                _run_deeprat_ltx_video,
+                            ),
+                            VideoProvider(
+                                "hysts / zeroscope-v2",
+                                45,
+                                False,
+                                False,
+                                _run_hysts_zeroscope_video,
+                            ),
+                            VideoProvider(
+                                "Alava01 / Wan Demo",
+                                50,
+                                False,
+                                False,
+                                _run_alava_wan_demo,
+                            ),
+                        ],
+                        [
+                            VideoProvider(
+                                "Wan-AI / Wan2.1",
+                                75,
+                                False,
+                                False,
+                                _run_wan_async_video,
+                            ),
+                        ],
                     ]
                 )
 
@@ -2952,26 +3000,6 @@ async def generate_video(
                     used_reference_image and result.used_reference_image
                 )
                 return result
-
-            if (
-                not REPLICATE_TOKEN_POOL
-                and not HF_TOKEN_POOL
-                and batch
-                and batch[0].name == "DeepRat / LTX Video"
-            ):
-                if progress_callback:
-                    await progress_callback("Backup render")
-                try:
-                    result = await _run_local_backup_video(
-                        text_prompt,
-                        reference_image_path=reference_image_path,
-                    )
-                    result.used_reference_image = (
-                        used_reference_image and result.used_reference_image
-                    )
-                    return result
-                except Exception as exc:
-                    failures.append(f"Local backup: {exc}")
 
         if progress_callback:
             await progress_callback("Backup render")
