@@ -40,6 +40,8 @@ IMAGE_ENHANCE_URL = "https://arimagex.netlify.app/api/enhance"
 IMAGE_REMOVEBG_URL = "https://arimagex.netlify.app/api/removebg"
 OCR_SPACE_API_URL = "https://api.ocr.space/parse/image"
 REPLICATE_API_URL = "https://api.replicate.com/v1"
+TEXT_VIDEO_MJ_URL = "https://text-to-video-mj.vercel.app/generate"
+TEXT_VIDEO_MJ_PROXY_URL = "https://mag.dhanjeerider.workers.dev/"
 VIDEO_DASHSCOPE_ENDPOINTS = {
     "sg": "https://dashscope-intl.aliyuncs.com/api/v1",
     "us": "https://dashscope-us.aliyuncs.com/api/v1",
@@ -939,6 +941,77 @@ def _run_replicate_kling_video(
         input_payload,
         timeout_seconds,
     )
+
+
+def _extract_simple_video_json_url(payload) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    if str(payload.get("status") or "").lower() not in {"success", "ok"}:
+        return None
+    value = str(payload.get("url") or "").strip()
+    return value or None
+
+
+def _run_text_video_mj_api(
+    api_url: str,
+    prompt: str,
+    timeout_seconds: int,
+) -> str:
+    request_timeout = httpx.Timeout(max(timeout_seconds, 30), connect=10.0)
+    async_headers = dict(HTTP_HEADERS)
+    with httpx.Client(
+        timeout=request_timeout,
+        headers=async_headers,
+        follow_redirects=True,
+        trust_env=False,
+    ) as client:
+        response = client.get(
+            api_url,
+            params={"prompt": prompt},
+        )
+        if response.status_code >= 400:
+            raise FreeAIError(response.text.strip() or "Text-to-video API request failed.")
+
+        try:
+            payload = response.json()
+        except Exception:
+            text = response.text.strip()
+            if text.startswith("{") and text.endswith("}"):
+                try:
+                    import json
+
+                    payload = json.loads(text)
+                except Exception as exc:
+                    raise FreeAIError("Text-to-video API returned an invalid response.") from exc
+            else:
+                raise FreeAIError("Text-to-video API returned an invalid response.")
+
+        video_url = _extract_simple_video_json_url(payload)
+        if video_url:
+            return video_url
+
+        detail = _extract_json_error(payload)
+        raise FreeAIError(detail or "Text-to-video API returned no video.")
+
+
+def _run_vidforge_text_video(
+    prompt: str,
+    reference_image_path: str | None,
+    timeout_seconds: int,
+) -> str:
+    if reference_image_path:
+        raise FreeAIError("VidForge text-to-video does not support reference images.")
+    return _run_text_video_mj_api(TEXT_VIDEO_MJ_URL, prompt, timeout_seconds)
+
+
+def _run_vidforge_proxy_text_video(
+    prompt: str,
+    reference_image_path: str | None,
+    timeout_seconds: int,
+) -> str:
+    if reference_image_path:
+        raise FreeAIError("VidForge proxy text-to-video does not support reference images.")
+    return _run_text_video_mj_api(TEXT_VIDEO_MJ_PROXY_URL, prompt, timeout_seconds)
 
 
 def _dashscope_error_message(response: httpx.Response) -> str:
@@ -2896,115 +2969,138 @@ async def generate_video(
             provider_batches.extend(hf_batch)
 
         if not REPLICATE_TOKEN_POOL or _is_enabled(GENVID_USE_PUBLIC_FALLBACKS):
-            provider_batches.extend(
-                [
+            public_primary: list[VideoProvider] = []
+            if not reference_image_path:
+                public_primary.extend(
                     [
                         VideoProvider(
-                            "DeepRat / LTX Video",
-                            70 if reference_image_path else 55,
-                            True,
+                            "VidForge / MJ T2V",
+                            35,
                             False,
-                            _run_deeprat_ltx_video,
+                            False,
+                            _run_vidforge_text_video,
                         ),
                         VideoProvider(
-                            "ZeroGPU AOTI / Wan2.2 Fast",
-                            32,
-                            True,
-                            True,
-                            _run_wan22_fast_i2v_video,
-                        ),
-                        VideoProvider(
-                            "r3gm / Wan2.2 Preview",
-                            34,
-                            True,
-                            True,
-                            _run_wan22_preview_video,
-                        ),
-                        VideoProvider(
-                            "r3gm / Wan2.2 Preview2",
-                            34,
-                            True,
-                            True,
-                            _run_wan22_preview2_video,
-                        ),
-                        VideoProvider(
-                            "obsxrver / WAN22 I2V",
-                            38,
-                            True,
-                            True,
-                            _run_wan22_obsxrver_video,
-                        ),
-                        VideoProvider(
-                            "Dream / Wan2.2 Faster Pro",
+                            "VidForge Proxy / MJ T2V",
                             40,
-                            True,
-                            True,
-                            _run_wan22_dream_i2v_space,
+                            False,
+                            False,
+                            _run_vidforge_proxy_text_video,
                         ),
-                        VideoProvider(
-                            "hysts / zeroscope-v2",
-                            22,
-                            False,
-                            False,
-                            _run_hysts_zeroscope_video,
-                        ),
-                        VideoProvider(
-                            "Alava01 / Wan Demo",
-                            24,
-                            False,
-                            False,
-                            _run_alava_wan_demo,
-                        ),
-                        VideoProvider(
-                            "OpenKing / Wan2 Video",
-                            28,
-                            True,
-                            False,
-                            _run_openking_video,
-                        ),
-                        VideoProvider(
-                            "Smikke / Wan2 Video",
-                            28,
-                            True,
-                            False,
-                            _run_smikke_video,
-                        ),
-                        VideoProvider(
-                            "Mrfalco / Wan2 Video",
-                            28,
-                            True,
-                            False,
-                            _run_mrfalco_video,
-                        ),
-                        VideoProvider(
-                            "ChanPoin / Wan2 Video",
-                            28,
-                            True,
-                            False,
-                            _run_chanpoin_video,
-                        ),
-                        VideoProvider(
-                            "Keen007 / Wan2 Video",
-                            28,
-                            True,
-                            False,
-                            _run_keen007_video,
-                        ),
-                        VideoProvider(
-                            "AliothTalks / Wan2 Video",
-                            28,
-                            True,
-                            False,
-                            _run_aliothtalks_video,
-                        ),
-                        VideoProvider(
-                            "BYTFITY / Wan2 Video",
-                            28,
-                            True,
-                            False,
-                            _run_bytfity_video,
-                        ),
-                    ],
+                    ]
+                )
+            public_primary.extend(
+                [
+                    VideoProvider(
+                        "DeepRat / LTX Video",
+                        70 if reference_image_path else 55,
+                        True,
+                        False,
+                        _run_deeprat_ltx_video,
+                    ),
+                    VideoProvider(
+                        "ZeroGPU AOTI / Wan2.2 Fast",
+                        32,
+                        True,
+                        True,
+                        _run_wan22_fast_i2v_video,
+                    ),
+                    VideoProvider(
+                        "r3gm / Wan2.2 Preview",
+                        34,
+                        True,
+                        True,
+                        _run_wan22_preview_video,
+                    ),
+                    VideoProvider(
+                        "r3gm / Wan2.2 Preview2",
+                        34,
+                        True,
+                        True,
+                        _run_wan22_preview2_video,
+                    ),
+                    VideoProvider(
+                        "obsxrver / WAN22 I2V",
+                        38,
+                        True,
+                        True,
+                        _run_wan22_obsxrver_video,
+                    ),
+                    VideoProvider(
+                        "Dream / Wan2.2 Faster Pro",
+                        40,
+                        True,
+                        True,
+                        _run_wan22_dream_i2v_space,
+                    ),
+                    VideoProvider(
+                        "hysts / zeroscope-v2",
+                        22,
+                        False,
+                        False,
+                        _run_hysts_zeroscope_video,
+                    ),
+                    VideoProvider(
+                        "Alava01 / Wan Demo",
+                        24,
+                        False,
+                        False,
+                        _run_alava_wan_demo,
+                    ),
+                    VideoProvider(
+                        "OpenKing / Wan2 Video",
+                        28,
+                        True,
+                        False,
+                        _run_openking_video,
+                    ),
+                    VideoProvider(
+                        "Smikke / Wan2 Video",
+                        28,
+                        True,
+                        False,
+                        _run_smikke_video,
+                    ),
+                    VideoProvider(
+                        "Mrfalco / Wan2 Video",
+                        28,
+                        True,
+                        False,
+                        _run_mrfalco_video,
+                    ),
+                    VideoProvider(
+                        "ChanPoin / Wan2 Video",
+                        28,
+                        True,
+                        False,
+                        _run_chanpoin_video,
+                    ),
+                    VideoProvider(
+                        "Keen007 / Wan2 Video",
+                        28,
+                        True,
+                        False,
+                        _run_keen007_video,
+                    ),
+                    VideoProvider(
+                        "AliothTalks / Wan2 Video",
+                        28,
+                        True,
+                        False,
+                        _run_aliothtalks_video,
+                    ),
+                    VideoProvider(
+                        "BYTFITY / Wan2 Video",
+                        28,
+                        True,
+                        False,
+                        _run_bytfity_video,
+                    ),
+                ]
+            )
+            provider_batches.extend(
+                [
+                    public_primary,
                     [
                         VideoProvider(
                             "Wan-AI / Wan2.1",
