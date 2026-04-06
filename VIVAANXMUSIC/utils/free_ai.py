@@ -2729,7 +2729,7 @@ async def generate_video(
                         [
                             VideoProvider(
                                 "Replicate / Seedance 1 Lite",
-                                240,
+                                300,
                                 True,
                                 False,
                                 _run_replicate_seedance_video,
@@ -2738,7 +2738,7 @@ async def generate_video(
                         [
                             VideoProvider(
                                 "Replicate / MiniMax Video-01",
-                                240,
+                                300,
                                 True,
                                 False,
                                 _run_replicate_minimax_video,
@@ -2756,78 +2756,8 @@ async def generate_video(
                     ]
                 )
 
-            if HF_TOKEN_POOL:
-                provider_batches.extend(
-                    [
-                        [
-                            VideoProvider(
-                                "HF / CogVideoX 5B",
-                                180,
-                                True,
-                                False,
-                                _run_cogvideox_5b_video,
-                            ),
-                        ],
-                    ]
-                )
-
             provider_batches.extend(
                 [
-                    [
-                        VideoProvider(
-                            "DeepRat / LTX Video",
-                            120,
-                            True,
-                            False,
-                            _run_deeprat_ltx_video,
-                        ),
-                        VideoProvider(
-                            "Multimodalart / Wan2.1 Fast",
-                            70,
-                            True,
-                            True,
-                            _run_multimodalart_video,
-                        ),
-                    ],
-                    [
-                        VideoProvider(
-                            "ZeroGPU AOTI / Wan2.2 Fast",
-                            65,
-                            True,
-                            True,
-                            _run_wan22_fast_i2v_video,
-                        ),
-                        VideoProvider(
-                            "r3gm / Wan2.2 Preview",
-                            70,
-                            True,
-                            True,
-                            _run_wan22_preview_video,
-                        ),
-                        VideoProvider(
-                            "r3gm / Wan2.2 Preview2",
-                            70,
-                            True,
-                            True,
-                            _run_wan22_preview2_video,
-                        ),
-                    ],
-                    [
-                        VideoProvider(
-                            "obsxrver / WAN22 I2V",
-                            80,
-                            True,
-                            True,
-                            _run_wan22_obsxrver_video,
-                        ),
-                        VideoProvider(
-                            "Dream / Wan2.2 Faster Pro",
-                            85,
-                            True,
-                            True,
-                            _run_wan22_dream_i2v_space,
-                        ),
-                    ],
                     [
                         VideoProvider(
                             "OpenKing / Wan2 Video",
@@ -2906,41 +2836,10 @@ async def generate_video(
                     ]
                 )
 
-            if HF_TOKEN_POOL:
-                provider_batches.extend(
-                    [
-                        [
-                            VideoProvider(
-                                "HF / CogVideoX 2B",
-                                140,
-                                False,
-                                False,
-                                _run_cogvideox_2b_video,
-                            ),
-                        ],
-                        [
-                            VideoProvider(
-                                "HF / CogVideoX 5B",
-                                180,
-                                True,
-                                False,
-                                _run_cogvideox_5b_video,
-                            ),
-                        ],
-                    ]
-                )
-
             if not REPLICATE_TOKEN_POOL or _is_enabled(GENVID_USE_PUBLIC_FALLBACKS):
                 provider_batches.extend(
                     [
                         [
-                            VideoProvider(
-                                "DeepRat / LTX Video",
-                                90,
-                                True,
-                                False,
-                                _run_deeprat_ltx_video,
-                            ),
                             VideoProvider(
                                 "hysts / zeroscope-v2",
                                 45,
