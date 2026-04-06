@@ -2884,6 +2884,26 @@ async def generate_video(
 
         provider_batches: list[list[VideoProvider]] = []
 
+        if not reference_image_path:
+            provider_batches.append(
+                [
+                    VideoProvider(
+                        "VidForge / MJ T2V",
+                        35,
+                        False,
+                        False,
+                        _run_vidforge_text_video,
+                    ),
+                    VideoProvider(
+                        "VidForge Proxy / MJ T2V",
+                        40,
+                        False,
+                        False,
+                        _run_vidforge_proxy_text_video,
+                    ),
+                ]
+            )
+
         if REPLICATE_TOKEN_POOL:
             replicate_batch = [
                 [
@@ -2970,25 +2990,6 @@ async def generate_video(
 
         if not REPLICATE_TOKEN_POOL or _is_enabled(GENVID_USE_PUBLIC_FALLBACKS):
             public_primary: list[VideoProvider] = []
-            if not reference_image_path:
-                public_primary.extend(
-                    [
-                        VideoProvider(
-                            "VidForge / MJ T2V",
-                            35,
-                            False,
-                            False,
-                            _run_vidforge_text_video,
-                        ),
-                        VideoProvider(
-                            "VidForge Proxy / MJ T2V",
-                            40,
-                            False,
-                            False,
-                            _run_vidforge_proxy_text_video,
-                        ),
-                    ]
-                )
             public_primary.extend(
                 [
                     VideoProvider(
