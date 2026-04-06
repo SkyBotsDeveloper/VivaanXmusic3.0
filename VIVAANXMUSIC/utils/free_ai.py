@@ -2882,25 +2882,6 @@ async def generate_video(
                 ]
             )
         else:
-            provider_batches.append(
-                [
-                    VideoProvider(
-                        "VidForge / MJ T2V",
-                        70,
-                        False,
-                        False,
-                        _run_vidforge_text_video,
-                    ),
-                    VideoProvider(
-                        "VidForge Proxy / MJ T2V",
-                        80,
-                        False,
-                        False,
-                        _run_vidforge_proxy_text_video,
-                    ),
-                ]
-            )
-
             if REPLICATE_TOKEN_POOL:
                 provider_batches.extend(
                     [
@@ -2986,6 +2967,25 @@ async def generate_video(
                         ],
                     ]
                 )
+
+            provider_batches.append(
+                [
+                    VideoProvider(
+                        "VidForge / MJ T2V",
+                        70,
+                        False,
+                        False,
+                        _run_vidforge_text_video,
+                    ),
+                    VideoProvider(
+                        "VidForge Proxy / MJ T2V",
+                        80,
+                        False,
+                        False,
+                        _run_vidforge_proxy_text_video,
+                    ),
+                ]
+            )
 
         for batch in provider_batches:
             result = await _run_video_provider_batch(
