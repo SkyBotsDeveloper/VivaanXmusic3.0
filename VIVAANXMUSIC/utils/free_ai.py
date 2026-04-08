@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import concurrent.futures
+import json
 import mimetypes
 import os
 import re
@@ -12,6 +13,9 @@ import time
 from dataclasses import dataclass
 
 import httpx
+from Crypto.Cipher import AES
+from Crypto.Hash import SHA256
+from Crypto.Protocol.KDF import PBKDF2
 from gradio_client import Client as GradioClient, handle_file
 from PIL import Image
 
@@ -39,6 +43,12 @@ OCR_SPACE_API_URL = "https://api.ocr.space/parse/image"
 REPLICATE_API_URL = "https://api.replicate.com/v1"
 TEXT_VIDEO_MJ_URL = "https://text-to-video-mj.vercel.app/generate"
 TEXT_VIDEO_MJ_PROXY_URL = "https://mag.dhanjeerider.workers.dev/"
+VHEER_BASE_URL = "https://vheer.com"
+VHEER_UPLOAD_URL = f"{VHEER_BASE_URL}/app/api/vheer/upload"
+VHEER_STATUS_URL = f"{VHEER_BASE_URL}/app/api/vheer/status"
+VHEER_ENCRYPTION_SECRET = "vH33r_2025_AES_GCM_S3cur3_K3y_9X7mP4qR8nT2wE5yU1oI6aS3dF7gH0jK9lZ"
+VHEER_ENCRYPTION_SALT = b"vheer-salt-2024"
+VHEER_IMAGE_TO_VIDEO_TASK_TYPE = 5
 REPLICATE_SEEDANCE_MODEL = "bytedance/seedance-1-lite"
 REPLICATE_MINIMAX_MODEL = "minimax/video-01"
 REPLICATE_KLING_MODEL = "kwaivgi/kling-v2.1"
@@ -381,11 +391,41 @@ def _is_identity_query(prompt: str | None) -> bool:
 
 def _extract_json_error(payload) -> str:
     if isinstance(payload, dict):
-        for key in ("response", "message", "error", "detail"):
+        for key in ("response", "message", "error", "detail", "msg"):
             value = payload.get(key)
             if value:
                 return str(value)
     return "Unknown upstream error."
+
+
+def _derive_vheer_key() -> bytes:
+    return PBKDF2(
+        VHEER_ENCRYPTION_SECRET.encode("utf-8"),
+        VHEER_ENCRYPTION_SALT,
+        dkLen=32,
+        count=10000,
+        hmac_hash_module=SHA256,
+    )
+
+
+def _encrypt_vheer_payload(payload: dict) -> str:
+    plaintext = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    nonce = os.urandom(12)
+    cipher = AES.new(_derive_vheer_key(), AES.MODE_GCM, nonce=nonce)
+    ciphertext, tag = cipher.encrypt_and_digest(plaintext)
+    return base64.b64encode(nonce + ciphertext + tag).decode("utf-8")
+
+
+def _decrypt_vheer_payload(encoded_payload: str):
+    raw = base64.b64decode(encoded_payload)
+    if len(raw) < 28:
+        raise FreeAIError("Vheer returned an invalid encrypted payload.")
+    nonce = raw[:12]
+    ciphertext = raw[12:-16]
+    tag = raw[-16:]
+    cipher = AES.new(_derive_vheer_key(), AES.MODE_GCM, nonce=nonce)
+    decrypted = cipher.decrypt_and_verify(ciphertext, tag)
+    return json.loads(decrypted.decode("utf-8"))
 
 
 def _write_temp_image(image_bytes: bytes, mime_type: str) -> str:
@@ -1029,6 +1069,121 @@ def _run_hysts_zeroscope_video(
     if not video_path:
         raise FreeAIError("hysts/zeroscope-v2 returned no video.")
     return video_path
+
+
+def _pick_vheer_video_url(payload) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+
+    urls = payload.get("downloadUrls") or payload.get("download_urls") or []
+    if isinstance(urls, str):
+        urls = [urls]
+
+    for url in urls:
+        candidate = str(url or "").strip()
+        if candidate.lower().endswith(".mp4"):
+            return candidate
+
+    for url in urls:
+        candidate = str(url or "").strip()
+        if candidate:
+            return candidate
+    return None
+
+
+def _run_vheer_image_to_video(
+    prompt: str,
+    reference_image_path: str | None,
+    timeout_seconds: int,
+) -> str:
+    if not reference_image_path:
+        raise FreeAIError("Vheer requires a reference image.")
+
+    upload_timeout = httpx.Timeout(max(timeout_seconds, 45), connect=10.0)
+    status_timeout = httpx.Timeout(30.0, connect=10.0)
+    upload_payload = {
+        "type": VHEER_IMAGE_TO_VIDEO_TASK_TYPE,
+        "model": "vheer_quality",
+        "prompt": prompt,
+        "aspectRatio": "auto",
+        "duration": 5,
+        "resolution": 768,
+        "frameRate": 24,
+        "generate_audio": False,
+    }
+
+    with open(reference_image_path, "rb") as image_handle:
+        files = {
+            "file": (
+                os.path.basename(reference_image_path),
+                image_handle,
+                mimetypes.guess_type(reference_image_path)[0] or "image/png",
+            )
+        }
+        data = {"params": _encrypt_vheer_payload(upload_payload)}
+
+        with httpx.Client(
+            timeout=upload_timeout,
+            headers=HTTP_HEADERS,
+            follow_redirects=True,
+            trust_env=False,
+        ) as client:
+            response = client.post(VHEER_UPLOAD_URL, files=files, data=data)
+            try:
+                payload = response.json()
+            except Exception as exc:
+                raise FreeAIError("Vheer upload returned an invalid response.") from exc
+
+            if response.status_code != 200 or payload.get("code") != 200:
+                raise FreeAIError(_extract_json_error(payload))
+
+            encrypted_data = payload.get("data_enc")
+            if not encrypted_data:
+                raise FreeAIError("Vheer upload returned no task payload.")
+
+            task_payload = _decrypt_vheer_payload(encrypted_data)
+            task_code = str(task_payload.get("code") or "").strip()
+            if not task_code:
+                raise FreeAIError("Vheer upload returned no task code.")
+
+            deadline = time.monotonic() + max(timeout_seconds, 90)
+            while time.monotonic() < deadline:
+                status_request = {
+                    "type": VHEER_IMAGE_TO_VIDEO_TASK_TYPE,
+                    "code": task_code,
+                    "user_id": "",
+                    "cost_credit": 0,
+                }
+                status_response = client.post(
+                    VHEER_STATUS_URL,
+                    json={"params": _encrypt_vheer_payload(status_request)},
+                    timeout=status_timeout,
+                )
+                try:
+                    status_payload = status_response.json()
+                except Exception as exc:
+                    raise FreeAIError("Vheer status returned an invalid response.") from exc
+
+                if status_response.status_code != 200 or status_payload.get("code") != 200:
+                    raise FreeAIError(_extract_json_error(status_payload))
+
+                encrypted_status = status_payload.get("data_enc")
+                if not encrypted_status:
+                    raise FreeAIError("Vheer status returned no task data.")
+
+                task_status = _decrypt_vheer_payload(encrypted_status)
+                state = str(task_status.get("status") or "").strip().lower()
+                if state in {"success", "completed", "done"}:
+                    video_url = _pick_vheer_video_url(task_status)
+                    if video_url:
+                        return video_url
+                    raise FreeAIError("Vheer finished without a video URL.")
+                if state in {"failed", "error", "canceled", "cancelled"}:
+                    raise FreeAIError(_extract_json_error(task_status))
+
+                time.sleep(3)
+
+    raise FreeAIError("Vheer image-to-video timed out.")
 
 
 def _run_cogvideox_2b_video(
@@ -2723,6 +2878,67 @@ async def generate_video(
         provider_batches: list[list[VideoProvider]] = []
 
         if reference_image_path:
+            provider_batches.append(
+                [
+                    VideoProvider(
+                        "Vheer / Free I2V",
+                        120,
+                        True,
+                        True,
+                        _run_vheer_image_to_video,
+                    ),
+                    VideoProvider(
+                        "OpenKing / Wan2 Video",
+                        55,
+                        True,
+                        False,
+                        _run_openking_video,
+                    ),
+                    VideoProvider(
+                        "Smikke / Wan2 Video",
+                        55,
+                        True,
+                        False,
+                        _run_smikke_video,
+                    ),
+                    VideoProvider(
+                        "Mrfalco / Wan2 Video",
+                        55,
+                        True,
+                        False,
+                        _run_mrfalco_video,
+                    ),
+                    VideoProvider(
+                        "ChanPoin / Wan2 Video",
+                        55,
+                        True,
+                        False,
+                        _run_chanpoin_video,
+                    ),
+                    VideoProvider(
+                        "Keen007 / Wan2 Video",
+                        55,
+                        True,
+                        False,
+                        _run_keen007_video,
+                    ),
+                    VideoProvider(
+                        "AliothTalks / Wan2 Video",
+                        55,
+                        True,
+                        False,
+                        _run_aliothtalks_video,
+                    ),
+                    VideoProvider(
+                        "BYTFITY / Wan2 Video",
+                        55,
+                        True,
+                        False,
+                        _run_bytfity_video,
+                    ),
+                ]
+            )
+
             if REPLICATE_TOKEN_POOL:
                 provider_batches.extend(
                     [
@@ -2756,61 +2972,6 @@ async def generate_video(
                     ]
                 )
 
-            provider_batches.extend(
-                [
-                    [
-                        VideoProvider(
-                            "OpenKing / Wan2 Video",
-                            55,
-                            True,
-                            False,
-                            _run_openking_video,
-                        ),
-                        VideoProvider(
-                            "Smikke / Wan2 Video",
-                            55,
-                            True,
-                            False,
-                            _run_smikke_video,
-                        ),
-                        VideoProvider(
-                            "Mrfalco / Wan2 Video",
-                            55,
-                            True,
-                            False,
-                            _run_mrfalco_video,
-                        ),
-                        VideoProvider(
-                            "ChanPoin / Wan2 Video",
-                            55,
-                            True,
-                            False,
-                            _run_chanpoin_video,
-                        ),
-                        VideoProvider(
-                            "Keen007 / Wan2 Video",
-                            55,
-                            True,
-                            False,
-                            _run_keen007_video,
-                        ),
-                        VideoProvider(
-                            "AliothTalks / Wan2 Video",
-                            55,
-                            True,
-                            False,
-                            _run_aliothtalks_video,
-                        ),
-                        VideoProvider(
-                            "BYTFITY / Wan2 Video",
-                            55,
-                            True,
-                            False,
-                            _run_bytfity_video,
-                        ),
-                    ],
-                ]
-            )
         else:
             if REPLICATE_TOKEN_POOL:
                 provider_batches.extend(
