@@ -175,6 +175,11 @@ CHAT_ALIAS_PROFILES = {
 VIDEO_NEGATIVE_PROMPT = (
     "low quality, blur, watermark, text, distorted anatomy, artifacts"
 )
+IMAGE_TO_VIDEO_NEGATIVE_PROMPT = (
+    "low quality, blur, watermark, text, distorted anatomy, artifacts, "
+    "identity change, face change, body change, clothing change, scene change, "
+    "background change, camera cut, extra people, extra limbs, morphing, flicker"
+)
 VISION_SYSTEM_PROMPT = (
     "You answer questions about an image using the provided multimodal analysis, OCR "
     "text, and fallback captions. Prefer the direct multimodal analysis when present. "
@@ -190,6 +195,12 @@ PROMO_LINE_MARKERS = (
     "join our",
     "join:",
     "op.wtf",
+)
+DEFAULT_IMAGE_MOTION_MARKERS = (
+    "make this image come alive",
+    "smooth cinematic motion",
+    "animate this image",
+    "bring this image to life",
 )
 BLOCKED_RESPONSE_MARKERS = (
     "pollinations legacy text api",
@@ -962,7 +973,7 @@ def _run_replicate_seedance_video(
         "resolution": "720p",
         "aspect_ratio": "16:9",
         "fps": 24,
-        "camera_fixed": False,
+        "camera_fixed": bool(reference_image_path),
     }
     if reference_image_path:
         input_payload["image"] = _path_to_data_uri(reference_image_path)
@@ -980,7 +991,7 @@ def _run_replicate_minimax_video(
 ) -> str:
     input_payload = {
         "prompt": prompt,
-        "prompt_optimizer": True,
+        "prompt_optimizer": not bool(reference_image_path),
     }
     if reference_image_path:
         input_payload["first_frame_image"] = _path_to_data_uri(reference_image_path)
@@ -1004,7 +1015,7 @@ def _run_replicate_kling_video(
         "start_image": _path_to_data_uri(reference_image_path),
         "duration": 5,
         "mode": "standard",
-        "negative_prompt": VIDEO_NEGATIVE_PROMPT,
+        "negative_prompt": IMAGE_TO_VIDEO_NEGATIVE_PROMPT,
     }
     return _run_replicate_prediction(
         REPLICATE_KLING_MODEL,
@@ -1336,6 +1347,32 @@ def _compute_video_dimensions(image_path: str | None) -> tuple[int, int]:
     if aspect <= 0.83:
         return 384, 576
     return 480, 480
+
+
+def _is_default_image_motion_prompt(prompt: str | None) -> bool:
+    lowered = str(prompt or "").strip().lower()
+    if not lowered:
+        return True
+    return any(marker in lowered for marker in DEFAULT_IMAGE_MOTION_MARKERS)
+
+
+def _build_image_to_video_prompt(prompt: str | None) -> str:
+    user_prompt = str(prompt or "").strip()
+    prefix = (
+        "Animate the exact uploaded image into a short realistic video. "
+        "Preserve the same person, face, body, outfit, objects, background, "
+        "lighting, composition, and camera framing. Add only natural motion "
+        "already implied by the image. If a person is visible, continue their "
+        "existing action naturally with subtle realistic movement. Do not change "
+        "identity, replace the subject, invent a different scene, or transform "
+        "the image into something unrelated."
+    )
+    if _is_default_image_motion_prompt(user_prompt):
+        return (
+            f"{prefix} Keep the motion gentle, coherent, and faithful to the "
+            "original image context."
+        )
+    return f"{prefix} Requested motion: {user_prompt}"
 
 
 def _run_deeprat_ltx_video(
@@ -2926,6 +2963,7 @@ async def generate_video(
                 image_bytes, mime_type
             )
             used_reference_image = True
+            text_prompt = _build_image_to_video_prompt(text_prompt)
 
         provider_batches: list[list[VideoProvider]] = []
 
