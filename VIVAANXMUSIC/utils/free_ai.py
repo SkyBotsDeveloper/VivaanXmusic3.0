@@ -49,6 +49,8 @@ VHEER_STATUS_URL = f"{VHEER_BASE_URL}/app/api/vheer/status"
 VHEER_ENCRYPTION_SECRET = "vH33r_2025_AES_GCM_S3cur3_K3y_9X7mP4qR8nT2wE5yU1oI6aS3dF7gH0jK9lZ"
 VHEER_ENCRYPTION_SALT = b"vheer-salt-2024"
 VHEER_IMAGE_TO_VIDEO_TASK_TYPE = 5
+VIDEO_REFERENCE_MAX_DIMENSION = 1024
+VIDEO_REFERENCE_JPEG_QUALITY = 88
 REPLICATE_SEEDANCE_MODEL = "bytedance/seedance-1-lite"
 REPLICATE_MINIMAX_MODEL = "minimax/video-01"
 REPLICATE_KLING_MODEL = "kwaivgi/kling-v2.1"
@@ -435,6 +437,49 @@ def _write_temp_image(image_bytes: bytes, mime_type: str) -> str:
         return handle.name
 
 
+def _prepare_video_reference_image(image_bytes: bytes, mime_type: str) -> str:
+    source_path = _write_temp_image(image_bytes, mime_type)
+    prepared_path: str | None = None
+    try:
+        with Image.open(source_path) as image:
+            image.load()
+
+            has_alpha = image.mode in {"RGBA", "LA"} or (
+                image.mode == "P" and "transparency" in image.info
+            )
+            converted = image.convert("RGBA" if has_alpha else "RGB")
+
+            width, height = converted.size
+            max_side = max(width, height, 1)
+            scale = min(1.0, VIDEO_REFERENCE_MAX_DIMENSION / max_side)
+            if scale < 1.0:
+                resized = (
+                    max(1, int(round(width * scale))),
+                    max(1, int(round(height * scale))),
+                )
+                converted = converted.resize(resized, Image.Resampling.LANCZOS)
+
+            suffix = ".png" if has_alpha else ".jpg"
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as handle:
+                prepared_path = handle.name
+                if has_alpha:
+                    converted.save(handle, format="PNG", optimize=True)
+                else:
+                    converted.save(
+                        handle,
+                        format="JPEG",
+                        quality=VIDEO_REFERENCE_JPEG_QUALITY,
+                        optimize=True,
+                    )
+
+        return prepared_path or source_path
+    except Exception:
+        return source_path
+    finally:
+        if prepared_path and prepared_path != source_path:
+            _remove_file(source_path)
+
+
 def _remove_file(path: str | None):
     if path and os.path.exists(path):
         try:
@@ -477,6 +522,11 @@ def _provider_cooldown_remaining(provider_name: str) -> int:
 
 def _set_provider_cooldown(provider_name: str, message: str):
     seconds = _cooldown_seconds_from_error(message)
+    lowered = (message or "").lower()
+    if provider_name == "Vheer / Free I2V" and (
+        "timed out" in lowered or "timeout" in lowered
+    ):
+        seconds = 15
     if seconds:
         PROVIDER_COOLDOWNS[provider_name] = time.time() + seconds
     else:
@@ -1099,7 +1149,7 @@ def _run_vheer_image_to_video(
     if not reference_image_path:
         raise FreeAIError("Vheer requires a reference image.")
 
-    upload_timeout = httpx.Timeout(max(timeout_seconds, 45), connect=10.0)
+    upload_timeout = httpx.Timeout(max(timeout_seconds, 60), connect=10.0)
     status_timeout = httpx.Timeout(30.0, connect=10.0)
     upload_payload = {
         "type": VHEER_IMAGE_TO_VIDEO_TASK_TYPE,
@@ -1146,7 +1196,7 @@ def _run_vheer_image_to_video(
             if not task_code:
                 raise FreeAIError("Vheer upload returned no task code.")
 
-            deadline = time.monotonic() + max(timeout_seconds, 90)
+            deadline = time.monotonic() + max(timeout_seconds, 120)
             while time.monotonic() < deadline:
                 status_request = {
                     "type": VHEER_IMAGE_TO_VIDEO_TASK_TYPE,
@@ -1181,7 +1231,7 @@ def _run_vheer_image_to_video(
                 if state in {"failed", "error", "canceled", "cancelled"}:
                     raise FreeAIError(_extract_json_error(task_status))
 
-                time.sleep(3)
+                time.sleep(2)
 
     raise FreeAIError("Vheer image-to-video timed out.")
 
@@ -2872,7 +2922,9 @@ async def generate_video(
 
     try:
         if image_bytes:
-            reference_image_path = _write_temp_image(image_bytes, mime_type)
+            reference_image_path = _prepare_video_reference_image(
+                image_bytes, mime_type
+            )
             used_reference_image = True
 
         provider_batches: list[list[VideoProvider]] = []
@@ -2882,59 +2934,10 @@ async def generate_video(
                 [
                     VideoProvider(
                         "Vheer / Free I2V",
-                        120,
+                        300,
                         True,
                         True,
                         _run_vheer_image_to_video,
-                    ),
-                    VideoProvider(
-                        "OpenKing / Wan2 Video",
-                        55,
-                        True,
-                        False,
-                        _run_openking_video,
-                    ),
-                    VideoProvider(
-                        "Smikke / Wan2 Video",
-                        55,
-                        True,
-                        False,
-                        _run_smikke_video,
-                    ),
-                    VideoProvider(
-                        "Mrfalco / Wan2 Video",
-                        55,
-                        True,
-                        False,
-                        _run_mrfalco_video,
-                    ),
-                    VideoProvider(
-                        "ChanPoin / Wan2 Video",
-                        55,
-                        True,
-                        False,
-                        _run_chanpoin_video,
-                    ),
-                    VideoProvider(
-                        "Keen007 / Wan2 Video",
-                        55,
-                        True,
-                        False,
-                        _run_keen007_video,
-                    ),
-                    VideoProvider(
-                        "AliothTalks / Wan2 Video",
-                        55,
-                        True,
-                        False,
-                        _run_aliothtalks_video,
-                    ),
-                    VideoProvider(
-                        "BYTFITY / Wan2 Video",
-                        55,
-                        True,
-                        False,
-                        _run_bytfity_video,
                     ),
                 ]
             )
