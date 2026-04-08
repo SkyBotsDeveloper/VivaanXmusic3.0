@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import concurrent.futures
+import hashlib
 import json
 import mimetypes
 import os
@@ -10,7 +11,9 @@ import re
 import tempfile
 import threading
 import time
+import uuid
 from dataclasses import dataclass
+from urllib.parse import quote
 
 import httpx
 from Crypto.Cipher import AES
@@ -46,6 +49,11 @@ TEXT_VIDEO_MJ_PROXY_URL = "https://mag.dhanjeerider.workers.dev/"
 VHEER_BASE_URL = "https://vheer.com"
 VHEER_UPLOAD_URL = f"{VHEER_BASE_URL}/app/api/vheer/upload"
 VHEER_STATUS_URL = f"{VHEER_BASE_URL}/app/api/vheer/status"
+FIXART_API_BASE_URL = "https://backend.fixart.ai/api"
+FIXART_AES_KEY = b"e82ckenh8dichen8"
+FIXART_MODEL_NAME = "MiniMax-Hailuo-02"
+FIXART_ENDPOINT_TYPE = "web"
+FIXART_SUBSCRIBE_TYPE = "0"
 VHEER_ENCRYPTION_SECRET = "vH33r_2025_AES_GCM_S3cur3_K3y_9X7mP4qR8nT2wE5yU1oI6aS3dF7gH0jK9lZ"
 VHEER_ENCRYPTION_SALT = b"vheer-salt-2024"
 VHEER_IMAGE_TO_VIDEO_TASK_TYPE = 5
@@ -441,6 +449,76 @@ def _decrypt_vheer_payload(encoded_payload: str):
     return json.loads(decrypted.decode("utf-8"))
 
 
+def _encrypt_fixart_payload(path: str, payload: dict) -> str:
+    serialized = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+    checksum = hashlib.md5(
+        f"nobody{path}use{serialized}md5forencrypt".encode("utf-8")
+    ).hexdigest()
+    plaintext = (
+        f"{path}-36cd479b6b5-{serialized}-36cd479b6b5-{checksum}"
+    ).encode("utf-8")
+    pad_length = 16 - (len(plaintext) % 16)
+    if pad_length <= 0:
+        pad_length = 16
+    cipher = AES.new(FIXART_AES_KEY, AES.MODE_ECB)
+    ciphertext = cipher.encrypt(plaintext + bytes([pad_length]) * pad_length)
+    return ciphertext.hex().upper()
+
+
+def _build_fixart_browser_info() -> str:
+    browser_info = {
+        "language": "en-US",
+        "languages": ["en-US", "en"],
+        "timeZone": "Asia/Kolkata",
+        "timezoneOffset": -330,
+        "userAgent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/135.0.0.0 Safari/537.36"
+        ),
+        "timeString": time.strftime(
+            "%a %b %d %Y %H:%M:%S GMT+0530 (India Standard Time)",
+            time.localtime(),
+        ),
+    }
+    return quote(json.dumps(browser_info, separators=(",", ":")))
+
+
+def _build_fixart_client(timeout_seconds: int) -> httpx.Client:
+    timeout = httpx.Timeout(max(timeout_seconds, 60), connect=10.0)
+    return httpx.Client(
+        timeout=timeout,
+        headers={
+            **HTTP_HEADERS,
+            "Accept-Language": "en-US",
+            "Browser-Info": _build_fixart_browser_info(),
+        },
+        follow_redirects=True,
+        trust_env=False,
+    )
+
+
+def _extract_fixart_job_state(payload: dict) -> tuple[bool, str | None, int]:
+    data = payload.get("data") or {}
+    job_process = data.get("job_process") or {}
+    info = data.get("info") or {}
+    next_delay = int(job_process.get("next_delay") or 5000)
+    video_url = (
+        info.get("output_resource")
+        or (data.get("output") or {}).get("resource")
+        or data.get("output_resource")
+    )
+    is_completed = bool(job_process.get("is_completed"))
+    status = str(job_process.get("status") or info.get("status") or "").strip().lower()
+
+    if (is_completed or status in {"success", "completed", "done"}) and video_url:
+        return True, str(video_url), next_delay
+    if status in {"failed", "error", "canceled", "cancelled"} or data.get("exception"):
+        message = payload.get("msg") or "Fixart image-to-video failed."
+        raise FreeAIError(str(message))
+    return False, None, next_delay
+
+
 def _write_temp_image(image_bytes: bytes, mime_type: str) -> str:
     suffix = ".png" if "png" in mime_type.lower() else ".jpg"
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as handle:
@@ -518,6 +596,8 @@ def _cooldown_seconds_from_error(message: str) -> int | None:
         or "insufficient credit" in lowered
     ):
         return 30 * 60
+    if "up to tasks can be run at a time" in lowered:
+        return 60
     if "queue is too long" in lowered:
         return 10 * 60
     if "timed out" in lowered or "read operation timed out" in lowered:
@@ -1150,6 +1230,97 @@ def _pick_vheer_video_url(payload) -> str | None:
         if candidate:
             return candidate
     return None
+
+
+def _run_fixart_image_to_video(
+    prompt: str,
+    reference_image_path: str | None,
+    timeout_seconds: int,
+) -> str:
+    if not reference_image_path:
+        raise FreeAIError("Fixart requires a reference image.")
+
+    register_path = "/v2/user/register"
+    create_path = "/tools/video/customPollo"
+    query_path = "/tools/job/queryV1"
+    register_payload = {
+        "uuid": str(uuid.uuid4()),
+        "endpoint_type": FIXART_ENDPOINT_TYPE,
+        "subscribe_type": FIXART_SUBSCRIBE_TYPE,
+    }
+    create_payload = {
+        "prompt": prompt,
+        "model": FIXART_MODEL_NAME,
+        "length": 6,
+        "resolution": "512P",
+        "audio": "FALSE",
+    }
+
+    with _build_fixart_client(timeout_seconds) as client:
+        register_response = client.post(
+            f"{FIXART_API_BASE_URL}{register_path}",
+            json={"params": _encrypt_fixart_payload(register_path, register_payload)},
+        )
+        try:
+            register_data = register_response.json()
+        except Exception as exc:
+            raise FreeAIError("Fixart registration returned an invalid response.") from exc
+        if register_response.status_code != 200 or register_data.get("code") != 1:
+            raise FreeAIError(_extract_json_error(register_data))
+
+        vtoken = str((register_data.get("data") or {}).get("vToken") or "").strip()
+        if not vtoken:
+            raise FreeAIError("Fixart registration returned no vToken.")
+
+        with open(reference_image_path, "rb") as image_handle:
+            files = {
+                "image": (
+                    os.path.basename(reference_image_path),
+                    image_handle,
+                    mimetypes.guess_type(reference_image_path)[0] or "image/jpeg",
+                ),
+                "params": (
+                    None,
+                    _encrypt_fixart_payload(create_path, create_payload),
+                ),
+            }
+            create_response = client.post(
+                f"{FIXART_API_BASE_URL}{create_path}",
+                headers={"vToken": vtoken},
+                files=files,
+            )
+
+        try:
+            create_data = create_response.json()
+        except Exception as exc:
+            raise FreeAIError("Fixart create returned an invalid response.") from exc
+        if create_response.status_code != 200 or create_data.get("code") != 1:
+            raise FreeAIError(_extract_json_error(create_data))
+
+        job_id = str((create_data.get("data") or {}).get("job_id") or "").strip()
+        if not job_id:
+            raise FreeAIError("Fixart returned no job id.")
+
+        deadline = time.monotonic() + max(timeout_seconds, 150)
+        while time.monotonic() < deadline:
+            query_response = client.get(
+                f"{FIXART_API_BASE_URL}{query_path}",
+                headers={"vToken": vtoken},
+                params={"job_id": job_id},
+            )
+            try:
+                query_data = query_response.json()
+            except Exception as exc:
+                raise FreeAIError("Fixart status returned an invalid response.") from exc
+            if query_response.status_code != 200 or query_data.get("code") != 1:
+                raise FreeAIError(_extract_json_error(query_data))
+
+            completed, video_url, next_delay = _extract_fixart_job_state(query_data)
+            if completed and video_url:
+                return video_url
+            time.sleep(max(2, min(next_delay / 1000.0, 8)))
+
+    raise FreeAIError("Fixart image-to-video timed out.")
 
 
 def _run_vheer_image_to_video(
@@ -2968,6 +3139,18 @@ async def generate_video(
         provider_batches: list[list[VideoProvider]] = []
 
         if reference_image_path:
+            provider_batches.append(
+                [
+                    VideoProvider(
+                        "Fixart / Free I2V",
+                        180,
+                        True,
+                        True,
+                        _run_fixart_image_to_video,
+                    ),
+                ]
+            )
+
             provider_batches.append(
                 [
                     VideoProvider(
