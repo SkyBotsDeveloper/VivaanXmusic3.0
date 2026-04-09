@@ -4,12 +4,7 @@ from pyrogram.types import Message
 from config import BANNED_USERS
 from VIVAANXMUSIC import app
 from VIVAANXMUSIC.core.call import JARVIS
-from VIVAANXMUSIC.utils.database import (
-    get_cmode,
-    get_vcnotify,
-    is_active_chat,
-    set_vcnotify,
-)
+from VIVAANXMUSIC.utils.database import get_cmode, get_vcnotify, set_vcnotify
 from VIVAANXMUSIC.utils.decorators.admins import AdminActual
 from VIVAANXMUSIC.utils.inline import close_markup
 
@@ -36,9 +31,8 @@ async def vcnotify_control(_, message: Message, strings):
 
     if state in {"on", "enable", "enabled", "yes"}:
         await set_vcnotify(group_chat_id, True)
-        if await is_active_chat(group_chat_id):
-            await JARVIS.maybe_start_vc_join_notifier(group_chat_id, group_chat_id)
-        if linked_chat_id and await is_active_chat(linked_chat_id):
+        await JARVIS.maybe_start_vc_join_notifier(group_chat_id, group_chat_id)
+        if linked_chat_id:
             await JARVIS.maybe_start_vc_join_notifier(linked_chat_id, group_chat_id)
         return await message.reply_text(
             f"» VC join notifications have been <code>enabled</code> by : {message.from_user.mention}.",

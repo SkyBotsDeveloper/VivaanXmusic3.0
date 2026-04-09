@@ -1,3 +1,5 @@
+import asyncio
+
 from pyrogram import filters
 from pyrogram.enums import ChatType
 from pyrogram.errors import (
@@ -23,8 +25,17 @@ async def _safe_reply_text(message: Message, *args, **kwargs):
         pass
 
 
+async def _delayed_vc_notify_bootstrap(chat_id: int):
+    await asyncio.sleep(2)
+    try:
+        await JARVIS.maybe_start_vc_join_notifier(chat_id, chat_id)
+    except Exception:
+        pass
+
+
 @app.on_message(filters.video_chat_started & filters.group)
 async def on_voice_chat_started(_, message: Message):
+    asyncio.create_task(_delayed_vc_notify_bootstrap(message.chat.id))
     await _safe_reply_text(message, "Voice chat has started.")
 
 
