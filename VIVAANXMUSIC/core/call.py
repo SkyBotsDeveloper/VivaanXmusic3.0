@@ -177,23 +177,16 @@ class Call:
         vc_join_notice_cache[notice_key] = now
         return True
 
-    @staticmethod
-    def _participant_signature(participant) -> tuple:
-        return (
-            int(getattr(participant, "source", 0) or 0),
-            int(getattr(participant, "date", 0) or 0),
-        )
-
-    async def _fetch_vc_participant_state(self, chat_id: int) -> dict[int, tuple]:
+    async def _fetch_vc_participant_ids(self, chat_id: int) -> set[int]:
         assistant = await group_assistant(self, chat_id)
         participants = await assistant.get_participants(chat_id)
-        state = {}
+        user_ids = set()
         for participant in participants:
             user_id = getattr(participant, "user_id", None)
             if not user_id:
                 continue
-            state[int(user_id)] = self._participant_signature(participant)
-        return state
+            user_ids.add(int(user_id))
+        return user_ids
 
     async def _send_vc_join_notice(
         self,
@@ -233,14 +226,21 @@ class Call:
         if not await get_vcnotify(notify_chat_id):
             return
 
+        member_snapshot = vc_join_snapshots.setdefault(mapping["chat_id"], set())
+
         for participant in update.participants:
-            if getattr(participant, "left", False):
+            user_id = self._extract_user_id_from_peer(getattr(participant, "peer", None))
+            if not user_id:
                 continue
+
+            if getattr(participant, "left", False):
+                member_snapshot.discard(user_id)
+                continue
+
             if not getattr(participant, "just_joined", False):
                 continue
 
-            user_id = self._extract_user_id_from_peer(getattr(participant, "peer", None))
-            if not user_id:
+            if user_id in member_snapshot:
                 continue
 
             if not self._remember_join_event(
@@ -251,6 +251,7 @@ class Call:
             ):
                 continue
 
+            member_snapshot.add(user_id)
             await self._send_vc_join_notice(
                 notify_chat_id,
                 user_id,
@@ -271,43 +272,28 @@ class Call:
                     continue
 
                 try:
-                    current_state = await self._fetch_vc_participant_state(chat_id)
+                    current_ids = await self._fetch_vc_participant_ids(chat_id)
                 except Exception:
                     await asyncio.sleep(1)
                     continue
 
-                previous_state = vc_join_snapshots.get(chat_id)
-                if previous_state is None:
-                    vc_join_snapshots[chat_id] = current_state
+                previous_ids = vc_join_snapshots.get(chat_id)
+                if previous_ids is None:
+                    vc_join_snapshots[chat_id] = current_ids
                     await asyncio.sleep(1)
                     continue
 
-                for user_id, signature in current_state.items():
-                    previous_signature = previous_state.get(user_id)
-                    if previous_signature is None or previous_signature != signature:
-                        call_id = 0
-                        for mapped_call_id, info in vc_join_call_map.items():
-                            if info.get("chat_id") == chat_id:
-                                call_id = int(mapped_call_id)
-                                break
-                        if call_id and not self._remember_join_event(
-                            call_id,
+                joined_ids = current_ids - previous_ids
+                for user_id in joined_ids:
+                    try:
+                        await self._send_vc_join_notice(
+                            notify_chat_id,
                             user_id,
-                            int(signature[1] or 0),
-                            int(signature[0] or 0),
-                        ):
-                            continue
-                        try:
-                            await self._send_vc_join_notice(
-                                notify_chat_id,
-                                user_id,
-                                int(signature[1] or 0),
-                                int(signature[0] or 0),
-                            )
-                        except Exception:
-                            continue
+                        )
+                    except Exception:
+                        continue
 
-                vc_join_snapshots[chat_id] = current_state
+                vc_join_snapshots[chat_id] = current_ids
                 await asyncio.sleep(1)
         except asyncio.CancelledError:
             raise
@@ -331,6 +317,12 @@ class Call:
                 "chat_id": chat_id,
                 "notify_chat_id": notify_chat_id,
             }
+
+        if chat_id not in vc_join_snapshots:
+            try:
+                vc_join_snapshots[chat_id] = await self._fetch_vc_participant_ids(chat_id)
+            except Exception:
+                vc_join_snapshots[chat_id] = set()
 
         existing = vc_join_monitors.get(chat_id)
         if not existing or existing.done():
