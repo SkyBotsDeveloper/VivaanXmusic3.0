@@ -162,8 +162,6 @@ class Call:
         return (
             int(getattr(participant, "source", 0) or 0),
             int(getattr(participant, "date", 0) or 0),
-            int(getattr(participant, "active_date", 0) or 0),
-            bool(getattr(participant, "video_joined", False)),
         )
 
     async def _fetch_vc_participant_state(self, chat_id: int) -> dict[int, tuple]:
