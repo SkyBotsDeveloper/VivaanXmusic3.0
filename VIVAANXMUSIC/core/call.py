@@ -50,6 +50,7 @@ vc_join_snapshots = {}
 vc_join_targets = {}
 vc_join_call_map = {}
 vc_join_event_cache = {}
+vc_join_notice_cache = {}
 
 def dynamic_media_stream(path: str, video: bool = False, ffmpeg_params: str = None) -> MediaStream:
     return MediaStream(
@@ -158,6 +159,25 @@ class Call:
         return True
 
     @staticmethod
+    def _remember_join_notice(
+        notify_chat_id: int,
+        user_id: int,
+        date: int,
+        source: int,
+    ) -> bool:
+        now = time.monotonic()
+        for key, stamp in list(vc_join_notice_cache.items()):
+            if now - stamp > 60:
+                vc_join_notice_cache.pop(key, None)
+
+        notice_key = (notify_chat_id, user_id, date, source)
+        if notice_key in vc_join_notice_cache:
+            return False
+
+        vc_join_notice_cache[notice_key] = now
+        return True
+
+    @staticmethod
     def _participant_signature(participant) -> tuple:
         return (
             int(getattr(participant, "source", 0) or 0),
@@ -175,7 +195,16 @@ class Call:
             state[int(user_id)] = self._participant_signature(participant)
         return state
 
-    async def _send_vc_join_notice(self, notify_chat_id: int, user_id: int) -> None:
+    async def _send_vc_join_notice(
+        self,
+        notify_chat_id: int,
+        user_id: int,
+        date: int = 0,
+        source: int = 0,
+    ) -> None:
+        if not self._remember_join_notice(notify_chat_id, user_id, date, source):
+            return
+
         try:
             user = await app.get_users(user_id)
             name = " ".join(
@@ -222,7 +251,12 @@ class Call:
             ):
                 continue
 
-            await self._send_vc_join_notice(notify_chat_id, user_id)
+            await self._send_vc_join_notice(
+                notify_chat_id,
+                user_id,
+                int(getattr(participant, "date", 0) or 0),
+                int(getattr(participant, "source", 0) or 0),
+            )
 
     async def _vc_join_monitor_loop(
         self,
@@ -264,7 +298,12 @@ class Call:
                         ):
                             continue
                         try:
-                            await self._send_vc_join_notice(notify_chat_id, user_id)
+                            await self._send_vc_join_notice(
+                                notify_chat_id,
+                                user_id,
+                                int(signature[1] or 0),
+                                int(signature[0] or 0),
+                            )
                         except Exception:
                             continue
 
