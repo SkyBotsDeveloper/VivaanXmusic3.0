@@ -25,6 +25,7 @@ BOT_COMMANDS = [
     BotCommand("queue", "Show current queue"),
     BotCommand("player", "Open player controls"),
     BotCommand("autoplay", "Toggle similar-song autoplay"),
+    BotCommand("vcnotify", "Toggle VC join notifications"),
     BotCommand("gpt", "Ask the AI assistant"),
     BotCommand("claude", "Ask Claude-style AI"),
     BotCommand("geminivision", "Analyze a replied image"),

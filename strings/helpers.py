@@ -316,6 +316,7 @@ HELP_31 = """
 - /activevc, /activevoice, /vc - list active voice chats.
 - /activev, /activevideo, /avc - list active video chats.
 - /ac, /av - show active voice/video chat counts.
+- /vcnotify [on|off] - send a group alert when someone joins the VC.
 - /voices [text] - guided TTS voice picker.
 - /tts [voice] [text] - direct text-to-speech.
 - /voiceall - export the full voice model list.

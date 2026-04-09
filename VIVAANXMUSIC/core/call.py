@@ -21,6 +21,7 @@ from VIVAANXMUSIC.utils.database import (
     get_autoplay,
     get_lang,
     get_loop,
+    get_vcnotify,
     group_assistant,
     is_autoend,
     music_on,
@@ -38,6 +39,9 @@ from VIVAANXMUSIC.utils.errors import capture_internal_err, send_large_error
 
 autoend = {}
 counter = {}
+vc_join_monitors = {}
+vc_join_snapshots = {}
+vc_join_targets = {}
 
 def dynamic_media_stream(path: str, video: bool = False, ffmpeg_params: str = None) -> MediaStream:
     return MediaStream(
@@ -54,6 +58,11 @@ async def _clear_(chat_id: int) -> None:
     if popped:
         await auto_clean(popped)
     db[chat_id] = []
+    task = vc_join_monitors.pop(chat_id, None)
+    if task and not task.done():
+        task.cancel()
+    vc_join_snapshots.pop(chat_id, None)
+    vc_join_targets.pop(chat_id, None)
     await remove_active_video_chat(chat_id)
     await remove_active_chat(chat_id)
     await set_loop(chat_id, 0)
@@ -96,6 +105,104 @@ class Call:
             self._stream_locks[chat_id] = lock
         return lock
 
+    async def _fetch_vc_participant_ids(self, chat_id: int) -> set[int]:
+        assistant = await group_assistant(self, chat_id)
+        participants = await assistant.get_participants(chat_id)
+        ids = set()
+        for participant in participants:
+            user_id = getattr(participant, "user_id", None)
+            if user_id:
+                ids.add(int(user_id))
+        return ids
+
+    async def _send_vc_join_notice(self, notify_chat_id: int, user_id: int) -> None:
+        try:
+            user = await app.get_users(user_id)
+            name = " ".join(
+                part for part in [user.first_name, user.last_name] if part
+            ).strip() or user.username or "Unknown User"
+            username = f" (@{user.username})" if user.username else ""
+        except Exception:
+            name = "Unknown User"
+            username = ""
+
+        await app.send_message(
+            notify_chat_id,
+            f"Joined VC\nName: {name}{username}\nUser ID: {user_id}",
+        )
+
+    async def _vc_join_monitor_loop(self, chat_id: int, notify_chat_id: int) -> None:
+        failures = 0
+        try:
+            while True:
+                if not await get_vcnotify(notify_chat_id):
+                    vc_join_snapshots.pop(chat_id, None)
+                    await asyncio.sleep(4)
+                    continue
+
+                try:
+                    current_ids = await self._fetch_vc_participant_ids(chat_id)
+                    failures = 0
+                except Exception:
+                    failures += 1
+                    if failures >= 3 and chat_id not in self.active_calls:
+                        break
+                    await asyncio.sleep(5)
+                    continue
+
+                previous_ids = vc_join_snapshots.get(chat_id)
+                if previous_ids is None:
+                    vc_join_snapshots[chat_id] = current_ids
+                else:
+                    joined_ids = current_ids - previous_ids
+                    vc_join_snapshots[chat_id] = current_ids
+                    for user_id in joined_ids:
+                        try:
+                            await self._send_vc_join_notice(notify_chat_id, user_id)
+                        except Exception:
+                            continue
+
+                await asyncio.sleep(4)
+        except asyncio.CancelledError:
+            raise
+        finally:
+            task = vc_join_monitors.get(chat_id)
+            if task is asyncio.current_task():
+                vc_join_monitors.pop(chat_id, None)
+            vc_join_snapshots.pop(chat_id, None)
+            vc_join_targets.pop(chat_id, None)
+
+    async def maybe_start_vc_join_notifier(
+        self,
+        chat_id: int,
+        notify_chat_id: int,
+    ) -> bool:
+        if not await get_vcnotify(notify_chat_id):
+            return False
+
+        existing = vc_join_monitors.get(chat_id)
+        if existing and not existing.done():
+            vc_join_targets[chat_id] = notify_chat_id
+            return True
+
+        try:
+            vc_join_snapshots[chat_id] = await self._fetch_vc_participant_ids(chat_id)
+        except Exception:
+            vc_join_snapshots.pop(chat_id, None)
+
+        vc_join_targets[chat_id] = notify_chat_id
+        vc_join_monitors[chat_id] = asyncio.create_task(
+            self._vc_join_monitor_loop(chat_id, notify_chat_id)
+        )
+        return True
+
+    async def stop_vc_join_notifier(self, chat_id: int) -> None:
+        task = vc_join_monitors.pop(chat_id, None)
+        if task and not task.done():
+            task.cancel()
+        vc_join_snapshots.pop(chat_id, None)
+        vc_join_targets.pop(chat_id, None)
+
     async def _play_stream(self, assistant: PyTgCalls, chat_id: int, stream: MediaStream) -> None:
         async with self._get_stream_lock(chat_id):
             for attempt in range(2):
@@ -135,6 +242,7 @@ class Call:
     @capture_internal_err
     async def stop_stream(self, chat_id: int) -> None:
         assistant = await group_assistant(self, chat_id)
+        await self.stop_vc_join_notifier(chat_id)
         await _clear_(chat_id)
         if chat_id not in self.active_calls:
             return
@@ -149,6 +257,7 @@ class Call:
     @capture_internal_err
     async def force_stop_stream(self, chat_id: int) -> None:
         assistant = await group_assistant(self, chat_id)
+        await self.stop_vc_join_notifier(chat_id)
         try:
             check = db.get(chat_id)
             if check:
@@ -283,6 +392,7 @@ class Call:
         await music_on(chat_id)
         if video:
             await add_active_video_chat(chat_id)
+        await self.maybe_start_vc_join_notifier(chat_id, original_chat_id)
 
         if await is_autoend():
             counter[chat_id] = {}

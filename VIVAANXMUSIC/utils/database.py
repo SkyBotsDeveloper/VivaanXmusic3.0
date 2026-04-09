@@ -22,6 +22,7 @@ playtypedb = mongodb.playtypedb
 skipdb = mongodb.skipmode
 sudoersdb = mongodb.sudoers
 usersdb = mongodb.tgusersdb
+vcnotifydb = mongodb.vcnotify
 
 
 active = []
@@ -40,6 +41,7 @@ playmode = {}
 playtype = {}
 skipmode = {}
 mute = {}
+vcnotify = {}
 
 async def get_assistant_number(chat_id: int) -> str:
     assistant = assistantdict.get(chat_id)
@@ -215,6 +217,27 @@ async def set_autoplay(chat_id: int, mode: bool):
     enabled = bool(mode)
     autoplay[chat_id] = enabled
     await autoplaydb.update_one(
+        {"chat_id": chat_id}, {"$set": {"mode": enabled}}, upsert=True
+    )
+
+
+async def get_vcnotify(chat_id: int) -> bool:
+    mode = vcnotify.get(chat_id)
+    if mode is None:
+        data = await vcnotifydb.find_one({"chat_id": chat_id})
+        if not data:
+            vcnotify[chat_id] = False
+            return False
+        mode = bool(data.get("mode"))
+        vcnotify[chat_id] = mode
+        return mode
+    return bool(mode)
+
+
+async def set_vcnotify(chat_id: int, mode: bool):
+    enabled = bool(mode)
+    vcnotify[chat_id] = enabled
+    await vcnotifydb.update_one(
         {"chat_id": chat_id}, {"$set": {"mode": enabled}}, upsert=True
     )
 
