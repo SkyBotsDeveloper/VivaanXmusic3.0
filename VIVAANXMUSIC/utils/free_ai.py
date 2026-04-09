@@ -1071,7 +1071,7 @@ def _run_replicate_minimax_video(
 ) -> str:
     input_payload = {
         "prompt": prompt,
-        "prompt_optimizer": not bool(reference_image_path),
+        "prompt_optimizer": False,
     }
     if reference_image_path:
         input_payload["first_frame_image"] = _path_to_data_uri(reference_image_path)
@@ -1544,6 +1544,20 @@ def _build_image_to_video_prompt(prompt: str | None) -> str:
             "original image context."
         )
     return f"{prefix} Requested motion: {user_prompt}"
+
+
+def _build_text_to_video_prompt(prompt: str | None) -> str:
+    user_prompt = str(prompt or "").strip()
+    if not user_prompt:
+        return "Create a short realistic video."
+
+    return (
+        "Create a short realistic video that follows this request exactly. "
+        "Keep the same main subject, action, object, food, tool, and setting exactly as requested. "
+        "Do not replace the action with a different one, do not swap the object, and do not change the scene intent. "
+        "No unrelated actions, no scene drift, no subject drift. "
+        f"Request: {user_prompt}"
+    )
 
 
 def _run_deeprat_ltx_video(
@@ -3135,6 +3149,8 @@ async def generate_video(
             )
             used_reference_image = True
             text_prompt = _build_image_to_video_prompt(text_prompt)
+        else:
+            text_prompt = _build_text_to_video_prompt(text_prompt)
 
         provider_batches: list[list[VideoProvider]] = []
 
