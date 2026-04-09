@@ -157,6 +157,26 @@ class Call:
         vc_join_event_cache[event_key] = now
         return True
 
+    @staticmethod
+    def _participant_signature(participant) -> tuple:
+        return (
+            int(getattr(participant, "source", 0) or 0),
+            int(getattr(participant, "date", 0) or 0),
+            int(getattr(participant, "active_date", 0) or 0),
+            bool(getattr(participant, "video_joined", False)),
+        )
+
+    async def _fetch_vc_participant_state(self, chat_id: int) -> dict[int, tuple]:
+        assistant = await group_assistant(self, chat_id)
+        participants = await assistant.get_participants(chat_id)
+        state = {}
+        for participant in participants:
+            user_id = getattr(participant, "user_id", None)
+            if not user_id:
+                continue
+            state[int(user_id)] = self._participant_signature(participant)
+        return state
+
     async def _send_vc_join_notice(self, notify_chat_id: int, user_id: int) -> None:
         try:
             user = await app.get_users(user_id)
@@ -206,6 +226,59 @@ class Call:
 
             await self._send_vc_join_notice(notify_chat_id, user_id)
 
+    async def _vc_join_monitor_loop(
+        self,
+        chat_id: int,
+        notify_chat_id: int,
+    ) -> None:
+        try:
+            while True:
+                if not await get_vcnotify(notify_chat_id):
+                    vc_join_snapshots.pop(chat_id, None)
+                    await asyncio.sleep(1)
+                    continue
+
+                try:
+                    current_state = await self._fetch_vc_participant_state(chat_id)
+                except Exception:
+                    await asyncio.sleep(1)
+                    continue
+
+                previous_state = vc_join_snapshots.get(chat_id)
+                if previous_state is None:
+                    vc_join_snapshots[chat_id] = current_state
+                    await asyncio.sleep(1)
+                    continue
+
+                for user_id, signature in current_state.items():
+                    previous_signature = previous_state.get(user_id)
+                    if previous_signature is None or previous_signature != signature:
+                        call_id = 0
+                        for mapped_call_id, info in vc_join_call_map.items():
+                            if info.get("chat_id") == chat_id:
+                                call_id = int(mapped_call_id)
+                                break
+                        if call_id and not self._remember_join_event(
+                            call_id,
+                            user_id,
+                            int(signature[1] or 0),
+                            int(signature[0] or 0),
+                        ):
+                            continue
+                        try:
+                            await self._send_vc_join_notice(notify_chat_id, user_id)
+                        except Exception:
+                            continue
+
+                vc_join_snapshots[chat_id] = current_state
+                await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            raise
+        finally:
+            task = vc_join_monitors.get(chat_id)
+            if task is asyncio.current_task():
+                vc_join_monitors.pop(chat_id, None)
+
     async def maybe_start_vc_join_notifier(
         self,
         chat_id: int,
@@ -215,14 +288,18 @@ class Call:
             return False
 
         call_id = await self._resolve_vc_call_id(chat_id)
-        if not call_id:
-            return False
-
         vc_join_targets[chat_id] = notify_chat_id
-        vc_join_call_map[call_id] = {
-            "chat_id": chat_id,
-            "notify_chat_id": notify_chat_id,
-        }
+        if call_id:
+            vc_join_call_map[call_id] = {
+                "chat_id": chat_id,
+                "notify_chat_id": notify_chat_id,
+            }
+
+        existing = vc_join_monitors.get(chat_id)
+        if not existing or existing.done():
+            vc_join_monitors[chat_id] = asyncio.create_task(
+                self._vc_join_monitor_loop(chat_id, notify_chat_id)
+            )
         return True
 
     async def stop_vc_join_notifier(self, chat_id: int) -> None:
