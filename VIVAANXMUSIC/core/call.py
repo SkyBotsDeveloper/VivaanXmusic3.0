@@ -188,7 +188,7 @@ class Call:
 
         await app.send_message(
             notify_chat_id,
-            f"Joined VC\nName: {name}{username}\nUser ID: {user_id}",
+            f"Joined VC\nName: {name}{username}\nUser ID: <code>{user_id}</code>",
         )
 
     async def _handle_group_call_participants_update(
