@@ -256,6 +256,10 @@ async def save_vault_message(code: str, data: dict):
     )
 
 
+async def delete_vault_message(code: str):
+    await messagevaultdb.delete_one({"code": code})
+
+
 async def is_autoend() -> bool:
     chat_id = 1234
     user = await autoenddb.find_one({"chat_id": chat_id})

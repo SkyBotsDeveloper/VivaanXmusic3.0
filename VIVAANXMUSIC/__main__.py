@@ -44,7 +44,7 @@ BOT_COMMANDS = [
     BotCommand("movie", "Search movie info"),
     BotCommand("news", "Get latest topic news"),
     BotCommand("encrypt", "Encrypt replied content into a code"),
-    BotCommand("decrypt", "Decrypt content by code"),
+    BotCommand("decrypt", "Decrypt one-time content by code"),
     BotCommand("settings", "Open group settings"),
     BotCommand("ping", "Check bot status"),
 ]

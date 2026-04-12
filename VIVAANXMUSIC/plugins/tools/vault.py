@@ -8,7 +8,11 @@ from pyrogram.types import Message
 import config
 from config import BANNED_USERS
 from VIVAANXMUSIC import app
-from VIVAANXMUSIC.utils.database import get_vault_message, save_vault_message
+from VIVAANXMUSIC.utils.database import (
+    delete_vault_message,
+    get_vault_message,
+    save_vault_message,
+)
 
 
 CODE_WORDS = (
@@ -51,6 +55,17 @@ def _thread_id(message: Message):
     return getattr(message, "message_thread_id", None)
 
 
+async def _cleanup_vault_content(client, code: str, data: dict):
+    try:
+        await client.delete_messages(
+            chat_id=data["storage_chat_id"],
+            message_ids=data["storage_message_id"],
+        )
+    except RPCError:
+        pass
+    await delete_vault_message(code)
+
+
 @app.on_message(filters.command(["encrypt", "enc"]) & ~BANNED_USERS)
 async def encrypt_message(client, message: Message):
     replied = message.reply_to_message
@@ -87,7 +102,9 @@ async def encrypt_message(client, message: Message):
     await message.reply_text(
         "Encrypted successfully.\n\n"
         f"Code: <code>{code}</code>\n"
-        f"Decrypt: <code>/decrypt {code}</code>"
+        f"Decrypt: <code>/decrypt {code}</code>\n\n"
+        "Note: This is a one-time decrypt code. After one successful decrypt, "
+        "the saved content will be deleted."
     )
 
 
@@ -110,8 +127,11 @@ async def decrypt_message(client, message: Message):
             message_thread_id=_thread_id(message),
         )
     except MessageIdInvalid:
+        await delete_vault_message(code)
         return await message.reply_text("Stored content is no longer available.")
     except RPCError as exc:
         return await message.reply_text(
             f"Could not decrypt this content.\nError: <code>{type(exc).__name__}</code>"
         )
+
+    await _cleanup_vault_content(client, code, data)
