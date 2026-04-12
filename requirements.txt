@@ -10,7 +10,7 @@ ffmpeg-python
 future
 gitpython
 google-api-python-client
-gradio_client==2.3.0
+gradio_client==2.4.1
 gpytranslate
 gtts
 heroku3
