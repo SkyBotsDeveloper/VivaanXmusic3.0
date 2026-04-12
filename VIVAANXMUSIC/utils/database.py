@@ -16,6 +16,7 @@ channeldb = mongodb.cplaymode
 countdb = mongodb.upcount
 gbansdb = mongodb.gban
 langdb = mongodb.language
+messagevaultdb = mongodb.messagevault
 onoffdb = mongodb.onoffper
 playmodedb = mongodb.playmode
 playtypedb = mongodb.playtypedb
@@ -239,6 +240,19 @@ async def set_vcnotify(chat_id: int, mode: bool):
     vcnotify[chat_id] = enabled
     await vcnotifydb.update_one(
         {"chat_id": chat_id}, {"$set": {"mode": enabled}}, upsert=True
+    )
+
+
+async def get_vault_message(code: str) -> dict:
+    return await messagevaultdb.find_one({"code": code})
+
+
+async def save_vault_message(code: str, data: dict):
+    data["code"] = code
+    await messagevaultdb.update_one(
+        {"code": code},
+        {"$set": data},
+        upsert=True,
     )
 
 
