@@ -79,8 +79,8 @@ HELP_7 = """
 - /speedtest, /spt - run a network speed test.
 - /webdl [url] - download a website snapshot/archive.
 - /bug [text or reply] - send a bug report to the owner.
-- /encrypt, /enc [reply] - encrypt replied text/media/sticker into a random code.
-- /decrypt, /dec [code] - decrypt once, resend content, then delete saved data.
+- /encrypt, /enc [reply] - PM-only: encrypt replied text/media/sticker into a random code.
+- /decrypt, /dec [code] - PM-only: decrypt once, resend content, then delete saved data.
 """
 
 HELP_8 = """

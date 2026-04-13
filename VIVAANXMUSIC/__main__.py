@@ -43,8 +43,8 @@ BOT_COMMANDS = [
     BotCommand("tiktok", "Download TikTok media"),
     BotCommand("movie", "Search movie info"),
     BotCommand("news", "Get latest topic news"),
-    BotCommand("encrypt", "Encrypt replied content into a code"),
-    BotCommand("decrypt", "Decrypt one-time content by code"),
+    BotCommand("encrypt", "PM-only encrypt replied content"),
+    BotCommand("decrypt", "PM-only one-time decrypt"),
     BotCommand("settings", "Open group settings"),
     BotCommand("ping", "Check bot status"),
 ]

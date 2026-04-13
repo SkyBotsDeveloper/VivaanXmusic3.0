@@ -2,6 +2,7 @@ import secrets
 from datetime import datetime
 
 from pyrogram import filters
+from pyrogram.enums import ChatType
 from pyrogram.errors import MessageIdInvalid, RPCError
 from pyrogram.types import Message
 
@@ -14,6 +15,8 @@ from VIVAANXMUSIC.utils.database import (
     save_vault_message,
 )
 
+
+PM_ONLY_MESSAGE = "This feature only works in PM. Open my DM and use it there."
 
 CODE_WORDS = (
     "nova",
@@ -55,6 +58,10 @@ def _thread_id(message: Message):
     return getattr(message, "message_thread_id", None)
 
 
+def _is_private_chat(message: Message) -> bool:
+    return message.chat and message.chat.type == ChatType.PRIVATE
+
+
 async def _cleanup_vault_content(client, code: str, data: dict):
     try:
         await client.delete_messages(
@@ -68,6 +75,9 @@ async def _cleanup_vault_content(client, code: str, data: dict):
 
 @app.on_message(filters.command(["encrypt", "enc"]) & ~BANNED_USERS)
 async def encrypt_message(client, message: Message):
+    if not _is_private_chat(message):
+        return await message.reply_text(PM_ONLY_MESSAGE)
+
     replied = message.reply_to_message
     if not replied:
         return await message.reply_text(
@@ -110,6 +120,9 @@ async def encrypt_message(client, message: Message):
 
 @app.on_message(filters.command(["decrypt", "dec"]) & ~BANNED_USERS)
 async def decrypt_message(client, message: Message):
+    if not _is_private_chat(message):
+        return await message.reply_text(PM_ONLY_MESSAGE)
+
     if len(message.command) < 2:
         return await message.reply_text("Usage: <code>/decrypt code</code>")
 
