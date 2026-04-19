@@ -16,7 +16,7 @@ gtts
 heroku3
 httpx[http2]==0.28.1
 indic-transliteration
-kurigram==2.2.19
+kurigram==2.2.22
 motor
 nekosbest
 numpy
