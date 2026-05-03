@@ -19,6 +19,14 @@ from VIVAANXMUSIC.core.dir import CACHE_DIR
 TITLE_FONT_PATH = "VIVAANXMUSIC/assets/thumb/font2.ttf"
 META_FONT_PATH = "VIVAANXMUSIC/assets/thumb/font.ttf"
 FALLBACK_AVATAR_URL = "https://files.catbox.moe/0ld5qc.jpg"
+THUMBNAIL_FETCH_TIMEOUT = aiohttp.ClientTimeout(total=4.0, connect=2.0)
+YOUTUBE_THUMBNAIL_NAMES = (
+    "maxresdefault.jpg",
+    "sddefault.jpg",
+    "hqdefault.jpg",
+    "mqdefault.jpg",
+    "default.jpg",
+)
 
 # Constants - Enhanced Layout
 CANVAS_WIDTH = 1280
@@ -132,6 +140,131 @@ def cache_remote_file(url: str, output_path: str) -> bool:
         with open(output_path, "wb") as file:
             file.write(response.read())
     return True
+
+
+def direct_youtube_thumbnail_urls(videoid: str) -> list[str]:
+    clean_id = str(videoid or "").strip()
+    if not clean_id:
+        return []
+    return [
+        f"https://i.ytimg.com/vi/{clean_id}/{name}"
+        for name in YOUTUBE_THUMBNAIL_NAMES
+    ]
+
+
+def thumbnail_candidates(videoid: str, result: dict | None) -> list[str]:
+    candidates = []
+    if result:
+        for item in result.get("thumbnails") or []:
+            url = str(item.get("url") or "").split("?", 1)[0].strip()
+            if url:
+                candidates.append(url)
+    candidates.extend(direct_youtube_thumbnail_urls(videoid))
+
+    seen = set()
+    ordered = []
+    for url in candidates:
+        if url not in seen:
+            ordered.append(url)
+            seen.add(url)
+    return ordered
+
+
+async def fetch_image_data(session: aiohttp.ClientSession, url: str) -> bytes | None:
+    if not url:
+        return None
+    try:
+        async with session.get(url) as resp:
+            if resp.status != 200:
+                return None
+            content_type = str(resp.headers.get("content-type") or "").lower()
+            if content_type and "image" not in content_type:
+                return None
+            data = await resp.read()
+            if len(data) < 512:
+                return None
+            return data
+    except Exception:
+        return None
+
+
+async def write_verified_image(data: bytes, output_path: str) -> bool:
+    try:
+        async with aiofiles.open(output_path, mode="wb") as file:
+            await file.write(data)
+
+        with Image.open(output_path) as image:
+            image.verify()
+        return True
+    except Exception:
+        try:
+            os.remove(output_path)
+        except Exception:
+            pass
+        return False
+
+
+async def download_image(session: aiohttp.ClientSession, url: str, output_path: str) -> bool:
+    data = await fetch_image_data(session, url)
+    if not data:
+        return False
+    return await write_verified_image(data, output_path)
+
+
+def create_local_fallback_art(output_path: str) -> bool:
+    try:
+        image = Image.new("RGB", (CANVAS_WIDTH, CANVAS_HEIGHT), (12, 18, 28))
+        draw = ImageDraw.Draw(image)
+        for y in range(CANVAS_HEIGHT):
+            blend = y / max(CANVAS_HEIGHT - 1, 1)
+            color = (
+                int(12 + (34 * blend)),
+                int(18 + (30 * blend)),
+                int(28 + (42 * blend)),
+            )
+            draw.line([(0, y), (CANVAS_WIDTH, y)], fill=color)
+
+        draw.ellipse((-180, 420, 360, 960), fill=(22, 88, 108))
+        draw.ellipse((860, -170, 1420, 320), fill=(92, 62, 112))
+        draw.rectangle((0, 0, CANVAS_WIDTH, CANVAS_HEIGHT), outline=(42, 54, 68), width=6)
+        image = image.filter(ImageFilter.GaussianBlur(12))
+
+        draw = ImageDraw.Draw(image)
+        font = ImageFont.load_default()
+        brand = resolve_brand_name().upper()
+        try:
+            bbox = draw.textbbox((0, 0), brand, font=font)
+            text_width_px = bbox[2] - bbox[0]
+        except Exception:
+            text_width_px = len(brand) * 7
+        draw.text(
+            ((CANVAS_WIDTH - text_width_px) // 2, CANVAS_HEIGHT // 2),
+            brand,
+            fill=(230, 238, 246),
+            font=font,
+        )
+        image.save(output_path, "JPEG", quality=92)
+        return True
+    except Exception:
+        return False
+
+
+async def download_first_thumbnail(
+    session: aiohttp.ClientSession,
+    candidates: list[str],
+    output_path: str,
+) -> bool:
+    if not candidates:
+        return False
+
+    results = await asyncio.gather(
+        *(fetch_image_data(session, thumbnail_url) for thumbnail_url in candidates),
+        return_exceptions=True,
+    )
+    for data in results:
+        if isinstance(data, bytes) and await write_verified_image(data, output_path):
+            return True
+    return False
 
 
 def text_width(draw, text: str, font) -> float:
@@ -391,32 +524,39 @@ async def get_thumb(videoid, user_id=None):
     fallback_avatar_path = os.path.join(CACHE_DIR, "elite_avatar_fallback.jpg")
     sp = None
     try:
-        results = VideosSearch(url, limit=1)
-        results_data = (await results.next()).get("result", [])
-        if not results_data:
-            return YOUTUBE_IMG_URL
+        result = None
+        try:
+            results = VideosSearch(url, limit=1)
+            results_data = (await results.next()).get("result", [])
+            result = results_data[0] if results_data else None
+        except Exception:
+            result = None
 
-        result = results_data[0]
         title = trim_text(
-            re.sub(r"\s+", " ", re.sub(r"[^\w\s&\-']", " ", result.get("title", ""))).strip().title()
-            or "Unsupported Title",
+            re.sub(
+                r"\s+",
+                " ",
+                re.sub(r"[^\w\s&\-']", " ", (result or {}).get("title", "")),
+            ).strip().title()
+            or "Unknown Title",
             140,
         )
-        duration = str(result.get("duration") or "Unknown")
-        thumbnail = result.get("thumbnails", [{}])[0].get("url", "").split("?")[0]
-        views = trim_text(str((result.get("viewCount") or {}).get("short") or "Unknown Views"), 18)
-        channel = trim_text(str((result.get("channel") or {}).get("name") or "Unknown Channel"), 34)
+        duration = str((result or {}).get("duration") or "Unknown")
+        views = trim_text(str(((result or {}).get("viewCount") or {}).get("short") or "Unknown Views"), 18)
+        channel = trim_text(str(((result or {}).get("channel") or {}).get("name") or "Unknown Channel"), 34)
 
-        if not thumbnail:
-            return YOUTUBE_IMG_URL
-
-        async with aiohttp.ClientSession() as session:
-            async with session.get(thumbnail) as resp:
-                if resp.status != 200:
-                    return YOUTUBE_IMG_URL
-                f = await aiofiles.open(temp_thumb_path, mode="wb")
-                await f.write(await resp.read())
-                await f.close()
+        async with aiohttp.ClientSession(timeout=THUMBNAIL_FETCH_TIMEOUT) as session:
+            downloaded = await download_first_thumbnail(
+                session,
+                thumbnail_candidates(videoid, result),
+                temp_thumb_path,
+            )
+            if not downloaded:
+                downloaded = await download_image(session, YOUTUBE_IMG_URL, temp_thumb_path)
+            if not downloaded:
+                downloaded = create_local_fallback_art(temp_thumb_path)
+            if not downloaded:
+                return YOUTUBE_IMG_URL
 
         if user_id is not None:
             try:
