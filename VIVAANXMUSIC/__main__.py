@@ -11,6 +11,7 @@ from VIVAANXMUSIC.core.call import JARVIS
 from VIVAANXMUSIC.misc import sudo
 from VIVAANXMUSIC.plugins import ALL_MODULES
 from VIVAANXMUSIC.utils.database import get_banned_users, get_gbanned
+from VIVAANXMUSIC.utils.lyrics import close_lyrics_http_client
 from config import BANNED_USERS
 
 BOT_COMMANDS = [
@@ -102,6 +103,17 @@ async def init():
         "\x41\x6e\x6e\x69\x65\x20\x4d\x75\x73\x69\x63\x20\x52\x6f\x62\x6f\x74\x20\x53\x74\x61\x72\x74\x65\x64\x20\x53\x75\x63\x63\x65\x73\x73\x66\x75\x6c\x6c\x79\x2e\x2e\x2e"
     )
     await idle()
+    try:
+        weather_plugin = importlib.import_module("VIVAANXMUSIC.plugins.Kishu.weather")
+        await weather_plugin.close_weather_http_client()
+    except Exception:
+        pass
+    try:
+        song_plugin = importlib.import_module("VIVAANXMUSIC.plugins.tools.song")
+        await song_plugin.close_song_http_client()
+    except Exception:
+        pass
+    await close_lyrics_http_client()
     await app.stop()
     await userbot.stop()
     LOGGER("VIVAANXMUSIC").info("Stopping music bot...")

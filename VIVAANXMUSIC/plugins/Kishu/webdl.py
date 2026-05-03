@@ -1,4 +1,5 @@
 import os
+import asyncio
 import tempfile
 from urllib.parse import urljoin
 
@@ -77,7 +78,7 @@ async def web_download(client: Client, message: Message):
     status_msg = await message.reply_text("Downloading website source...")
 
     try:
-        source_code = download_website(url)
+        source_code = await asyncio.to_thread(download_website, url)
     except SecurityError as exc:
         await status_msg.edit_text(
             f"Blocked by security policy: `{exc}`",

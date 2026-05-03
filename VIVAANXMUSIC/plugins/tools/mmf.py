@@ -13,6 +13,16 @@ async def mmf(_, message: Message):
     if len(message.text.split()) < 2:
         await message.reply_text("**Give me text after /mmf to memify.**")
         return
+    if not reply_message or not (
+        reply_message.photo
+        or reply_message.sticker
+        or (
+            reply_message.document
+            and (reply_message.document.mime_type or "").startswith("image/")
+        )
+    ):
+        await message.reply_text("**Reply to an image or sticker to memify.**")
+        return
 
     msg = await message.reply_text("❄️")
     text = message.text.split(None, 1)[1]
@@ -22,12 +32,20 @@ async def mmf(_, message: Message):
         await msg.edit(f"❌ Failed to download media.\nError: {e}")
         return
 
-    meme = await drawText(file, text)
-    await app.send_document(chat_id, document=meme)
-
-    await msg.delete()
-
-    os.remove(meme)
+    meme = None
+    sent = False
+    try:
+        meme = await drawText(file, text)
+        await app.send_document(chat_id, document=meme)
+        sent = True
+    except Exception as e:
+        await msg.edit(f"Failed to create meme.\nError: {e}")
+        return
+    finally:
+        if sent:
+            await msg.delete()
+        if meme and os.path.exists(meme):
+            os.remove(meme)
 
 
 async def drawText(image_path, text):
@@ -45,7 +63,7 @@ async def drawText(image_path, text):
     m_font = ImageFont.truetype(fnt, int((70 / 640) * i_width))
 
     if ";" in text:
-        upper_text, lower_text = text.split(";")
+        upper_text, lower_text = text.split(";", 1)
     else:
         upper_text = text
         lower_text = ""

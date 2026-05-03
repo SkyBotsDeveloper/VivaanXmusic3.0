@@ -14,6 +14,11 @@ from youtubesearchpython.future import VideosSearch
 
 
 HTTP_TIMEOUT = httpx.Timeout(20.0, connect=8.0)
+HTTP_LIMITS = httpx.Limits(
+    max_connections=12,
+    max_keepalive_connections=4,
+    keepalive_expiry=20.0,
+)
 HTTP_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -30,6 +35,9 @@ DUCKDUCKGO_HTML_SEARCH_URL = "https://html.duckduckgo.com/html/"
 LYRICSBOGIE_SEARCH_URL = "https://www.lyricsbogie.com/wp-json/wp/v2/search"
 
 MAX_SEARCH_RESULTS = 10
+MAX_CONCURRENT_LYRICS_SEARCHES = 4
+MAX_CONCURRENT_LYRICS_FETCHES = 8
+MAX_CONCURRENT_LYRICS_REQUESTS = 10
 SOURCE_BASE_SCORES = {
     "lrclib": 95.0,
     "lyricsbogie": 150.0,
@@ -56,6 +64,13 @@ LYRICS_NOISE_PATTERN = re.compile(
 
 class LyricsError(RuntimeError):
     pass
+
+
+_lyrics_http_client: httpx.AsyncClient | None = None
+_lyrics_client_lock = asyncio.Lock()
+_lyrics_search_semaphore = asyncio.Semaphore(MAX_CONCURRENT_LYRICS_SEARCHES)
+_lyrics_fetch_semaphore = asyncio.Semaphore(MAX_CONCURRENT_LYRICS_FETCHES)
+_lyrics_request_semaphore = asyncio.Semaphore(MAX_CONCURRENT_LYRICS_REQUESTS)
 
 
 @dataclass(slots=True)
@@ -85,6 +100,45 @@ class LyricsResult:
 
 def _clean_text(value: str | None) -> str:
     return SPACE_PATTERN.sub(" ", str(value or "").strip())
+
+
+async def _get_lyrics_http_client() -> httpx.AsyncClient:
+    global _lyrics_http_client
+    async with _lyrics_client_lock:
+        if _lyrics_http_client is None or _lyrics_http_client.is_closed:
+            try:
+                _lyrics_http_client = httpx.AsyncClient(
+                    timeout=HTTP_TIMEOUT,
+                    headers=HTTP_HEADERS,
+                    follow_redirects=True,
+                    trust_env=False,
+                    limits=HTTP_LIMITS,
+                )
+            except OSError as exc:
+                raise LyricsError(
+                    "Lyrics search is busy right now. Please try again in a moment."
+                ) from exc
+        return _lyrics_http_client
+
+
+async def close_lyrics_http_client() -> None:
+    global _lyrics_http_client
+    async with _lyrics_client_lock:
+        if _lyrics_http_client and not _lyrics_http_client.is_closed:
+            await _lyrics_http_client.aclose()
+        _lyrics_http_client = None
+
+
+async def _request(
+    client: httpx.AsyncClient,
+    url: str,
+    **kwargs,
+) -> httpx.Response:
+    try:
+        async with _lyrics_request_semaphore:
+            return await client.get(url, **kwargs)
+    except OSError as exc:
+        raise LyricsError("Lyrics search is busy right now. Please try again in a moment.") from exc
 
 
 def _clean_lyrics_text(value: str | None) -> str:
@@ -261,13 +315,13 @@ def _score_candidate(query: str, candidate: LyricsCandidate, index: int) -> floa
 
 
 async def _request_json(client: httpx.AsyncClient, url: str, **kwargs):
-    response = await client.get(url, **kwargs)
+    response = await _request(client, url, **kwargs)
     response.raise_for_status()
     return response.json()
 
 
 async def _request_text(client: httpx.AsyncClient, url: str, **kwargs) -> str:
-    response = await client.get(url, **kwargs)
+    response = await _request(client, url, **kwargs)
     response.raise_for_status()
     return response.text
 
@@ -308,7 +362,7 @@ async def _fetch_candidate_page(
     if not page_url:
         return None
 
-    response = await client.get(page_url)
+    response = await _request(client, page_url)
     if response.status_code != 200:
         return None
 
@@ -707,12 +761,8 @@ async def search_lyrics_candidates(query: str) -> list[LyricsCandidate]:
 
     variants = _query_variants(text)
     tasks = []
-    async with httpx.AsyncClient(
-        timeout=HTTP_TIMEOUT,
-        headers=HTTP_HEADERS,
-        follow_redirects=True,
-        trust_env=False,
-    ) as client:
+    async with _lyrics_search_semaphore:
+        client = await _get_lyrics_http_client()
         for variant in variants:
             tasks.extend(
                 (
@@ -759,7 +809,7 @@ async def _lrclib_fetch_by_id(
 ) -> LyricsResult | None:
     if not candidate.source_id:
         return None
-    response = await client.get(f"{LRCLIB_GET_URL}/{candidate.source_id}")
+    response = await _request(client, f"{LRCLIB_GET_URL}/{candidate.source_id}")
     if response.status_code != 200:
         return None
     payload = response.json()
@@ -791,7 +841,7 @@ async def _lrclib_fetch_by_names(
     if album:
         params["album_name"] = album
 
-    response = await client.get(LRCLIB_GET_URL, params=params)
+    response = await _request(client, LRCLIB_GET_URL, params=params)
     if response.status_code != 200:
         return None
     payload = response.json()
@@ -826,7 +876,8 @@ async def _lyricsovh_fetch(
 
     for artist in artist_variants:
         for title in title_variants:
-            response = await client.get(
+            response = await _request(
+                client,
                 f"{LYRICS_OVH_LYRICS_URL}/{quote(artist)}/{quote(title)}"
             )
             if response.status_code != 200:
@@ -851,7 +902,7 @@ async def _lyricscom_fetch(
 ) -> LyricsResult | None:
     if not candidate.page_url:
         return None
-    response = await client.get(candidate.page_url)
+    response = await _request(client, candidate.page_url)
     if response.status_code != 200:
         return None
     soup = BeautifulSoup(response.text, "html.parser")
@@ -920,7 +971,7 @@ async def _allthelyrics_fetch(
     candidate: LyricsCandidate,
 ) -> LyricsResult | None:
     if candidate.page_url and (candidate.plain_lyrics or candidate.title):
-        response = await client.get(candidate.page_url)
+        response = await _request(client, candidate.page_url)
         if response.status_code != 200:
             return None
         soup = BeautifulSoup(response.text, "html.parser")
@@ -956,7 +1007,7 @@ async def _letras_fetch(
 ) -> LyricsResult | None:
     if not candidate.page_url:
         return None
-    response = await client.get(candidate.page_url)
+    response = await _request(client, candidate.page_url)
     if response.status_code != 200:
         return None
     soup = BeautifulSoup(response.text, "html.parser")
@@ -982,12 +1033,8 @@ async def _letras_fetch(
 
 
 async def fetch_lyrics(candidate: LyricsCandidate) -> LyricsResult:
-    async with httpx.AsyncClient(
-        timeout=HTTP_TIMEOUT,
-        headers=HTTP_HEADERS,
-        follow_redirects=True,
-        trust_env=False,
-    ) as client:
+    async with _lyrics_fetch_semaphore:
+        client = await _get_lyrics_http_client()
         if candidate.source == "lyricsbogie":
             result = await _lyricsbogie_fetch(client, candidate)
             if result:

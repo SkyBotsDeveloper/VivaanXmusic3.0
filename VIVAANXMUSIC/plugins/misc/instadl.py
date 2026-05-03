@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 from pathlib import Path
 
@@ -14,6 +15,8 @@ from VIVAANXMUSIC.utils.socialdown import (
     download_bundle_files,
     get_social_bundle,
 )
+
+URL_PATTERN = re.compile(r"https?://\S+", re.IGNORECASE)
 
 
 COMMAND_PLATFORMS = {
@@ -144,6 +147,24 @@ async def _download_youtube_video(source_url: str) -> tuple[str, str]:
     return file_path, title
 
 
+def _extract_source_url(message: Message) -> str | None:
+    candidates = [
+        message.text or message.caption or "",
+    ]
+    if message.reply_to_message:
+        candidates.append(
+            message.reply_to_message.text
+            or message.reply_to_message.caption
+            or ""
+        )
+
+    for text in candidates:
+        match = URL_PATTERN.search(str(text or ""))
+        if match:
+            return match.group(0).strip().rstrip(").,]")
+    return None
+
+
 @app.on_message(
     filters.command(
         [
@@ -168,17 +189,19 @@ async def social_download(_, message: Message):
     if not platform:
         return
 
-    if len(message.command) < 2:
+    source_url = _extract_source_url(message)
+    if not source_url:
         return await message.reply_text(USAGE_TEXT[platform])
 
-    source_url = message.command[1].strip()
     status = await message.reply_text(f"Fetching {platform} media...")
     temp_dir = None
+    youtube_file_path = None
 
     try:
         await app.send_chat_action(message.chat.id, ChatAction.TYPING)
         if platform == "youtube":
             file_path, title = await _download_youtube_video(source_url)
+            youtube_file_path = file_path
             await message.reply_video(
                 file_path,
                 caption=f"Downloaded from YouTube\n{title}",
@@ -214,8 +237,15 @@ async def social_download(_, message: Message):
         await status.delete()
     except SecurityError as exc:
         await status.edit_text(f"Blocked by security policy: {exc}")
-    except (SocialDownloadError, Exception) as exc:
+    except SocialDownloadError as exc:
+        await status.edit_text(f"Error downloading {platform} media: {exc}")
+    except Exception as exc:
         await status.edit_text(f"Error downloading {platform} media: {exc}")
     finally:
         if temp_dir and os.path.exists(temp_dir):
             shutil.rmtree(temp_dir, ignore_errors=True)
+        if youtube_file_path and os.path.exists(youtube_file_path):
+            try:
+                os.remove(youtube_file_path)
+            except Exception:
+                pass

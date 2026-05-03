@@ -1,6 +1,7 @@
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from pyrogram.enums import ParseMode
+import asyncio
 import requests
 from VIVAANXMUSIC import app
 
@@ -16,7 +17,7 @@ async def country_command_handler(client: Client, message: Message):
     api_url = f"https://restcountries.com/v3.1/alpha/{country_code}"
 
     try:
-        response = requests.get(api_url)
+        response = await asyncio.to_thread(requests.get, api_url, timeout=12)
         response.raise_for_status()
         country_info = response.json()
 

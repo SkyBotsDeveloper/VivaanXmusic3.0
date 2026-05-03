@@ -208,7 +208,6 @@ HELP_20 = """
 HELP_21 = """
 <b><u>Repo Info</u></b>
 
-- /repo - open repo/support buttons.
 - /pypi [package] - fetch package info from PyPI.
 - /downloadrepo [github url] - download a repository as a zip.
 """

@@ -1,4 +1,5 @@
-from pyrogram import Client, filters
+from pyrogram import filters
+import asyncio
 import requests
 from VIVAANXMUSIC import app
 
@@ -11,7 +12,7 @@ async def meme_command(client, message):
     api_url = f"https://meme-api.com/gimme/{category}" if category else "https://meme-api.com/gimme"
 
     try:
-        response = requests.get(api_url)
+        response = await asyncio.to_thread(requests.get, api_url, timeout=12)
         data = response.json()
 
         if response.status_code == 403 or "message" in data and "Unable to Access Subreddit" in data["message"]:

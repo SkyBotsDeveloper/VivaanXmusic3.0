@@ -5,6 +5,7 @@ import re
 import shutil
 import tempfile
 import time
+import mimetypes
 from dataclasses import dataclass
 from html import unescape
 from pathlib import Path
@@ -12,11 +13,16 @@ from urllib.parse import unquote, urljoin, urlparse
 
 import httpx
 
-from VIVAANXMUSIC.security import SecurityError, validate_public_http_url
+from VIVAANXMUSIC.security import validate_public_http_url
 
 
 API_TIMEOUT = httpx.Timeout(18.0, connect=6.0)
 DOWNLOAD_TIMEOUT = httpx.Timeout(45.0, connect=10.0)
+HTTP_LIMITS = httpx.Limits(
+    max_connections=10,
+    max_keepalive_connections=4,
+    keepalive_expiry=20.0,
+)
 HTTP_HEADERS = {
     "User-Agent": (
         "VivaanXDownloader/1.0 "
@@ -94,7 +100,7 @@ PLATFORM_SERVICE_KEYS = {
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".mov", ".webm", ".m4v"}
 PHOTO_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 AUDIO_EXTENSIONS = {".mp3", ".m4a", ".aac", ".ogg", ".opus", ".wav", ".flac"}
-X_STATUS_PATTERN = re.compile(r"/status(?:es)?/(\d+)", re.IGNORECASE)
+X_STATUS_PATTERN = re.compile(r"/(?:i/web/)?status(?:es)?/(\d+)", re.IGNORECASE)
 CONTENT_DISPOSITION_FILENAME = re.compile(r'filename\*?=(?:UTF-8\'\')?"?([^";]+)')
 META_TAG_PATTERN = re.compile(
     r"<meta[^>]+(?:property|name)\s*=\s*['\"]([^'\"]+)['\"][^>]+content\s*=\s*['\"]([^'\"]*)['\"]",
@@ -204,6 +210,17 @@ def _guess_kind(filename: str, content_type: str) -> str:
     return "document"
 
 
+def _ensure_extension(filename: str, content_type: str) -> str:
+    suffix = Path(filename).suffix
+    if suffix:
+        return filename
+    media_type = str(content_type or "").split(";", 1)[0].strip().lower()
+    extension = mimetypes.guess_extension(media_type) if media_type else ""
+    if extension:
+        return f"{filename}{extension}"
+    return filename
+
+
 def _extract_filename(headers: httpx.Headers, url: str, fallback: str) -> str:
     disposition = headers.get("content-disposition") or ""
     match = CONTENT_DISPOSITION_FILENAME.search(disposition)
@@ -279,10 +296,18 @@ def _bundle_from_cobalt_payload(payload, source_name: str) -> SocialDownloadBund
     if status in {"tunnel", "redirect"}:
         media_url = payload.get("url")
         if media_url:
+            filename = payload.get("filename") or title
+            content_type = payload.get("type") or ""
             return SocialDownloadBundle(
                 title=title,
                 source=source_name,
-                items=[SocialMediaItem(url=str(media_url), kind="document", filename_hint=title)],
+                items=[
+                    SocialMediaItem(
+                        url=str(media_url),
+                        kind=_guess_kind(str(filename), str(content_type)),
+                        filename_hint=str(filename),
+                    )
+                ],
             )
 
     if status == "picker":
@@ -292,13 +317,30 @@ def _bundle_from_cobalt_payload(payload, source_name: str) -> SocialDownloadBund
             media_url = item.get("url")
             media_type = str(item.get("type") or "document").lower()
             if media_url:
+                if media_type == "audio":
+                    kind = "audio"
+                elif media_type in {"video", "gif"}:
+                    kind = "video"
+                elif media_type in {"photo", "image"}:
+                    kind = "photo"
+                else:
+                    kind = "document"
                 items.append(
                     SocialMediaItem(
                         url=str(media_url),
-                        kind="video" if media_type in {"video", "gif"} else "photo",
+                        kind=kind,
                         filename_hint=title,
                     )
                 )
+        audio_url = payload.get("audio")
+        if audio_url and len(items) < MAX_MEDIA_FILES:
+            items.append(
+                SocialMediaItem(
+                    url=str(audio_url),
+                    kind="audio",
+                    filename_hint=str(payload.get("audioFilename") or title),
+                )
+            )
         if items:
             return SocialDownloadBundle(title=title, source=source_name, items=items)
 
@@ -511,6 +553,8 @@ async def _fetch_via_cobalt_api(
         "youtubeVideoContainer": "mp4",
         "audioFormat": "mp3",
         "youtubeBetterAudio": True,
+        "alwaysProxy": True,
+        "localProcessing": "disabled",
     }
     data = await _request_json(
         client,
@@ -993,6 +1037,7 @@ async def get_social_bundle(platform: str, url: str) -> SocialDownloadBundle:
         headers=HTTP_HEADERS,
         follow_redirects=True,
         trust_env=False,
+        limits=HTTP_LIMITS,
     ) as client:
         strategies = []
         if platform == "x":
@@ -1115,6 +1160,7 @@ async def download_bundle_files(bundle: SocialDownloadBundle) -> tuple[str, list
         headers=HTTP_HEADERS,
         follow_redirects=True,
         trust_env=False,
+        limits=HTTP_LIMITS,
     ) as client:
         try:
             for index, item in enumerate(bundle.items[:MAX_MEDIA_FILES], start=1):
@@ -1139,7 +1185,9 @@ async def download_bundle_files(bundle: SocialDownloadBundle) -> tuple[str, list
                         raise SocialDownloadError("Remote media is too large to send.")
 
                     fallback_name = f"{bundle.title}_{index}"
+                    content_type = str(response.headers.get("content-type") or "")
                     filename = _extract_filename(response.headers, safe_remote, fallback_name)
+                    filename = _ensure_extension(filename, content_type)
                     file_path = os.path.join(temp_dir, filename)
 
                     downloaded = 0
@@ -1156,7 +1204,7 @@ async def download_bundle_files(bundle: SocialDownloadBundle) -> tuple[str, list
                     if media_kind == "document":
                         media_kind = _guess_kind(
                             filename,
-                            str(response.headers.get("content-type") or ""),
+                            content_type,
                         )
                     downloads.append((file_path, media_kind))
 

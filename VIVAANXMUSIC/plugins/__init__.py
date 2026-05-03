@@ -7,7 +7,7 @@ def __list_all_modules():
     mod_paths = glob.glob(work_dir + "/*/*.py")
 
     all_modules = [
-        (((f.replace(work_dir, "")).replace("/", "."))[:-3])
+        (((f.replace(work_dir, "")).replace("\\", ".").replace("/", "."))[:-3])
         for f in mod_paths
         if isfile(f) and f.endswith(".py") and not f.endswith("__init__.py")
     ]
