@@ -138,6 +138,7 @@ async def skip(cli, message: Message, _, chat_id):
                 mystic,
                 videoid=True,
                 video=status,
+                stream=True,
             )
         except:
             return await mystic.edit_text(_["call_6"])
@@ -148,7 +149,24 @@ async def skip(cli, message: Message, _, chat_id):
         try:
             await JARVIS.skip_stream(chat_id, file_path, video=status, image=image)
         except:
-            return await mystic.edit_text(_["call_6"])
+            if direct:
+                return await mystic.edit_text(_["call_6"])
+            try:
+                fallback_path, fallback_direct = await YouTube.download(
+                    videoid,
+                    mystic,
+                    videoid=True,
+                    video=status,
+                )
+            except:
+                return await mystic.edit_text(_["call_6"])
+            if not fallback_path:
+                return await mystic.edit_text(_["call_6"])
+            file_path, direct = fallback_path, fallback_direct
+            try:
+                await JARVIS.skip_stream(chat_id, file_path, video=status, image=image)
+            except:
+                return await mystic.edit_text(_["call_6"])
         button = stream_markup(_, chat_id)
         schedule_stream_card(
             chat_id=chat_id,

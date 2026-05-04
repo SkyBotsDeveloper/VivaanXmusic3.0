@@ -679,6 +679,7 @@ class Call:
                         mystic,
                         videoid=True,
                         video=True if str(streamtype) == "video" else False,
+                        stream=True,
                     )
                 except:
                     return await mystic.edit_text(
@@ -689,7 +690,29 @@ class Call:
                 try:
                     await self._play_stream(client, chat_id, stream)
                 except:
-                    return await app.send_message(original_chat_id, text=_["call_6"])
+                    if direct:
+                        return await app.send_message(original_chat_id, text=_["call_6"])
+                    try:
+                        fallback_path, fallback_direct = await YouTube.download(
+                            videoid,
+                            mystic,
+                            videoid=True,
+                            video=True if str(streamtype) == "video" else False,
+                        )
+                    except:
+                        return await mystic.edit_text(
+                            _["call_6"], disable_web_page_preview=True
+                        )
+                    if not fallback_path:
+                        return await mystic.edit_text(
+                            _["call_6"], disable_web_page_preview=True
+                        )
+                    file_path, direct = fallback_path, fallback_direct
+                    stream = dynamic_media_stream(path=file_path, video=video)
+                    try:
+                        await self._play_stream(client, chat_id, stream)
+                    except:
+                        return await app.send_message(original_chat_id, text=_["call_6"])
 
                 button = stream_markup(_, chat_id)
                 await mystic.delete()

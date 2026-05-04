@@ -17,6 +17,47 @@ from VIVAANXMUSIC.utils.stream.queue import put_queue, put_queue_index
 from VIVAANXMUSIC.utils.errors import capture_internal_err
 
 
+async def _join_youtube_with_fallback(
+    chat_id,
+    original_chat_id,
+    vidid,
+    mystic,
+    file_path,
+    direct,
+    is_video,
+    thumbnail,
+):
+    try:
+        await JARVIS.join_call(
+            chat_id,
+            original_chat_id,
+            file_path,
+            video=is_video,
+            image=thumbnail,
+        )
+        return file_path, direct
+    except Exception:
+        if direct:
+            raise
+
+    fallback_path, fallback_direct = await YouTube.download(
+        vidid,
+        mystic,
+        video=is_video,
+        videoid=vidid,
+    )
+    if not fallback_path:
+        raise AssistantErr("Unable to prepare YouTube stream.")
+    await JARVIS.join_call(
+        chat_id,
+        original_chat_id,
+        fallback_path,
+        video=is_video,
+        image=thumbnail,
+    )
+    return fallback_path, fallback_direct
+
+
 @capture_internal_err
 async def stream(
     _,
@@ -81,19 +122,22 @@ async def stream(
                     db[chat_id] = []
                 try:
                     file_path, direct = await YouTube.download(
-                        vidid, mystic, video=is_video, videoid=vidid
+                        vidid, mystic, video=is_video, videoid=vidid, stream=True
                     )
                 except Exception:
                     raise AssistantErr(_["play_14"])
                 if not file_path:
                     raise AssistantErr(_["play_14"])
 
-                await JARVIS.join_call(
+                file_path, direct = await _join_youtube_with_fallback(
                     chat_id,
                     original_chat_id,
+                    vidid,
+                    mystic,
                     file_path,
-                    video=is_video,
-                    image=thumbnail,
+                    direct,
+                    is_video,
+                    thumbnail,
                 )
                 await put_queue(
                     chat_id,
@@ -151,20 +195,11 @@ async def stream(
         duration_min = result["duration_min"]
         thumbnail = result["thumb"]
 
-        try:
-            file_path, direct = await YouTube.download(
-                vidid, mystic, video=is_video, videoid=vidid
-            )
-        except Exception:
-            raise AssistantErr(_["play_14"])
-        if not file_path:
-            raise AssistantErr(_["play_14"])
-
         if await is_active_chat(chat_id):
             await put_queue(
                 chat_id,
                 original_chat_id,
-                file_path if direct else f"vid_{vidid}",
+                f"vid_{vidid}",
                 title,
                 duration_min,
                 user_name,
@@ -180,14 +215,26 @@ async def stream(
                 reply_markup=InlineKeyboardMarkup(button),
             )
         else:
+            try:
+                file_path, direct = await YouTube.download(
+                    vidid, mystic, video=is_video, videoid=vidid, stream=True
+                )
+            except Exception:
+                raise AssistantErr(_["play_14"])
+            if not file_path:
+                raise AssistantErr(_["play_14"])
+
             if not forceplay:
                 db[chat_id] = []
-            await JARVIS.join_call(
+            file_path, direct = await _join_youtube_with_fallback(
                 chat_id,
                 original_chat_id,
+                vidid,
+                mystic,
                 file_path,
-                video=is_video,
-                image=thumbnail,
+                direct,
+                is_video,
+                thumbnail,
             )
             await put_queue(
                 chat_id,

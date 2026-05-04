@@ -301,7 +301,13 @@ async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: 
     elif "vid_" in queued:
         mystic = await callback.message.reply_text(_["call_7"], disable_web_page_preview=True)
         try:
-            file_path, direct = await YouTube.download(videoid, mystic, videoid=True, video=status)
+            file_path, direct = await YouTube.download(
+                videoid,
+                mystic,
+                videoid=True,
+                video=status,
+                stream=True,
+            )
         except Exception:
             return await mystic.edit_text(_["call_6"])
         try:
@@ -311,7 +317,24 @@ async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: 
         try:
             await JARVIS.skip_stream(chat_id, file_path, video=status, image=image)
         except Exception:
-            return await mystic.edit_text(_["call_6"])
+            if direct:
+                return await mystic.edit_text(_["call_6"])
+            try:
+                fallback_path, fallback_direct = await YouTube.download(
+                    videoid,
+                    mystic,
+                    videoid=True,
+                    video=status,
+                )
+            except Exception:
+                return await mystic.edit_text(_["call_6"])
+            if not fallback_path:
+                return await mystic.edit_text(_["call_6"])
+            file_path, direct = fallback_path, fallback_direct
+            try:
+                await JARVIS.skip_stream(chat_id, file_path, video=status, image=image)
+            except Exception:
+                return await mystic.edit_text(_["call_6"])
         buttons = stream_markup(_, chat_id)
         schedule_stream_card(
             chat_id=chat_id,

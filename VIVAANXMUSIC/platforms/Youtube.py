@@ -33,6 +33,7 @@ WORKER_FALLBACK_API_URL = os.getenv(
     "https://youtubenewapi.skybotsdeveloper.workers.dev",
 )
 WORKER_FALLBACK_API_KEY = os.getenv("WORKER_FALLBACK_API_KEY", "itsmesid")
+MIN_CACHED_MEDIA_BYTES = 128 * 1024
 
 def build_yt_dlp_args(args: list[str]) -> list[str]:
     return list(args)
@@ -106,6 +107,7 @@ class YouTubeAPI:
             "cookie_downloads": 0,
             "existing_files": 0
         }
+        self._background_cache_tasks = {}
 
     def _has_disallowed_url_chars(self, link: str) -> bool:
         return any(char in link for char in [";", "&", "|", "$", "\n", "\r", "`"])
@@ -509,6 +511,7 @@ class YouTubeAPI:
         songvideo: Union[bool, str] = None,
         format_id: Union[bool, str] = None,
         title: Union[bool, str] = None,
+        stream: Union[bool, str] = None,
     ) -> str:
         if videoid:
             vid_id = link
@@ -522,6 +525,18 @@ class YouTubeAPI:
             session.mount('https://', HTTPAdapter(max_retries=retries))
             return session
 
+        def cached_media_ready(filepath):
+            try:
+                return (
+                    os.path.exists(filepath)
+                    and os.path.getsize(filepath) >= MIN_CACHED_MEDIA_BYTES
+                )
+            except Exception:
+                return False
+
+        def partial_path(filepath):
+            return f"{filepath}.downloading"
+
         async def download_with_ytdlp(url, filepath, headers=None, max_retries=3):
             default_headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
@@ -532,13 +547,15 @@ class YouTubeAPI:
             merged_headers = default_headers.copy()
             if headers:
                 merged_headers.update(headers)
+            temp_filepath = partial_path(filepath)
 
             # yt-dlp handles direct media URLs, reuse the running loop to avoid blocking the event loop.
             def run_download():
                 ydl_opts = {
                     "quiet": True,
                     "no_warnings": True,
-                    "outtmpl": filepath,
+                    "noprogress": True,
+                    "outtmpl": temp_filepath,
                     "force_overwrites": True,
                     "nopart": True,
                     "retries": max_retries,
@@ -549,19 +566,21 @@ class YouTubeAPI:
                     ydl.download([url])
 
             try:
-                if os.path.exists(filepath):
-                    os.remove(filepath)
+                if os.path.exists(temp_filepath):
+                    os.remove(temp_filepath)
                 await loop.run_in_executor(None, run_download)
-                if os.path.exists(filepath):
+                if os.path.exists(temp_filepath):
+                    os.replace(temp_filepath, filepath)
                     return filepath
             except Exception as e:
                 logger.error(f"yt-dlp download failed: {str(e)}")
-            if os.path.exists(filepath):
-                os.remove(filepath)
+            if os.path.exists(temp_filepath):
+                os.remove(temp_filepath)
             return None
 
         async def download_with_requests_fallback(url, filepath, headers=None):
             session = None
+            temp_filepath = partial_path(filepath)
             try:
                 session = create_session()
                 
@@ -573,18 +592,20 @@ class YouTubeAPI:
                 downloaded = 0
                 chunk_size = 1024 * 1024 
                 
-                with open(filepath, 'wb') as file:
+                if os.path.exists(temp_filepath):
+                    os.remove(temp_filepath)
+                with open(temp_filepath, 'wb') as file:
                     for chunk in response.iter_content(chunk_size=chunk_size):
                         if chunk:
                             file.write(chunk)
                             downloaded += len(chunk)
-                
+                os.replace(temp_filepath, filepath)
                 return filepath
                 
             except Exception as e:
                 logger.error(f"Requests download failed: {str(e)}")
-                if os.path.exists(filepath):
-                    os.remove(filepath)
+                if os.path.exists(temp_filepath):
+                    os.remove(temp_filepath)
                 return None
             finally:
                 if session:
@@ -595,6 +616,70 @@ class YouTubeAPI:
             if result:
                 return result
             return await download_with_requests_fallback(url, filepath, headers)
+
+        async def validate_stream_source(url):
+            if not url:
+                return False
+
+            def check_source():
+                session = None
+                try:
+                    session = create_session()
+                    response = session.get(
+                        url,
+                        headers={
+                            "User-Agent": "Mozilla/5.0",
+                            "Range": "bytes=0-0",
+                        },
+                        stream=True,
+                        timeout=12,
+                    )
+                    if response.status_code not in {200, 206}:
+                        return False
+                    for chunk in response.iter_content(chunk_size=1):
+                        return bool(chunk)
+                    return True
+                except Exception:
+                    return False
+                finally:
+                    if session:
+                        session.close()
+
+            return await loop.run_in_executor(None, check_source)
+
+        def schedule_background_cache(url, filepath, headers=None):
+            if not url or not filepath or cached_media_ready(filepath):
+                return
+            existing = self._background_cache_tasks.get(filepath)
+            if existing and not existing.done():
+                return
+
+            async def cache_job():
+                try:
+                    await download_from_source(url, filepath, headers)
+                except Exception as exc:
+                    logger.warning(f"Background cache failed for {os.path.basename(filepath)}: {exc}")
+                finally:
+                    self._background_cache_tasks.pop(filepath, None)
+
+            self._background_cache_tasks[filepath] = asyncio.create_task(cache_job())
+
+        async def wait_for_background_cache(filepath):
+            task = self._background_cache_tasks.get(filepath)
+            if not task:
+                return None
+            try:
+                await task
+            except Exception:
+                pass
+            if cached_media_ready(filepath):
+                return filepath
+            if os.path.exists(filepath):
+                try:
+                    os.remove(filepath)
+                except Exception:
+                    pass
+            return None
 
         def fetch_worker_fallback_link_sync(vid_id, media_format):
             if not WORKER_FALLBACK_API_URL or not WORKER_FALLBACK_API_KEY:
@@ -634,8 +719,17 @@ class YouTubeAPI:
 
         async def audio_dl(vid_id):
             filepath = os.path.join("downloads", f"{vid_id}.mp3")
+            if cached_media_ready(filepath):
+                return filepath, True
             if os.path.exists(filepath):
-                return filepath
+                try:
+                    os.remove(filepath)
+                except Exception:
+                    pass
+            if not stream:
+                cached = await wait_for_background_cache(filepath)
+                if cached:
+                    return cached, True
 
             headers = {
                 "x-api-key": f"{YT_API_KEY}",
@@ -673,25 +767,40 @@ class YouTubeAPI:
                 logger.warning("Paid API key/endpoint not configured. Using worker fallback for audio.")
 
             if paid_audio_url:
+                if stream and await validate_stream_source(paid_audio_url):
+                    schedule_background_cache(paid_audio_url, filepath, headers)
+                    return paid_audio_url, False
                 result = await download_from_source(paid_audio_url, filepath, headers)
                 if result:
-                    return result
+                    return result, True
                 logger.warning("Paid audio URL download failed, trying worker fallback.")
 
             fallback_audio_url = await get_worker_fallback_link(vid_id, "mp3")
             if fallback_audio_url:
+                if stream and await validate_stream_source(fallback_audio_url):
+                    schedule_background_cache(fallback_audio_url, filepath)
+                    return fallback_audio_url, False
                 result = await download_from_source(fallback_audio_url, filepath)
                 if result:
-                    return result
+                    return result, True
 
             logger.error("Audio download failed on both paid API and worker fallback.")
-            return None
+            return None, True
         
         
         async def video_dl(vid_id):
             filepath = os.path.join("downloads", f"{vid_id}.mp4")
+            if cached_media_ready(filepath):
+                return filepath, True
             if os.path.exists(filepath):
-                return filepath
+                try:
+                    os.remove(filepath)
+                except Exception:
+                    pass
+            if not stream:
+                cached = await wait_for_background_cache(filepath)
+                if cached:
+                    return cached, True
 
             headers = {
                 "x-api-key": f"{YT_API_KEY}",
@@ -729,19 +838,25 @@ class YouTubeAPI:
                 logger.warning("Paid API key/endpoint not configured. Using worker fallback for video.")
 
             if paid_video_url:
+                if stream and await validate_stream_source(paid_video_url):
+                    schedule_background_cache(paid_video_url, filepath, headers)
+                    return paid_video_url, False
                 result = await download_from_source(paid_video_url, filepath, headers)
                 if result:
-                    return result
+                    return result, True
                 logger.warning("Paid video URL download failed, trying worker fallback.")
 
             fallback_video_url = await get_worker_fallback_link(vid_id, "mp4")
             if fallback_video_url:
+                if stream and await validate_stream_source(fallback_video_url):
+                    schedule_background_cache(fallback_video_url, filepath)
+                    return fallback_video_url, False
                 result = await download_from_source(fallback_video_url, filepath)
                 if result:
-                    return result
+                    return result, True
 
             logger.error("Video download failed on both paid API and worker fallback.")
-            return None
+            return None, True
         
         def song_video_dl():
             formats = f"{format_id}+140"
@@ -789,10 +904,8 @@ class YouTubeAPI:
             fpath = f"downloads/{title}.mp3"
             return fpath
         elif video:
-            direct = True
-            downloaded_file = await video_dl(vid_id)
+            downloaded_file, direct = await video_dl(vid_id)
         else:
-            direct = True
-            downloaded_file = await audio_dl(vid_id)
+            downloaded_file, direct = await audio_dl(vid_id)
         
         return downloaded_file, direct
