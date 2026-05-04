@@ -7,6 +7,7 @@ from uuid import uuid4
 import aiofiles
 import aiohttp
 import numpy as np
+import yt_dlp
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 from unidecode import unidecode
 from urllib.request import Request, urlopen
@@ -20,14 +21,22 @@ from VIVAANXMUSIC.core.dir import CACHE_DIR
 TITLE_FONT_PATH = "VIVAANXMUSIC/assets/thumb/font2.ttf"
 META_FONT_PATH = "VIVAANXMUSIC/assets/thumb/font.ttf"
 FALLBACK_AVATAR_URL = "https://files.catbox.moe/0ld5qc.jpg"
-THUMB_CACHE_VERSION = "v24"
-THUMBNAIL_FETCH_TIMEOUT = aiohttp.ClientTimeout(total=4.0, connect=2.0)
+THUMB_CACHE_VERSION = "v25"
+THUMBNAIL_FETCH_TIMEOUT = aiohttp.ClientTimeout(total=7.0, connect=3.0, sock_read=4.0)
 YOUTUBE_THUMBNAIL_NAMES = (
     "maxresdefault.jpg",
+    "hq720.jpg",
     "sddefault.jpg",
     "hqdefault.jpg",
     "mqdefault.jpg",
     "default.jpg",
+)
+YOUTUBE_WEBP_THUMBNAIL_NAMES = (
+    "maxresdefault.webp",
+    "sddefault.webp",
+    "hqdefault.webp",
+    "mqdefault.webp",
+    "default.webp",
 )
 
 # Constants - Enhanced Layout
@@ -197,10 +206,14 @@ def direct_youtube_thumbnail_urls(videoid: str) -> list[str]:
     clean_id = str(videoid or "").strip()
     if not clean_id:
         return []
-    return [
-        f"https://i.ytimg.com/vi/{clean_id}/{name}"
-        for name in YOUTUBE_THUMBNAIL_NAMES
-    ]
+    urls = []
+    for host in ("https://i.ytimg.com", "https://img.youtube.com"):
+        urls.extend(f"{host}/vi/{clean_id}/{name}" for name in YOUTUBE_THUMBNAIL_NAMES)
+    urls.extend(
+        f"https://i.ytimg.com/vi_webp/{clean_id}/{name}"
+        for name in YOUTUBE_WEBP_THUMBNAIL_NAMES
+    )
+    return urls
 
 
 def thumbnail_candidates(videoid: str, result: dict | None) -> list[str]:
@@ -262,7 +275,11 @@ async def download_image(session: aiohttp.ClientSession, url: str, output_path: 
     return await write_verified_image(data, output_path)
 
 
-def create_local_fallback_art(output_path: str) -> bool:
+def create_local_fallback_art(
+    output_path: str,
+    title: str | None = None,
+    channel: str | None = None,
+) -> bool:
     try:
         image = Image.new("RGB", (CANVAS_WIDTH, CANVAS_HEIGHT), (12, 18, 28))
         draw = ImageDraw.Draw(image)
@@ -281,23 +298,103 @@ def create_local_fallback_art(output_path: str) -> bool:
         image = image.filter(ImageFilter.GaussianBlur(12))
 
         draw = ImageDraw.Draw(image)
-        font = ImageFont.load_default()
+        title_font = load_font(TITLE_FONT_PATH, 52)
+        meta_font = load_font(META_FONT_PATH, 26)
+        small_font = load_font(META_FONT_PATH, 20)
         brand = resolve_brand_name().upper()
-        try:
-            bbox = draw.textbbox((0, 0), brand, font=font)
-            text_width_px = bbox[2] - bbox[0]
-        except Exception:
-            text_width_px = len(brand) * 7
+
+        title_text = trim_text(title or "Unknown Title", 70)
+        channel_text = trim_text(channel or brand, 38)
+        title_lines = wrap_text(draw, title_text, title_font, 960, max_lines=2)
+        title_block_height = len(title_lines) * 62
+        title_y = (CANVAS_HEIGHT - title_block_height) // 2 - 20
+        for index, line in enumerate(title_lines):
+            width = text_width(draw, line, title_font)
+            draw_text_with_outline(
+                draw,
+                ((CANVAS_WIDTH - width) // 2, title_y + (index * 62)),
+                line,
+                title_font,
+                fill_color=(246, 250, 255),
+                outline_color=(8, 12, 20),
+                outline_width=2,
+            )
+
+        channel_width = text_width(draw, channel_text, meta_font)
         draw.text(
-            ((CANVAS_WIDTH - text_width_px) // 2, CANVAS_HEIGHT // 2),
+            ((CANVAS_WIDTH - channel_width) // 2, title_y + title_block_height + 18),
+            channel_text,
+            fill=(210, 222, 235),
+            font=meta_font,
+        )
+        brand_width = text_width(draw, brand, small_font)
+        draw.text(
+            ((CANVAS_WIDTH - brand_width) // 2, CANVAS_HEIGHT - 86),
             brand,
-            fill=(230, 238, 246),
-            font=font,
+            fill=(164, 180, 198),
+            font=small_font,
         )
         image.save(output_path, "JPEG", quality=92)
         return True
     except Exception:
         return False
+
+
+class QuietYtDlpLogger:
+    def debug(self, msg):
+        pass
+
+    def warning(self, msg):
+        pass
+
+    def error(self, msg):
+        pass
+
+
+def extract_ytdlp_thumbnail_urls(videoid: str) -> list[str]:
+    clean_id = str(videoid or "").strip()
+    if not clean_id:
+        return []
+    url = f"https://www.youtube.com/watch?v={clean_id}"
+    options = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "socket_timeout": 8,
+        "retries": 1,
+        "noplaylist": True,
+        "logger": QuietYtDlpLogger(),
+    }
+    try:
+        with yt_dlp.YoutubeDL(options) as ydl:
+            info = ydl.extract_info(url, download=False)
+    except Exception:
+        return []
+
+    thumbnails = []
+    primary = str((info or {}).get("thumbnail") or "").strip()
+    if primary:
+        thumbnails.append(primary)
+
+    items = (info or {}).get("thumbnails") or []
+    def score(item):
+        width = item.get("width") or 0
+        height = item.get("height") or 0
+        preference = item.get("preference") or 0
+        return (int(preference), int(width) * int(height))
+
+    for item in sorted(items, key=score, reverse=True):
+        thumb_url = str(item.get("url") or "").strip()
+        if thumb_url:
+            thumbnails.append(thumb_url)
+
+    seen = set()
+    ordered = []
+    for thumb_url in thumbnails:
+        if thumb_url not in seen:
+            ordered.append(thumb_url)
+            seen.add(thumb_url)
+    return ordered
 
 
 async def download_first_thumbnail(
@@ -323,6 +420,8 @@ async def resolve_artwork_image(
     videoid: str,
     result: dict | None,
     fallback_output_path: str,
+    title: str | None = None,
+    channel: str | None = None,
 ) -> tuple[str | None, str]:
     shared_artwork_path = artwork_cache_path(videoid)
     if is_valid_image(shared_artwork_path):
@@ -335,10 +434,18 @@ async def resolve_artwork_image(
     ):
         return shared_artwork_path, "official"
 
-    if await download_image(session, YOUTUBE_IMG_URL, fallback_output_path):
-        return fallback_output_path, "fallback"
+    try:
+        ytdlp_candidates = await asyncio.to_thread(extract_ytdlp_thumbnail_urls, videoid)
+    except Exception:
+        ytdlp_candidates = []
+    if ytdlp_candidates and await download_first_thumbnail(
+        session,
+        ytdlp_candidates,
+        shared_artwork_path,
+    ):
+        return shared_artwork_path, "official"
 
-    if create_local_fallback_art(fallback_output_path):
+    if create_local_fallback_art(fallback_output_path, title=title, channel=channel):
         return fallback_output_path, "fallback"
 
     return None, "missing"
@@ -602,6 +709,10 @@ async def get_thumb(videoid, user_id=None):
     fallback_avatar_path = os.path.join(CACHE_DIR, "elite_avatar_fallback.jpg")
     sp = None
     artwork_source = "missing"
+    title = "Unknown Title"
+    duration = "Unknown"
+    views = "Unknown Views"
+    channel = resolve_brand_name()
     try:
         result = None
         try:
@@ -630,8 +741,13 @@ async def get_thumb(videoid, user_id=None):
                 videoid,
                 result,
                 temp_thumb_path,
+                title=title,
+                channel=channel,
             )
             if not artwork_path:
+                output_path = fallback_card_path(videoid, cache_user_id)
+                if create_local_fallback_art(output_path, title=title, channel=channel):
+                    return output_path
                 return YOUTUBE_IMG_URL
             if artwork_source != "official":
                 output_path = fallback_card_path(videoid, cache_user_id)
@@ -913,4 +1029,7 @@ async def get_thumb(videoid, user_id=None):
                 os.remove(temp_thumb_path)
         except Exception:
             pass
+        output_path = fallback_card_path(videoid, cache_user_id)
+        if create_local_fallback_art(output_path, title=title, channel=channel):
+            return output_path
         return YOUTUBE_IMG_URL
