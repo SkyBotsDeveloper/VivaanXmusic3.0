@@ -3,6 +3,7 @@ import math
 import os
 import re
 from functools import lru_cache
+from uuid import uuid4
 import aiofiles
 import aiohttp
 import numpy as np
@@ -19,6 +20,7 @@ from VIVAANXMUSIC.core.dir import CACHE_DIR
 TITLE_FONT_PATH = "VIVAANXMUSIC/assets/thumb/font2.ttf"
 META_FONT_PATH = "VIVAANXMUSIC/assets/thumb/font.ttf"
 FALLBACK_AVATAR_URL = "https://files.catbox.moe/0ld5qc.jpg"
+THUMB_CACHE_VERSION = "v24"
 THUMBNAIL_FETCH_TIMEOUT = aiohttp.ClientTimeout(total=4.0, connect=2.0)
 YOUTUBE_THUMBNAIL_NAMES = (
     "maxresdefault.jpg",
@@ -140,6 +142,55 @@ def cache_remote_file(url: str, output_path: str) -> bool:
         with open(output_path, "wb") as file:
             file.write(response.read())
     return True
+
+
+def safe_cache_token(value) -> str:
+    token = re.sub(r"[^a-zA-Z0-9_.-]+", "_", str(value or "blank")).strip("._")
+    return token or "blank"
+
+
+def card_cache_path(videoid: str, cache_user_id: str) -> str:
+    return os.path.join(
+        CACHE_DIR,
+        f"{safe_cache_token(videoid)}_{safe_cache_token(cache_user_id)}_elite_glass_{THUMB_CACHE_VERSION}.png",
+    )
+
+
+def fallback_card_path(videoid: str, cache_user_id: str) -> str:
+    return os.path.join(
+        CACHE_DIR,
+        f"{safe_cache_token(videoid)}_{safe_cache_token(cache_user_id)}_fallback_elite_glass_{THUMB_CACHE_VERSION}.png",
+    )
+
+
+def artwork_cache_path(videoid: str) -> str:
+    return os.path.join(
+        CACHE_DIR,
+        f"{safe_cache_token(videoid)}_youtube_artwork_{THUMB_CACHE_VERSION}.jpg",
+    )
+
+
+def temp_artwork_path(videoid: str, cache_user_id: str) -> str:
+    unique = uuid4().hex[:10]
+    return os.path.join(
+        CACHE_DIR,
+        f"thumb_{safe_cache_token(videoid)}_{safe_cache_token(cache_user_id)}_{unique}.jpg",
+    )
+
+
+def is_valid_image(path: str) -> bool:
+    if not path or not os.path.isfile(path) or os.path.getsize(path) < 512:
+        return False
+    try:
+        with Image.open(path) as image:
+            image.verify()
+        return True
+    except Exception:
+        try:
+            os.remove(path)
+        except Exception:
+            pass
+        return False
 
 
 def direct_youtube_thumbnail_urls(videoid: str) -> list[str]:
@@ -265,6 +316,32 @@ async def download_first_thumbnail(
         if isinstance(data, bytes) and await write_verified_image(data, output_path):
             return True
     return False
+
+
+async def resolve_artwork_image(
+    session: aiohttp.ClientSession,
+    videoid: str,
+    result: dict | None,
+    fallback_output_path: str,
+) -> tuple[str | None, str]:
+    shared_artwork_path = artwork_cache_path(videoid)
+    if is_valid_image(shared_artwork_path):
+        return shared_artwork_path, "official"
+
+    if await download_first_thumbnail(
+        session,
+        thumbnail_candidates(videoid, result),
+        shared_artwork_path,
+    ):
+        return shared_artwork_path, "official"
+
+    if await download_image(session, YOUTUBE_IMG_URL, fallback_output_path):
+        return fallback_output_path, "fallback"
+
+    if create_local_fallback_art(fallback_output_path):
+        return fallback_output_path, "fallback"
+
+    return None, "missing"
 
 
 def text_width(draw, text: str, font) -> float:
@@ -515,14 +592,16 @@ def accent_palette(image):
 async def get_thumb(videoid, user_id=None):
     """Generate an enhanced glassmorphic playback thumbnail."""
     cache_user_id = user_id if user_id is not None else "blank"
-    cache_path = os.path.join(CACHE_DIR, f"{videoid}_{cache_user_id}_elite_glass_v23.png")
-    if os.path.isfile(cache_path):
+    cache_path = card_cache_path(videoid, cache_user_id)
+    if is_valid_image(cache_path):
         return cache_path
 
     url = f"https://www.youtube.com/watch?v={videoid}"
-    temp_thumb_path = os.path.join(CACHE_DIR, f"thumb_{videoid}_glass.png")
+    temp_thumb_path = temp_artwork_path(videoid, cache_user_id)
+    output_path = cache_path
     fallback_avatar_path = os.path.join(CACHE_DIR, "elite_avatar_fallback.jpg")
     sp = None
+    artwork_source = "missing"
     try:
         result = None
         try:
@@ -546,17 +625,16 @@ async def get_thumb(videoid, user_id=None):
         channel = trim_text(str(((result or {}).get("channel") or {}).get("name") or "Unknown Channel"), 34)
 
         async with aiohttp.ClientSession(timeout=THUMBNAIL_FETCH_TIMEOUT) as session:
-            downloaded = await download_first_thumbnail(
+            artwork_path, artwork_source = await resolve_artwork_image(
                 session,
-                thumbnail_candidates(videoid, result),
+                videoid,
+                result,
                 temp_thumb_path,
             )
-            if not downloaded:
-                downloaded = await download_image(session, YOUTUBE_IMG_URL, temp_thumb_path)
-            if not downloaded:
-                downloaded = create_local_fallback_art(temp_thumb_path)
-            if not downloaded:
+            if not artwork_path:
                 return YOUTUBE_IMG_URL
+            if artwork_source != "official":
+                output_path = fallback_card_path(videoid, cache_user_id)
 
         if user_id is not None:
             try:
@@ -584,7 +662,7 @@ async def get_thumb(videoid, user_id=None):
             except Exception:
                 user_dp = Image.new("RGBA", (200, 200), (100, 100, 100, 255))
 
-        youtube_thumb = Image.open(temp_thumb_path).convert("RGBA")
+        youtube_thumb = Image.open(artwork_path).convert("RGBA")
         accent_color, accent_soft = accent_palette(youtube_thumb)
         playback_accent = blend_rgb(accent_color, accent_soft, 0.28)
         accent_glow = (*accent_color, 78)
@@ -826,8 +904,8 @@ async def get_thumb(videoid, user_id=None):
         except Exception:
             pass
 
-        background.save(cache_path)
-        return cache_path
+        background.save(output_path)
+        return output_path
 
     except Exception:
         try:
