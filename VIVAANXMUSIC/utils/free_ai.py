@@ -276,8 +276,7 @@ IMAGE_EDIT_ERROR_MARKERS = (
     "provider timed out",
 )
 GENERATION_SAFETY_MESSAGE = (
-    "I can't generate that image or video. Please use a safe prompt without porn, "
-    "nudity, drugs, abuse, gore, hate, or other harmful content."
+    "I can't generate that request. Please try a different safe prompt."
 )
 GENERATION_BLOCKLIST = {
     "sexual": (
