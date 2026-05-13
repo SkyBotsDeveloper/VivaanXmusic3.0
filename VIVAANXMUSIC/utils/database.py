@@ -1,3 +1,4 @@
+import asyncio
 import random
 from typing import Dict, List, Union
 
@@ -44,6 +45,28 @@ skipmode = {}
 mute = {}
 vcnotify = {}
 
+ASSISTANT_WAIT_TIMEOUT = 30
+ASSISTANT_WAIT_INTERVAL = 0.5
+
+
+async def _available_assistants() -> list[int]:
+    from VIVAANXMUSIC.core.userbot import assistants
+
+    if assistants:
+        return list(assistants)
+
+    deadline = asyncio.get_running_loop().time() + ASSISTANT_WAIT_TIMEOUT
+    while not assistants and asyncio.get_running_loop().time() < deadline:
+        await asyncio.sleep(ASSISTANT_WAIT_INTERVAL)
+
+    if not assistants:
+        raise RuntimeError(
+            "No active assistant client is available. Check STRING_SESSION values "
+            "and assistant startup logs."
+        )
+    return list(assistants)
+
+
 async def get_assistant_number(chat_id: int) -> str:
     assistant = assistantdict.get(chat_id)
     return assistant
@@ -72,8 +95,7 @@ async def set_assistant_new(chat_id, number):
 
 
 async def set_assistant(chat_id):
-    from VIVAANXMUSIC.core.userbot import assistants
-
+    assistants = await _available_assistants()
     ran_assistant = random.choice(assistants)
     assistantdict[chat_id] = ran_assistant
     await assdb.update_one(
@@ -86,7 +108,7 @@ async def set_assistant(chat_id):
 
 
 async def get_assistant(chat_id: int) -> str:
-    from VIVAANXMUSIC.core.userbot import assistants
+    assistants = await _available_assistants()
 
     assistant = assistantdict.get(chat_id)
     if not assistant:
@@ -113,8 +135,7 @@ async def get_assistant(chat_id: int) -> str:
 
 
 async def set_calls_assistant(chat_id):
-    from VIVAANXMUSIC.core.userbot import assistants
-
+    assistants = await _available_assistants()
     ran_assistant = random.choice(assistants)
     assistantdict[chat_id] = ran_assistant
     await assdb.update_one(
@@ -126,7 +147,7 @@ async def set_calls_assistant(chat_id):
 
 
 async def group_assistant(self, chat_id: int) -> int:
-    from VIVAANXMUSIC.core.userbot import assistants
+    assistants = await _available_assistants()
 
     assistant = assistantdict.get(chat_id)
     if not assistant:

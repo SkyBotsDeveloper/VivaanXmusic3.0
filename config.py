@@ -43,7 +43,7 @@ ELITE_LLM_API_BASE = getenv("ELITE_LLM_API_BASE", "https://elite-llms.vercel.app
 ELITE_LLM_API_KEY = getenv("ELITE_LLM_API_KEY", "theelitekey")
 
 # Vars For API End Pont.
-YTPROXY_URL = getenv("YTPROXY_URL", 'https://tgapi.xbitcode.com') ## xBit Music Endpoint.
+YTPROXY_URL = getenv("YTPROXY_URL", "https://tgapi.xbitcode.com") ## Primary xBit music endpoint.
 YT_API_KEY = getenv("YT_API_KEY" , None ) ## Your API key like: xbit_10000000xx0233 Get from  https://t.me/tgmusic_apibot
 
 # ── Hosting / deployment ───────────────────────────────────────────────────────

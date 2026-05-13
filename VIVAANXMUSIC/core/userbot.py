@@ -74,7 +74,8 @@ class Userbot:
                 except Exception:
                     pass
 
-            assistants.append(index)
+            if index not in assistants:
+                assistants.append(index)
 
             try:
                 await client.send_message(
@@ -88,7 +89,8 @@ class Userbot:
 
             me = await client.get_me()
             client.id, client.name, client.username = me.id, me.first_name, me.username
-            assistantids.append(me.id)
+            if me.id not in assistantids:
+                assistantids.append(me.id)
 
             LOGGER(__name__).info(f"Assistant {index} Started as {client.name}")
 
@@ -102,6 +104,11 @@ class Userbot:
         await self.start_assistant(self.three, 3)
         await self.start_assistant(self.four, 4)
         await self.start_assistant(self.five, 5)
+        if not assistants:
+            LOGGER(__name__).error(
+                "No assistants started. Check STRING_SESSION values and assistant logs."
+            )
+            exit()
 
     async def stop(self):
         LOGGER(__name__).info("Stopping Assistants...")

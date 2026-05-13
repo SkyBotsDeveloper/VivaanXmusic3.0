@@ -30,7 +30,7 @@ logger = LOGGER(__name__)
 # Worker fallback API (kept configurable through env for production overrides)
 WORKER_FALLBACK_API_URL = os.getenv(
     "WORKER_FALLBACK_API_URL",
-    "https://youtubenewapi.skybotsdeveloper.workers.dev",
+    "https://youtubeapi-4899a42b3b68.herokuapp.com",
 )
 WORKER_FALLBACK_API_KEY = os.getenv("WORKER_FALLBACK_API_KEY", "itsmesid")
 MIN_CACHED_MEDIA_BYTES = 128 * 1024
@@ -681,6 +681,18 @@ class YouTubeAPI:
                     pass
             return None
 
+        def select_media_link(data, prefer_stream=False):
+            keys = (
+                ("streamLink", "directLink", "downloads")
+                if prefer_stream
+                else ("directLink", "streamLink", "downloads")
+            )
+            for key in keys:
+                value = data.get(key)
+                if isinstance(value, str) and value:
+                    return value
+            return None
+
         def fetch_worker_fallback_link_sync(vid_id, media_format):
             if not WORKER_FALLBACK_API_URL or not WORKER_FALLBACK_API_KEY:
                 logger.warning("Worker fallback API URL/key not set. Skipping worker fallback.")
@@ -704,7 +716,11 @@ class YouTubeAPI:
                     logger.error(f"Worker fallback API error: {data.get('error', 'Unknown error')}")
                     return None
 
-                return data.get("directLink") or data.get("streamLink") or data.get("downloads")
+                media_url = select_media_link(data, prefer_stream=bool(stream))
+                if not media_url:
+                    logger.error("Worker fallback API succeeded without a media URL.")
+                    return None
+                return media_url
             except Exception as e:
                 logger.error(f"Worker fallback request failed: {str(e)}")
                 return None

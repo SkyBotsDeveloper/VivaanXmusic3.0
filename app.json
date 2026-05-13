@@ -52,14 +52,24 @@
       "value": ""
     },
     "YTPROXY_URL": {
-      "description": "(Optional) URL of a custom API server used for music downloads or other services.",
-      "required": true,
+      "description": "(Optional) Primary xBit music API endpoint. Leave as default unless you use another compatible endpoint.",
+      "required": false,
       "value": "https://tgapi.xbitcode.com"
     },
     "YT_API_KEY": {
-      "description": "(Optional) API Key associated with your custom music download server (used with API_URL).",
-      "required": true,
+      "description": "(Optional) API key associated with your primary xBit music API endpoint.",
+      "required": false,
       "value": ""
+    },
+    "WORKER_FALLBACK_API_URL": {
+      "description": "(Optional) YouTube fallback converter API endpoint.",
+      "required": false,
+      "value": "https://youtubeapi-4899a42b3b68.herokuapp.com"
+    },
+    "WORKER_FALLBACK_API_KEY": {
+      "description": "(Optional) API key for the YouTube fallback converter API.",
+      "required": false,
+      "value": "itsmesid"
     },
     "DEEP_API": {
       "description": "(Optional) DeepAI API key for enabling AI-powered features. Get it from https://deepai.org/.",

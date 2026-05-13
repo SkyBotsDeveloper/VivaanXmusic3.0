@@ -78,11 +78,6 @@ async def init():
 
     await app.start()
     await app.set_bot_commands(BOT_COMMANDS)
-    for all_module in ALL_MODULES:
-        importlib.import_module("VIVAANXMUSIC.plugins" + all_module)
-
-    LOGGER("VIVAANXMUSIC.plugins").info("Modules loaded.")
-
     await userbot.start()
     await JARVIS.start()
 
@@ -99,6 +94,10 @@ async def init():
         pass
 
     await JARVIS.decorators()
+    for all_module in ALL_MODULES:
+        importlib.import_module("VIVAANXMUSIC.plugins" + all_module)
+
+    LOGGER("VIVAANXMUSIC.plugins").info("Modules loaded.")
     LOGGER("VIVAANXMUSIC").info(
         "\x41\x6e\x6e\x69\x65\x20\x4d\x75\x73\x69\x63\x20\x52\x6f\x62\x6f\x74\x20\x53\x74\x61\x72\x74\x65\x64\x20\x53\x75\x63\x63\x65\x73\x73\x66\x75\x6c\x6c\x79\x2e\x2e\x2e"
     )
