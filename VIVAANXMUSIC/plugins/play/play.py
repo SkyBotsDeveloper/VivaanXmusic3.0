@@ -456,7 +456,13 @@ async def play_command(
             if internal_type == "youtube" and isinstance(details, dict):
                 source = get_youtube_source_status(details.get("vidid"))
             if source:
-                await play_logs(message, streamtype=f"{log_label} Failed", source=source)
+                failed_query = details.get("title") if isinstance(details, dict) else None
+                await play_logs(
+                    message,
+                    streamtype=f"{log_label} Failed",
+                    query=failed_query,
+                    source=source,
+                )
             return await mystic.edit_text(err)
 
         await mystic.delete()
@@ -613,15 +619,22 @@ async def play_music(client, CallbackQuery, _):
 
         await mystic.delete()
         source = get_youtube_source_status(vidid)
-        await play_logs(CallbackQuery.message, streamtype="Youtube Track", source=source)
+        await play_logs(
+            CallbackQuery.message,
+            streamtype="Youtube Track",
+            query=details.get("title"),
+            source=source,
+        )
 
     except Exception as e:
         try:
             source = get_youtube_source_status(vidid)
             if source:
+                query = details.get("title") if isinstance(details, dict) else None
                 await play_logs(
                     CallbackQuery.message,
                     streamtype="Youtube Track Failed",
+                    query=query,
                     source=source,
                 )
         except Exception:

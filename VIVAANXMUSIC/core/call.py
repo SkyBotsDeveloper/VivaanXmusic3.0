@@ -699,6 +699,7 @@ class Call:
     async def _download_youtube_queue_source(
         self,
         videoid: str,
+        title: str,
         mystic,
         streamtype,
         modes=("local", "stream"),
@@ -713,6 +714,7 @@ class Call:
                     videoid=True,
                     video=is_video,
                     stream=use_stream_url,
+                    title=title,
                 )
             except Exception as err:
                 LOGGER(__name__).warning(
@@ -838,6 +840,7 @@ class Call:
                 mystic = await app.send_message(original_chat_id, _["call_7"])
                 file_path, direct, source_mode = await self._download_youtube_queue_source(
                     videoid,
+                    title,
                     mystic,
                     streamtype,
                 )
@@ -863,6 +866,7 @@ class Call:
                         return await app.send_message(original_chat_id, text=_["call_6"])
                     fallback_path, fallback_direct, fallback_mode = await self._download_youtube_queue_source(
                         videoid,
+                        title,
                         mystic,
                         streamtype,
                         modes=("stream",),

@@ -30,6 +30,7 @@ async def _join_youtube_with_fallback(
     chat_id,
     original_chat_id,
     vidid,
+    title,
     mystic,
     file_path,
     direct,
@@ -54,6 +55,7 @@ async def _join_youtube_with_fallback(
         mystic,
         video=is_video,
         videoid=vidid,
+        title=title,
     )
     if not fallback_path:
         raise AssistantErr("Unable to prepare YouTube stream.")
@@ -134,7 +136,12 @@ async def stream(
                     db[chat_id] = []
                 try:
                     file_path, direct = await YouTube.download(
-                        vidid, mystic, video=is_video, videoid=vidid, stream=True
+                        vidid,
+                        mystic,
+                        video=is_video,
+                        videoid=vidid,
+                        stream=True,
+                        title=title,
                     )
                 except Exception:
                     raise AssistantErr(_["play_14"])
@@ -145,6 +152,7 @@ async def stream(
                     chat_id,
                     original_chat_id,
                     vidid,
+                    title,
                     mystic,
                     file_path,
                     direct,
@@ -233,7 +241,12 @@ async def stream(
         else:
             try:
                 file_path, direct = await YouTube.download(
-                    vidid, mystic, video=is_video, videoid=vidid, stream=True
+                    vidid,
+                    mystic,
+                    video=is_video,
+                    videoid=vidid,
+                    stream=True,
+                    title=title,
                 )
             except Exception:
                 raise AssistantErr(_["play_14"])
@@ -246,6 +259,7 @@ async def stream(
                 chat_id,
                 original_chat_id,
                 vidid,
+                title,
                 mystic,
                 file_path,
                 direct,

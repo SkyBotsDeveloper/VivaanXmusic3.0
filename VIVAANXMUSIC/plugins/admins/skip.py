@@ -139,6 +139,7 @@ async def skip(cli, message: Message, _, chat_id):
                 videoid=True,
                 video=status,
                 stream=True,
+                title=title,
             )
         except:
             return await mystic.edit_text(_["call_6"])
@@ -157,6 +158,7 @@ async def skip(cli, message: Message, _, chat_id):
                     mystic,
                     videoid=True,
                     video=status,
+                    title=title,
                 )
             except:
                 return await mystic.edit_text(_["call_6"])

@@ -519,6 +519,8 @@ class YouTubeAPI:
         if videoid:
             vid_id = link
             link = self.base + link
+        log_title = re.sub(r"\s+", " ", str(title or "")).strip()
+        log_title = log_title[:80] if log_title else "-"
         loop = asyncio.get_running_loop()
 
         def create_session():
@@ -699,28 +701,33 @@ class YouTubeAPI:
         def mark_source(vid_id, media_type, source, ok=True):
             state = "OK" if ok else "FAILED"
             text = f"{source} {state} ({media_type})"
+            if not ok:
+                text = f"{text} | ID: {vid_id}"
             set_youtube_source_status(vid_id, text)
             logger.info(
-                "YouTube source %s | source=%s | media=%s | video_id=%s",
+                "YouTube source %s | source=%s | media=%s | video_id=%s | title=%s",
                 state.lower(),
                 source.lower().replace(" ", "_"),
                 media_type,
                 vid_id,
+                log_title,
             )
 
         def log_primary_api_issue(media_type, vid_id, message):
             if WORKER_FALLBACK_API_URL and WORKER_FALLBACK_API_KEY:
                 logger.info(
-                    "Primary xBit API failed | media=%s | video_id=%s | reason=%s | next=worker_fallback",
+                    "Primary xBit API failed | media=%s | video_id=%s | title=%s | reason=%s | next=worker_fallback",
                     media_type,
                     vid_id,
+                    log_title,
                     message,
                 )
                 return
             logger.warning(
-                "Primary xBit API failed | media=%s | video_id=%s | reason=%s | next=none",
+                "Primary xBit API failed | media=%s | video_id=%s | title=%s | reason=%s | next=none",
                 media_type,
                 vid_id,
+                log_title,
                 message,
             )
 
@@ -745,9 +752,10 @@ class YouTubeAPI:
 
                 if not data.get("success"):
                     logger.error(
-                        "Worker fallback API failed | format=%s | video_id=%s | reason=%s",
+                        "Worker fallback API failed | format=%s | video_id=%s | title=%s | reason=%s",
                         media_format,
                         vid_id,
+                        log_title,
                         data.get("error", "Unknown error"),
                     )
                     return None
@@ -755,17 +763,19 @@ class YouTubeAPI:
                 media_url = select_media_link(data, prefer_stream=bool(stream))
                 if not media_url:
                     logger.error(
-                        "Worker fallback API failed | format=%s | video_id=%s | reason=no media url",
+                        "Worker fallback API failed | format=%s | video_id=%s | title=%s | reason=no media url",
                         media_format,
                         vid_id,
+                        log_title,
                     )
                     return None
                 return media_url
             except Exception as e:
                 logger.error(
-                    "Worker fallback API failed | format=%s | video_id=%s | reason=%s",
+                    "Worker fallback API failed | format=%s | video_id=%s | title=%s | reason=%s",
                     media_format,
                     vid_id,
+                    log_title,
                     str(e),
                 )
                 return None
@@ -858,8 +868,9 @@ class YouTubeAPI:
 
             mark_source(vid_id, "audio", "PRIMARY XBIT + WORKER FALLBACK", ok=False)
             logger.error(
-                "YouTube source failed | sources=primary_xbit,worker_fallback | media=audio | video_id=%s",
+                "YouTube source failed | sources=primary_xbit,worker_fallback | media=audio | video_id=%s | title=%s",
                 vid_id,
+                log_title,
             )
             return None, True
         
@@ -944,8 +955,9 @@ class YouTubeAPI:
 
             mark_source(vid_id, "video", "PRIMARY XBIT + WORKER FALLBACK", ok=False)
             logger.error(
-                "YouTube source failed | sources=primary_xbit,worker_fallback | media=video | video_id=%s",
+                "YouTube source failed | sources=primary_xbit,worker_fallback | media=video | video_id=%s | title=%s",
                 vid_id,
+                log_title,
             )
             return None, True
         

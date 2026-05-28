@@ -307,6 +307,7 @@ async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: 
                 videoid=True,
                 video=status,
                 stream=True,
+                title=title,
             )
         except Exception:
             return await mystic.edit_text(_["call_6"])
@@ -325,6 +326,7 @@ async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: 
                     mystic,
                     videoid=True,
                     video=status,
+                    title=title,
                 )
             except Exception:
                 return await mystic.edit_text(_["call_6"])
