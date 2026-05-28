@@ -700,9 +700,18 @@ class YouTubeAPI:
 
         def mark_source(vid_id, media_type, source, ok=True):
             state = "OK" if ok else "FAILED"
-            text = f"{source} {state} ({media_type})"
+            pretty_sources = {
+                "LOCAL CACHE": "ʟᴏᴄᴀʟ ᴄᴀᴄʜᴇ",
+                "PRIMARY XBIT": "ᴘʀɪᴍᴀʀʏ xʙɪᴛ",
+                "WORKER FALLBACK": "ᴡᴏʀᴋᴇʀ ғᴀʟʟʙᴀᴄᴋ",
+                "PRIMARY XBIT + WORKER FALLBACK": "ᴘʀɪᴍᴀʀʏ xʙɪᴛ + ᴡᴏʀᴋᴇʀ ғᴀʟʟʙᴀᴄᴋ",
+            }
+            pretty_media = {"audio": "ᴀᴜᴅɪᴏ", "video": "ᴠɪᴅᴇᴏ"}.get(media_type, media_type)
+            pretty_state = "ᴏᴋ" if ok else "ғᴀɪʟᴇᴅ"
+            pretty_source = pretty_sources.get(source, source)
+            text = f"{pretty_source} {pretty_state} ({pretty_media})"
             if not ok:
-                text = f"{text} | ID: {vid_id}"
+                text = f"{text} | ɪᴅ: {vid_id}"
             set_youtube_source_status(vid_id, text)
             logger.info(
                 "YouTube source %s | source=%s | media=%s | video_id=%s | title=%s",

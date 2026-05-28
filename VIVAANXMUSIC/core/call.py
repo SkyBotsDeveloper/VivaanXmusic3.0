@@ -694,12 +694,12 @@ class Call:
                 await app.send_message(
                     config.LOGGER_ID,
                     (
-                        "Music Bot FAILURE LOG\n\n"
-                        "AREA : Queue Playback\n"
-                        f"REASON : {reason}\n"
-                        f"QUERY : {(dropped or {}).get('title') or 'Unknown Title'}\n"
-                        f"VIDEO ID : {(dropped or {}).get('vidid') or 'N/A'}\n"
-                        f"CHAT ID : {chat_id}"
+                        "ᴍᴜsɪᴄ ʙᴏᴛ ғᴀɪʟᴜʀᴇ ʟᴏɢ\n\n"
+                        "ᴀʀᴇᴀ : ǫᴜᴇᴜᴇ ᴘʟᴀʏʙᴀᴄᴋ\n"
+                        f"ʀᴇᴀsᴏɴ : {reason}\n"
+                        f"ǫᴜᴇʀʏ : {(dropped or {}).get('title') or 'Unknown Title'}\n"
+                        f"ᴠɪᴅᴇᴏ ɪᴅ : {(dropped or {}).get('vidid') or 'N/A'}\n"
+                        f"ᴄʜᴀᴛ ɪᴅ : {chat_id}"
                     ),
                     disable_web_page_preview=True,
                 )

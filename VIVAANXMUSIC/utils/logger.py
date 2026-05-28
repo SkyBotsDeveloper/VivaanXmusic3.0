@@ -25,20 +25,20 @@ async def play_logs(message, streamtype, query: str = None, source: str = None):
             except Exception:
                 query = "-"
 
-        source_line = f"\n<b>SOURCE :</b> {source}" if source else ""
+        source_line = f"\n<b>sᴏᴜʀᴄᴇ :</b> {source}" if source else ""
         logger_text = f"""
-<b>{app.mention} PLAY LOG</b>
+<b>{app.mention} ᴘʟᴀʏ ʟᴏɢ</b>
 
-<b>CHAT ID :</b> <code>{message.chat.id}</code>
-<b>CHAT NAME :</b> {message.chat.title}
-<b>CHAT USERNAME :</b> @{message.chat.username}
+<b>ᴄʜᴀᴛ ɪᴅ :</b> <code>{message.chat.id}</code>
+<b>ᴄʜᴀᴛ ɴᴀᴍᴇ :</b> {message.chat.title}
+<b>ᴄʜᴀᴛ ᴜsᴇʀɴᴀᴍᴇ :</b> @{message.chat.username}
 
-<b>USER ID :</b> <code>{message.from_user.id}</code>
-<b>NAME :</b> {message.from_user.mention}
-<b>USERNAME :</b> @{message.from_user.username}
+<b>ᴜsᴇʀ ɪᴅ :</b> <code>{message.from_user.id}</code>
+<b>ɴᴀᴍᴇ :</b> {message.from_user.mention}
+<b>ᴜsᴇʀɴᴀᴍᴇ :</b> @{message.from_user.username}
 
-<b>QUERY :</b> {query}
-<b>STREAMTYPE :</b> {streamtype}{source_line}"""
+<b>ǫᴜᴇʀʏ :</b> {query}
+<b>sᴛʀᴇᴀᴍᴛʏᴘᴇ :</b> {streamtype}{source_line}"""
         if message.chat.id != LOGGER_ID:
             try:
                 await app.send_message(
@@ -72,17 +72,17 @@ async def failure_logs(
         if actor
         else "N/A"
     )
-    query_line = f"\n<b>QUERY :</b> {_safe(query)}" if query else ""
-    stream_line = f"\n<b>STREAMTYPE :</b> {_safe(streamtype)}" if streamtype else ""
-    source_line = f"\n<b>SOURCE :</b> {_safe(source)}" if source else ""
+    query_line = f"\n<b>ǫᴜᴇʀʏ :</b> {_safe(query)}" if query else ""
+    stream_line = f"\n<b>sᴛʀᴇᴀᴍᴛʏᴘᴇ :</b> {_safe(streamtype)}" if streamtype else ""
+    source_line = f"\n<b>sᴏᴜʀᴄᴇ :</b> {_safe(source)}" if source else ""
     text = f"""
-<b>{app.mention} FAILURE LOG</b>
+<b>{app.mention} ғᴀɪʟᴜʀᴇ ʟᴏɢ</b>
 
-<b>AREA :</b> {_safe(area, 80)}
-<b>REASON :</b> {_safe(reason, 220)}{query_line}{stream_line}{source_line}
+<b>ᴀʀᴇᴀ :</b> {_safe(area, 80)}
+<b>ʀᴇᴀsᴏɴ :</b> {_safe(reason, 220)}{query_line}{stream_line}{source_line}
 
-<b>CHAT :</b> {_safe(message.chat.title, 120)} (<code>{message.chat.id}</code>)
-<b>USER :</b> {user_line}"""
+<b>ᴄʜᴀᴛ :</b> {_safe(message.chat.title, 120)} (<code>{message.chat.id}</code>)
+<b>ᴜsᴇʀ :</b> {user_line}"""
     try:
         await app.send_message(
             chat_id=LOGGER_ID,
