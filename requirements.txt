@@ -16,12 +16,12 @@ gtts
 heroku3
 httpx[http2]==0.28.1
 indic-transliteration
-kurigram==2.2.19
+kurigram==2.2.23
 motor
 nekosbest
 numpy
 opencv-python
-pillow==12.0.0
+pillow==12.2.0
 psutil
 ntgcalls==2.1.0
 py-tgcalls==2.2.11
@@ -42,4 +42,4 @@ telegraph
 tgcrypto
 unidecode
 wget
-yt-dlp==2025.10.14
+yt-dlp==2026.3.17

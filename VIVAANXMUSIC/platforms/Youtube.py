@@ -693,6 +693,14 @@ class YouTubeAPI:
                     return value
             return None
 
+        def log_primary_api_issue(media_type, message):
+            fallback_note = (
+                "Trying worker fallback."
+                if WORKER_FALLBACK_API_URL and WORKER_FALLBACK_API_KEY
+                else "Worker fallback is not configured."
+            )
+            logger.warning("Primary paid %s API unavailable: %s %s", media_type, message, fallback_note)
+
         def fetch_worker_fallback_link_sync(vid_id, media_format):
             if not WORKER_FALLBACK_API_URL or not WORKER_FALLBACK_API_KEY:
                 logger.warning("Worker fallback API URL/key not set. Skipping worker fallback.")
@@ -765,17 +773,18 @@ class YouTubeAPI:
                     if status == 'success':
                         paid_audio_url = song_data.get('audio_url')
                     elif status == 'error':
-                        logger.error(
-                            f"Paid API Error: {song_data.get('message', 'Unknown error from API.')}"
+                        log_primary_api_issue(
+                            "audio",
+                            song_data.get('message', 'Unknown error from API.'),
                         )
                     else:
-                        logger.error("Paid API returned unexpected response while fetching audio.")
+                        log_primary_api_issue("audio", "unexpected response while fetching audio")
                 except requests.exceptions.RequestException as e:
-                    logger.error(f"Network error while fetching paid audio info: {str(e)}")
+                    log_primary_api_issue("audio", f"network error: {str(e)}")
                 except json.JSONDecodeError as e:
-                    logger.error(f"Invalid paid API response for audio: {str(e)}")
+                    log_primary_api_issue("audio", f"invalid response: {str(e)}")
                 except Exception as e:
-                    logger.error(f"Error in paid audio flow: {str(e)}")
+                    log_primary_api_issue("audio", str(e))
                 finally:
                     if session:
                         session.close()
@@ -836,17 +845,18 @@ class YouTubeAPI:
                     if status == 'success':
                         paid_video_url = video_data.get('video_url')
                     elif status == 'error':
-                        logger.error(
-                            f"Paid API Error: {video_data.get('message', 'Unknown error from API.')}"
+                        log_primary_api_issue(
+                            "video",
+                            video_data.get('message', 'Unknown error from API.'),
                         )
                     else:
-                        logger.error("Paid API returned unexpected response while fetching video.")
+                        log_primary_api_issue("video", "unexpected response while fetching video")
                 except requests.exceptions.RequestException as e:
-                    logger.error(f"Network error while fetching paid video info: {str(e)}")
+                    log_primary_api_issue("video", f"network error: {str(e)}")
                 except json.JSONDecodeError as e:
-                    logger.error(f"Invalid paid API response for video: {str(e)}")
+                    log_primary_api_issue("video", f"invalid response: {str(e)}")
                 except Exception as e:
-                    logger.error(f"Error in paid video flow: {str(e)}")
+                    log_primary_api_issue("video", str(e))
                 finally:
                     if session:
                         session.close()
