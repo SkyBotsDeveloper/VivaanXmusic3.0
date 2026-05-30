@@ -279,11 +279,19 @@ async def _send_scan_report(message, status, report):
 @app.on_message((filters.group | filters.channel), group=-50)
 async def remember_seen_chat(_, message):
     await _remember_broadcast_chat(message.chat)
+    await _remember_private_user(message.from_user)
 
 
 @app.on_message(filters.private, group=-50)
 async def remember_seen_user(_, message):
     await _remember_private_user(message.from_user)
+
+
+@app.on_callback_query(group=-50)
+async def remember_callback_activity(_, callback):
+    await _remember_private_user(callback.from_user)
+    if callback.message:
+        await _remember_broadcast_chat(callback.message.chat)
 
 
 @app.on_chat_member_updated(group=-50)
