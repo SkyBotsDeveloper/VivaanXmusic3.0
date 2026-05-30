@@ -3,7 +3,7 @@ from html import escape
 from io import BytesIO
 
 from pyrogram import filters
-from pyrogram.enums import ChatMembersFilter, ChatType
+from pyrogram.enums import ChatMemberStatus, ChatMembersFilter, ChatType
 from pyrogram.errors import FloodWait
 
 from VIVAANXMUSIC import app
@@ -27,8 +27,15 @@ IS_BROADCASTING = False
 SCAN_CHAT_TYPES = {ChatType.GROUP, ChatType.SUPERGROUP, ChatType.CHANNEL}
 if getattr(ChatType, "FORUM", None):
     SCAN_CHAT_TYPES.add(ChatType.FORUM)
-SCAN_DIALOG_TYPES = set(SCAN_CHAT_TYPES)
-SCAN_DIALOG_TYPES.add(ChatType.PRIVATE)
+ACTIVE_BOT_STATUSES = {
+    ChatMemberStatus.MEMBER,
+    ChatMemberStatus.ADMINISTRATOR,
+    ChatMemberStatus.OWNER,
+}
+if getattr(ChatMemberStatus, "RESTRICTED", None):
+    ACTIVE_BOT_STATUSES.add(ChatMemberStatus.RESTRICTED)
+TRACKED_CHAT_IDS = set()
+TRACKED_USER_IDS = set()
 
 
 def _chat_title(chat):
@@ -45,6 +52,30 @@ def _chat_report_line(chat):
     return f"{chat.id} | {_chat_title(chat)} | {_chat_username(chat)}"
 
 
+def _is_broadcast_chat(chat):
+    return bool(chat and chat.type in SCAN_CHAT_TYPES and int(chat.id) < 0)
+
+
+async def _remember_broadcast_chat(chat):
+    if not _is_broadcast_chat(chat):
+        return
+    chat_id = int(chat.id)
+    if chat_id in TRACKED_CHAT_IDS:
+        return
+    await add_served_chat(chat_id)
+    TRACKED_CHAT_IDS.add(chat_id)
+
+
+async def _remember_private_user(user):
+    if not user or getattr(user, "is_bot", False):
+        return
+    user_id = int(user.id)
+    if user_id in TRACKED_USER_IDS:
+        return
+    await add_served_user(user_id)
+    TRACKED_USER_IDS.add(user_id)
+
+
 async def _send_scan_report(message, status, report):
     if len(report) <= 3900:
         return await status.edit_text(f"<pre>{report}</pre>")
@@ -55,12 +86,44 @@ async def _send_scan_report(message, status, report):
     await status.delete()
 
 
+@app.on_message((filters.group | filters.channel), group=-50)
+async def remember_seen_chat(_, message):
+    await _remember_broadcast_chat(message.chat)
+
+
+@app.on_message(filters.private, group=-50)
+async def remember_seen_user(_, message):
+    await _remember_private_user(message.from_user)
+
+
+@app.on_chat_member_updated(group=-50)
+async def remember_bot_membership(client, update):
+    old = update.old_chat_member
+    new = update.new_chat_member
+    member_user = getattr(new, "user", None) or getattr(old, "user", None)
+    if not member_user or member_user.id != app.id:
+        return
+
+    chat = update.chat
+    if not _is_broadcast_chat(chat):
+        return
+
+    new_status = getattr(new, "status", None)
+    chat_id = int(chat.id)
+    if new_status in ACTIVE_BOT_STATUSES:
+        await _remember_broadcast_chat(chat)
+        return
+
+    await remove_served_chat(chat_id)
+    TRACKED_CHAT_IDS.discard(chat_id)
+
+
 @app.on_message(filters.command(["syncchats", "scanchats", "scanbroadcast"]) & filters.user(OWNER_ID))
 async def scan_broadcast_chats(client, message):
     command_text = message.text or ""
     clean_stale = "-clean" in command_text
     check_users = clean_stale or "-users" in command_text
-    status = await message.reply_text("Scanning bot dialogs and Mongo broadcast targets...")
+    status = await message.reply_text("Validating Mongo broadcast targets...")
 
     db_docs = await get_served_chats()
     user_docs = await get_served_users()
@@ -75,41 +138,13 @@ async def scan_broadcast_chats(client, message):
         if user.get("user_id") is not None
     }
 
-    dialog_chats = {}
-    dialog_users = {}
-    added_chats = []
-    added_users = []
-    scan_error = None
-    try:
-        async for dialog in client.get_dialogs():
-            chat = getattr(dialog, "chat", None)
-            if not chat or chat.type not in SCAN_DIALOG_TYPES:
-                continue
-            chat_id = int(chat.id)
-            if chat.type == ChatType.PRIVATE and chat_id > 0:
-                dialog_users[chat_id] = chat
-                if chat_id not in db_user_ids:
-                    await add_served_user(chat_id)
-                    db_user_ids.add(chat_id)
-                    added_users.append(chat)
-                continue
-            dialog_chats[chat_id] = chat
-            if chat_id not in db_chat_ids:
-                await add_served_chat(chat_id)
-                db_chat_ids.add(chat_id)
-                added_chats.append(chat)
-    except Exception as exc:
-        scan_error = str(exc)
-
     stale_chats = []
-    checked_only = []
+    reachable_chats = []
     for chat_id in sorted(db_chat_ids):
-        if chat_id in dialog_chats:
-            continue
         try:
             chat = await client.get_chat(chat_id)
             if chat.type in SCAN_CHAT_TYPES:
-                checked_only.append(chat)
+                reachable_chats.append(chat)
             else:
                 stale_chats.append((chat_id, f"unexpected chat type: {chat.type}"))
         except Exception as exc:
@@ -120,8 +155,6 @@ async def scan_broadcast_chats(client, message):
     reachable_users = []
     if check_users:
         for user_id in sorted(db_user_ids):
-            if user_id in dialog_users:
-                continue
             try:
                 user = await client.get_users(user_id)
                 reachable_users.append(user)
@@ -148,17 +181,16 @@ async def scan_broadcast_chats(client, message):
     active_chats = len(db_chat_ids) - cleaned_chats
     active_users = len(db_user_ids) - cleaned_users
     lines = [
-        "BOT CHAT SCAN REPORT",
+        "BOT BROADCAST TARGET REPORT",
         "",
-        f"Mongo chat/channel targets before scan: {len(db_docs)}",
-        f"Mongo private user targets before scan: {len(user_docs)}",
-        f"Actual chat/channel dialogs found: {len(dialog_chats)}",
-        f"Actual private dialogs found: {len(dialog_users)}",
-        f"Missing chats/channels added to Mongo: {len(added_chats)}",
-        f"Missing private users added to Mongo: {len(added_users)}",
-        f"Mongo-only chats/channels still reachable: {len(checked_only)}",
-        f"Mongo-only users validation: {'checked' if check_users else 'skipped'}",
-        f"Mongo-only users still reachable: {len(reachable_users)}",
+        "Note: Telegram does not allow bot accounts to fetch full dialog lists.",
+        "This command validates Mongo targets. New chats/users are auto-synced from activity and bot membership updates.",
+        "",
+        f"Mongo chat/channel targets: {len(db_docs)}",
+        f"Mongo private user targets: {len(user_docs)}",
+        f"Reachable chat/channel targets: {len(reachable_chats)}",
+        f"Private user validation: {'checked' if check_users else 'skipped'}",
+        f"Reachable private user targets: {len(reachable_users)}",
         f"Stale/inaccessible Mongo chats: {len(stale_chats)}",
         f"Stale/inaccessible Mongo users: {len(stale_users)}",
         f"Cleaned stale chats: {cleaned_chats}",
@@ -166,24 +198,10 @@ async def scan_broadcast_chats(client, message):
         f"Broadcast chat/channel targets after scan: {active_chats}",
         f"Broadcast private user targets after scan: {active_users}",
     ]
-    if scan_error:
-        lines.extend(["", f"Dialog scan warning: {escape(scan_error)}"])
     if (stale_chats or stale_users) and not clean_stale:
         lines.append("Use /syncchats -clean to remove stale/inaccessible targets from Mongo.")
     if not check_users:
         lines.append("Use /syncchats -users to validate private users too.")
-
-    if added_chats:
-        lines.extend(["", "ADDED CHATS/CHANNELS TO MONGO"])
-        lines.extend(_chat_report_line(chat) for chat in added_chats[:80])
-        if len(added_chats) > 80:
-            lines.append(f"...and {len(added_chats) - 80} more")
-
-    if added_users:
-        lines.extend(["", "ADDED PRIVATE USERS TO MONGO"])
-        lines.extend(_chat_report_line(user) for user in added_users[:80])
-        if len(added_users) > 80:
-            lines.append(f"...and {len(added_users) - 80} more")
 
     if stale_chats:
         lines.extend(["", "STALE / INACCESSIBLE CHATS"])
