@@ -2,10 +2,17 @@ import re
 
 import httpx
 import spotipy
+from bs4 import BeautifulSoup
 from spotipy.oauth2 import SpotifyClientCredentials
 from youtubesearchpython.future import VideosSearch
 
 import config
+
+
+SPOTIFY_WEB_HEADERS = {
+    "Accept": "text/html,application/json",
+    "User-Agent": "Mozilla/5.0",
+}
 
 
 class SpotifyAPI:
@@ -31,6 +38,59 @@ class SpotifyAPI:
         else:
             self.spotify = None
 
+    def _resource_id(self, url: str, kind: str) -> str:
+        match = re.search(rf"/{kind}/([A-Za-z0-9]+)", url or "")
+        return match.group(1) if match else url
+
+    async def _scrape_tracks(self, url: str, *, fallback_artist: str = ""):
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(25.0, connect=10.0),
+            follow_redirects=True,
+            trust_env=False,
+            headers=SPOTIFY_WEB_HEADERS,
+        ) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            html = response.text
+
+        soup = BeautifulSoup(html, "html.parser")
+        if not fallback_artist:
+            og_title = soup.find("meta", attrs={"property": "og:title"})
+            fallback_artist = re.sub(
+                r"\s*\|\s*Spotify\s*$",
+                "",
+                str((og_title or {}).get("content") or "").strip(),
+                flags=re.IGNORECASE,
+            )
+
+        tracks: list[str] = []
+        for row in soup.select('[data-testid="track-row"]'):
+            title = row.get("aria-label") or ""
+            title_node = row.select_one('[data-encore-id="listRowTitle"]')
+            if title_node:
+                title = title_node.get_text(" ", strip=True) or title
+            title = re.sub(r"\s+", " ", title).strip()
+            if not title:
+                continue
+
+            artists: list[str] = []
+            details = row.select_one('[data-encore-id="listRowDetails"]')
+            if details:
+                for link in details.find_all("a"):
+                    artist_name = re.sub(r"\s+", " ", link.get_text(" ", strip=True)).strip()
+                    if artist_name and artist_name not in artists:
+                        artists.append(artist_name)
+            if not artists and fallback_artist and "/artist/" in url:
+                artists.append(fallback_artist)
+
+            query = f"{title} {' '.join(artists)}".strip()
+            if query and query not in tracks:
+                tracks.append(query)
+
+        if not tracks:
+            raise RuntimeError("Could not resolve Spotify public track list")
+        return tracks
+
     async def valid(self, link: str) -> bool:
         return bool(re.search(self.regex, link or ""))
 
@@ -52,12 +112,7 @@ class SpotifyAPI:
                 timeout=httpx.Timeout(20.0, connect=10.0),
                 follow_redirects=True,
                 trust_env=False,
-                headers={
-                    "User-Agent": (
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-                    )
-                },
+                headers=SPOTIFY_WEB_HEADERS,
             ) as client:
                 try:
                     response = await client.get(
@@ -104,48 +159,63 @@ class SpotifyAPI:
         return track_details, track_details["vidid"]
 
     async def playlist(self, url):
-        if not self.spotify:
-            raise RuntimeError("Spotify credentials not configured")
-        playlist = self.spotify.playlist(url)
-        playlist_id = playlist["id"]
-        results = []
-        for item in playlist["tracks"]["items"]:
-            music_track = item["track"]
-            info = music_track["name"]
-            for artist in music_track["artists"]:
-                fetched = f' {artist["name"]}'
-                if "Various Artists" not in fetched:
-                    info += fetched
-            results.append(info)
-        return results, playlist_id
+        playlist_id = self._resource_id(url, "playlist")
+        if self.spotify:
+            try:
+                playlist = self.spotify.playlist(url)
+                playlist_id = playlist["id"]
+                results = []
+                for item in playlist["tracks"]["items"]:
+                    music_track = item["track"]
+                    info = music_track["name"]
+                    for artist in music_track["artists"]:
+                        fetched = f' {artist["name"]}'
+                        if "Various Artists" not in fetched:
+                            info += fetched
+                    results.append(info)
+                if results:
+                    return results, playlist_id
+            except Exception:
+                pass
+        return await self._scrape_tracks(url), playlist_id
 
     async def album(self, url):
-        if not self.spotify:
-            raise RuntimeError("Spotify credentials not configured")
-        album = self.spotify.album(url)
-        album_id = album["id"]
-        results = []
-        for item in album["tracks"]["items"]:
-            info = item["name"]
-            for artist in item["artists"]:
-                fetched = f' {artist["name"]}'
-                if "Various Artists" not in fetched:
-                    info += fetched
-            results.append(info)
-        return results, album_id
+        album_id = self._resource_id(url, "album")
+        if self.spotify:
+            try:
+                album = self.spotify.album(url)
+                album_id = album["id"]
+                results = []
+                for item in album["tracks"]["items"]:
+                    info = item["name"]
+                    for artist in item["artists"]:
+                        fetched = f' {artist["name"]}'
+                        if "Various Artists" not in fetched:
+                            info += fetched
+                    results.append(info)
+                if results:
+                    return results, album_id
+            except Exception:
+                pass
+        return await self._scrape_tracks(url), album_id
 
     async def artist(self, url):
-        if not self.spotify:
-            raise RuntimeError("Spotify credentials not configured")
-        artistinfo = self.spotify.artist(url)
-        artist_id = artistinfo["id"]
-        results = []
-        artisttoptracks = self.spotify.artist_top_tracks(url)
-        for item in artisttoptracks["tracks"]:
-            info = item["name"]
-            for artist in item["artists"]:
-                fetched = f' {artist["name"]}'
-                if "Various Artists" not in fetched:
-                    info += fetched
-            results.append(info)
-        return results, artist_id
+        artist_id = self._resource_id(url, "artist")
+        if self.spotify:
+            try:
+                artistinfo = self.spotify.artist(url)
+                artist_id = artistinfo["id"]
+                results = []
+                artisttoptracks = self.spotify.artist_top_tracks(url)
+                for item in artisttoptracks["tracks"]:
+                    info = item["name"]
+                    for artist in item["artists"]:
+                        fetched = f' {artist["name"]}'
+                        if "Various Artists" not in fetched:
+                            info += fetched
+                    results.append(info)
+                if results:
+                    return results, artist_id
+            except Exception:
+                pass
+        return await self._scrape_tracks(url), artist_id

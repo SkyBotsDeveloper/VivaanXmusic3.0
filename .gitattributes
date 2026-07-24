@@ -1,0 +1,4 @@
+*.sh text eol=lf
+setup text eol=lf
+start text eol=lf
+Procfile text eol=lf

@@ -1,9 +1,17 @@
+import json
 import re
 from typing import List, Union, Optional
 
 import aiohttp
 from bs4 import BeautifulSoup
 from youtubesearchpython.future import VideosSearch
+
+
+APPLE_HEADERS = {
+    "Accept": "text/html,application/json",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+}
 
 
 class AppleAPI:
@@ -22,7 +30,7 @@ class AppleAPI:
         title_query: Optional[str] = None
         track_match = self.track_id_regex.search(url or "")
 
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(headers=APPLE_HEADERS) as session:
             if track_match:
                 track_id = track_match.group(1)
                 async with session.get(
@@ -85,20 +93,52 @@ class AppleAPI:
         except Exception:
             return False
 
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(headers=APPLE_HEADERS) as session:
             async with session.get(url) as response:
                 if response.status != 200:
                     return False
                 html = await response.text()
 
         soup = BeautifulSoup(html, "html.parser")
-        applelinks = soup.find_all("meta", attrs={"property": "music:song"})
         results: List[str] = []
-        for item in applelinks:
+
+        for script in soup.find_all("script", attrs={"type": "application/ld+json"}):
             try:
-                slug = item["content"].split("album/")[1].split("/")[0]
-                results.append(slug.replace("-", " "))
+                payload = json.loads(script.get_text(strip=True))
             except Exception:
                 continue
+            tracks = payload.get("track") if isinstance(payload, dict) else None
+            if not isinstance(tracks, list):
+                continue
+            for track in tracks:
+                if not isinstance(track, dict):
+                    continue
+                title = str(track.get("name") or "").strip()
+                artist = ""
+                by_artist = track.get("byArtist")
+                if isinstance(by_artist, dict):
+                    artist = str(by_artist.get("name") or "").strip()
+                elif isinstance(by_artist, list) and by_artist:
+                    artist = str((by_artist[0] or {}).get("name") or "").strip()
+                query = f"{title} {artist}".strip()
+                if query:
+                    results.append(query)
 
-        return results, playlist_id
+        if not results:
+            applelinks = soup.find_all("meta", attrs={"property": "music:song"})
+            for item in applelinks:
+                try:
+                    content = item.get("content") or ""
+                    match = re.search(r"/song/([^/?#]+)/", content)
+                    if match:
+                        results.append(match.group(1).replace("-", " "))
+                        continue
+                    slug = content.split("album/")[1].split("/")[0]
+                    results.append(slug.replace("-", " "))
+                except Exception:
+                    continue
+
+        deduped = list(dict.fromkeys(results))
+        if not deduped:
+            return False
+        return deduped, playlist_id

@@ -1,9 +1,11 @@
 import base64
+import textwrap
 from io import BytesIO
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from VIVAANXMUSIC import app
 from httpx import AsyncClient, Timeout
+from PIL import Image, ImageDraw, ImageFont
 
 # -----------------------------------------------------------------
 fetch = AsyncClient(
@@ -21,6 +23,184 @@ fetch = AsyncClient(
 class QuotlyException(Exception):
     pass
 # --------------------------------------------------------------------------
+def _load_quote_font(size: int, *, bold: bool = False):
+    names = (
+        "arialbd.ttf" if bold else "arial.ttf",
+        "C:/Windows/Fonts/arialbd.ttf" if bold else "C:/Windows/Fonts/arial.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+        if bold
+        else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    )
+    for name in names:
+        try:
+            return ImageFont.truetype(name, size=size)
+        except Exception:
+            continue
+    return ImageFont.load_default()
+
+
+def _quote_text_size(draw: ImageDraw.ImageDraw, text: str, font) -> tuple[int, int]:
+    box = draw.textbbox((0, 0), text or " ", font=font)
+    return box[2] - box[0], box[3] - box[1]
+
+
+def _wrap_quote_text(draw: ImageDraw.ImageDraw, text: str, font, max_width: int):
+    source = " ".join(str(text or "").split()) or " "
+    lines: list[str] = []
+    for paragraph in source.splitlines() or [source]:
+        current = ""
+        for word in paragraph.split():
+            candidate = f"{current} {word}".strip()
+            width, _ = _quote_text_size(draw, candidate, font)
+            if width <= max_width:
+                current = candidate
+                continue
+            if current:
+                lines.append(current)
+            if _quote_text_size(draw, word, font)[0] <= max_width:
+                current = word
+            else:
+                chunks = textwrap.wrap(word, width=22) or [word]
+                lines.extend(chunks[:-1])
+                current = chunks[-1]
+        if current:
+            lines.append(current)
+    return lines or [" "]
+
+
+def _quote_color(seed: int):
+    palette = (
+        "#7c3aed",
+        "#0891b2",
+        "#16a34a",
+        "#dc2626",
+        "#d97706",
+        "#2563eb",
+    )
+    return palette[abs(int(seed or 1)) % len(palette)]
+
+
+def _quote_initials(name: str):
+    parts = [part for part in str(name or "").split() if part]
+    if not parts:
+        return "?"
+    return "".join(part[0].upper() for part in parts[:2])
+
+
+async def _render_quote_locally(messages, is_reply):
+    if not isinstance(messages, list):
+        messages = [messages]
+
+    width = 940
+    padding = 36
+    avatar_size = 74
+    gap = 22
+    content_width = width - (padding * 2) - avatar_size - gap
+    name_font = _load_quote_font(30, bold=True)
+    text_font = _load_quote_font(32)
+    reply_font = _load_quote_font(23)
+    initial_font = _load_quote_font(27, bold=True)
+    dummy = Image.new("RGB", (width, 10))
+    draw = ImageDraw.Draw(dummy)
+
+    rows = []
+    total_height = padding
+    for message in messages:
+        name = await get_message_sender_name(message) or "Unknown"
+        text = await get_text_or_caption(message) or "[message]"
+        sender_id = await get_message_sender_id(message)
+        text_lines = _wrap_quote_text(draw, text, text_font, content_width)
+
+        reply_lines = []
+        reply_name = ""
+        if is_reply and message.reply_to_message:
+            reply_name = await get_message_sender_name(message.reply_to_message) or "Reply"
+            reply_text = await get_text_or_caption(message.reply_to_message) or "[message]"
+            reply_lines = _wrap_quote_text(draw, reply_text, reply_font, content_width - 24)[:2]
+
+        row_height = 24 + 36 + (len(text_lines) * 42) + 24
+        if reply_lines:
+            row_height += 28 + (len(reply_lines) * 30) + 16
+        row_height = max(row_height, avatar_size + 38)
+        rows.append(
+            {
+                "name": name,
+                "sender_id": sender_id,
+                "text_lines": text_lines,
+                "reply_name": reply_name,
+                "reply_lines": reply_lines,
+                "height": row_height,
+            }
+        )
+        total_height += row_height + 18
+    total_height += padding - 18
+
+    image = Image.new("RGB", (width, max(total_height, 220)), "#161020")
+    draw = ImageDraw.Draw(image)
+    y = padding
+    for row in rows:
+        card_box = (padding // 2, y - 10, width - padding // 2, y + row["height"])
+        draw.rounded_rectangle(card_box, radius=28, fill="#241a34")
+
+        avatar_x = padding
+        avatar_y = y + 18
+        color = _quote_color(row["sender_id"])
+        draw.ellipse(
+            (avatar_x, avatar_y, avatar_x + avatar_size, avatar_y + avatar_size),
+            fill=color,
+        )
+        initials = _quote_initials(row["name"])
+        iw, ih = _quote_text_size(draw, initials, initial_font)
+        draw.text(
+            (
+                avatar_x + (avatar_size - iw) / 2,
+                avatar_y + (avatar_size - ih) / 2 - 2,
+            ),
+            initials,
+            fill="#ffffff",
+            font=initial_font,
+        )
+
+        text_x = padding + avatar_size + gap
+        cursor_y = y + 20
+        draw.text((text_x, cursor_y), row["name"], fill="#ffffff", font=name_font)
+        cursor_y += 42
+
+        if row["reply_lines"]:
+            reply_box = (
+                text_x,
+                cursor_y,
+                width - padding,
+                cursor_y + 36 + len(row["reply_lines"]) * 30,
+            )
+            draw.rounded_rectangle(reply_box, radius=14, fill="#332744")
+            draw.rectangle(
+                (text_x, cursor_y + 8, text_x + 5, reply_box[3] - 8),
+                fill="#a78bfa",
+            )
+            draw.text(
+                (text_x + 18, cursor_y + 8),
+                row["reply_name"],
+                fill="#c4b5fd",
+                font=reply_font,
+            )
+            reply_y = cursor_y + 36
+            for line in row["reply_lines"]:
+                draw.text((text_x + 18, reply_y), line, fill="#d9d2e8", font=reply_font)
+                reply_y += 30
+            cursor_y = reply_box[3] + 18
+
+        for line in row["text_lines"]:
+            draw.text((text_x, cursor_y), line, fill="#f8fafc", font=text_font)
+            cursor_y += 42
+
+        y += row["height"] + 18
+
+    buffer = BytesIO()
+    image.save(buffer, format="WEBP", quality=92, method=6)
+    return buffer.getvalue()
+
+
 async def get_message_sender_id(ctx: Message):
     if ctx.forward_date:
         if ctx.forward_sender_name:
@@ -250,7 +430,12 @@ async def pyrogram_to_quotly(messages, is_reply):
     except Exception as exc:
         errors.append(str(exc))
 
-    raise QuotlyException("; ".join(errors[-2:]))
+    try:
+        return await _render_quote_locally(messages, is_reply)
+    except Exception as exc:
+        errors.append(f"local renderer failed: {exc}")
+
+    raise QuotlyException("; ".join(errors[-3:]))
 # ------------------------------------------------------------------------------------------
 
 # Helper function to check if an argument is an integer

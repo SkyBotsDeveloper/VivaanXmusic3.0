@@ -44,8 +44,8 @@ ELITE_LLM_API_BASE = getenv("ELITE_LLM_API_BASE", "https://elite-llms.vercel.app
 ELITE_LLM_API_KEY = getenv("ELITE_LLM_API_KEY", "theelitekey")
 
 # Vars For API End Pont.
-YTPROXY_URL = getenv("YTPROXY_URL", "https://tgapi.xbitcode.com") ## Primary xBit music endpoint.
-YT_API_KEY = getenv("YT_API_KEY" , None ) ## Your API key like: xbit_10000000xx0233 Get from  https://t.me/tgmusic_apibot
+YTPROXY_URL = getenv("YTPROXY_URL", "") ## Optional xBit fallback endpoint.
+YT_API_KEY = getenv("YT_API_KEY" , None ) ## Optional xBit API key like: xbit_10000000xx0233
 
 # ── Hosting / deployment ───────────────────────────────────────────────────────
 HEROKU_APP_NAME = getenv("HEROKU_APP_NAME")
@@ -68,8 +68,8 @@ AUTO_LEAVE_ASSISTANT_TIME = int(getenv("ASSISTANT_LEAVE_TIME", "604800"))
 DEBUG_IGNORE_LOG = True
 
 # ── Spotify (optional) ─────────────────────────────────────────────────────────
-SPOTIFY_CLIENT_ID = getenv("SPOTIFY_CLIENT_ID", "22b6125bfe224587b722d6815002db2b")
-SPOTIFY_CLIENT_SECRET = getenv("SPOTIFY_CLIENT_SECRET", "c9c63c6fbf2f467c8bc68624851e9773")
+SPOTIFY_CLIENT_ID = getenv("SPOTIFY_CLIENT_ID", "")
+SPOTIFY_CLIENT_SECRET = getenv("SPOTIFY_CLIENT_SECRET", "")
 
 # ── Session strings (optional) ─────────────────────────────────────────────────
 STRING1 = getenv("STRING_SESSION")

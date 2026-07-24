@@ -11,6 +11,10 @@ SUPPORT_BTN = InlineKeyboardMarkup(
 )
 
 CUTE_VIDEO = "https://telegra.ph/file/528d0563175669e123a75.mp4"
+NEKOS_BEST_HEADERS = {
+    "Accept": "application/json",
+    "User-Agent": "VivaanXMusicBot (https://github.com/VivaanXMusic)",
+}
 
 
 @app.on_message(filters.command("wish"))
@@ -22,6 +26,7 @@ async def wish(_, m):
         response = await asyncio.to_thread(
             requests.get,
             "https://nekos.best/api/v2/happy",
+            headers=NEKOS_BEST_HEADERS,
             timeout=12,
         )
         api = response.json()

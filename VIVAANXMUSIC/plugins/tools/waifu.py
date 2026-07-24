@@ -5,6 +5,10 @@ from pyrogram.types import Message
 from VIVAANXMUSIC import app
 
 NEKOS_BEST_API_BASE = "https://nekos.best/api/v2"
+NEKOS_BEST_HEADERS = {
+    "Accept": "application/json",
+    "User-Agent": "VivaanXMusicBot (https://github.com/VivaanXMusic)",
+}
 NEKOS_BEST_TAGS = {
     "waifu",
     "neko",
@@ -70,6 +74,7 @@ def get_waifu_data(tag):
         try:
             response = requests.get(
                 f"{NEKOS_BEST_API_BASE}/{endpoint_tag}",
+                headers=NEKOS_BEST_HEADERS,
                 timeout=12,
             )
             response.raise_for_status()

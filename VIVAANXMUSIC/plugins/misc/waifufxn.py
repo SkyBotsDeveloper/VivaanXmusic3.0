@@ -1,10 +1,17 @@
+import asyncio
+
+import requests
 from pyrogram import Client, filters
-from pyrogram.types import Message
 from pyrogram.enums import ParseMode
-from nekosbest import Client as NekoClient
+from pyrogram.types import Message
+
 from VIVAANXMUSIC import app
 
-neko_client = NekoClient()
+NEKOS_BEST_API_BASE = "https://nekos.best/api/v2"
+NEKOS_BEST_HEADERS = {
+    "Accept": "application/json",
+    "User-Agent": "VivaanXMusicBot (https://github.com/VivaanXMusic)",
+}
 
 commands = {
     "punch": {"emoji": "💥", "text": "punched"},
@@ -47,13 +54,33 @@ def md_escape(text: str) -> str:
     return text.replace('[', '\\[').replace(']', '\\]')
 
 
-async def get_animation(action: str):
+async def _unused_get_animation(action: str):
     try:
-        result = await neko_client.get_image(action)
-        return result.url
+        return None
     except Exception as e:
         print(f"❌ NekoClient error: {e}")
         return None
+
+
+def _fetch_animation(action: str):
+    for endpoint in (action, "happy", "waifu"):
+        try:
+            response = requests.get(
+                f"{NEKOS_BEST_API_BASE}/{endpoint}",
+                headers=NEKOS_BEST_HEADERS,
+                timeout=12,
+            )
+            response.raise_for_status()
+            results = response.json().get("results") or []
+            if results and results[0].get("url"):
+                return results[0]["url"]
+        except Exception:
+            continue
+    return None
+
+
+async def get_animation(action: str):
+    return await asyncio.to_thread(_fetch_animation, action)
 
 
 @app.on_message(filters.command(list(commands.keys())) & ~filters.forwarded & ~filters.via_bot)
