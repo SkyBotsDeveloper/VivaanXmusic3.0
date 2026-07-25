@@ -1,11 +1,14 @@
 import base64
+import re
 import textwrap
+import unicodedata
 from io import BytesIO
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from VIVAANXMUSIC import app
 from httpx import AsyncClient, Timeout
 from PIL import Image, ImageDraw, ImageFont
+from unidecode import unidecode
 
 # -----------------------------------------------------------------
 fetch = AsyncClient(
@@ -27,14 +30,36 @@ QUOTE_BINARY_ENDPOINTS = (
     "https://quote.yuri.ly/generate.webp",
     "https://bot.lyo.su/quote/generate.png",
 )
+QUOTE_NAME_LIMIT = 48
+DECORATIVE_NAME_RE = re.compile(
+    "["
+    "\u0250-\u02af"
+    "\u1d00-\u1dbf"
+    "\u2100-\u214f"
+    "\u2460-\u24ff"
+    "\U0001d400-\U0001d7ff"
+    "\ufe00-\ufe0f"
+    "]"
+)
+ASCII_NAME_CLEAN_RE = re.compile(r"[^A-Za-z0-9 ._@'&()\-]+")
 # ------------------------------------------------------------------------
 class QuotlyException(Exception):
     pass
 # --------------------------------------------------------------------------
 def _load_quote_font(size: int, *, bold: bool = False):
     names = (
+        "NirmalaB.ttf" if bold else "Nirmala.ttf",
+        "segoeuib.ttf" if bold else "segoeui.ttf",
         "arialbd.ttf" if bold else "arial.ttf",
+        "C:/Windows/Fonts/NirmalaB.ttf" if bold else "C:/Windows/Fonts/Nirmala.ttf",
+        "C:/Windows/Fonts/segoeuib.ttf" if bold else "C:/Windows/Fonts/segoeui.ttf",
         "C:/Windows/Fonts/arialbd.ttf" if bold else "C:/Windows/Fonts/arial.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf"
+        if bold
+        else "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Bold.ttf"
+        if bold
+        else "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
         if bold
         else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -45,6 +70,45 @@ def _load_quote_font(size: int, *, bold: bool = False):
         except Exception:
             continue
     return ImageFont.load_default()
+
+
+def _trim_quote_name(name: str) -> str:
+    if len(name) <= QUOTE_NAME_LIMIT:
+        return name
+    return f"{name[: QUOTE_NAME_LIMIT - 3].rstrip()}..."
+
+
+def _prettify_ascii_quote_name(name: str) -> str:
+    words = []
+    for word in name.split():
+        letters = [ch for ch in word if ch.isalpha()]
+        if len(letters) > 3 and sum(ch.isupper() for ch in letters) > sum(
+            ch.islower() for ch in letters
+        ):
+            word = word[:1].upper() + word[1:].lower()
+        words.append(word)
+    return " ".join(words)
+
+
+def _quote_display_name(name, fallback: str = "User") -> str:
+    raw = str(name or "").strip()
+    raw = "".join(ch for ch in raw if unicodedata.category(ch)[0] != "C")
+    raw = " ".join(raw.split())
+    if not raw:
+        return fallback
+
+    normalized = unicodedata.normalize("NFKC", raw)
+    normalized = " ".join(normalized.split())
+    if not DECORATIVE_NAME_RE.search(raw):
+        return _trim_quote_name(normalized or fallback)
+
+    readable = unidecode(normalized)
+    readable = ASCII_NAME_CLEAN_RE.sub("", readable)
+    readable = " ".join(readable.split()).strip()
+    readable = _prettify_ascii_quote_name(readable)
+    if len(readable.replace(" ", "")) >= 2:
+        return _trim_quote_name(readable)
+    return _trim_quote_name(normalized or fallback)
 
 
 def _quote_text_size(draw: ImageDraw.ImageDraw, text: str, font) -> tuple[int, int]:
@@ -89,7 +153,9 @@ def _quote_color(seed: int):
 
 
 def _quote_initials(name: str):
-    parts = [part for part in str(name or "").split() if part]
+    readable = unidecode(unicodedata.normalize("NFKC", str(name or "")))
+    readable = ASCII_NAME_CLEAN_RE.sub(" ", readable)
+    parts = [part for part in readable.split() if part]
     if not parts:
         return "?"
     return "".join(part[0].upper() for part in parts[:2])
@@ -114,7 +180,7 @@ async def _render_quote_locally(messages, is_reply):
     rows = []
     total_height = padding
     for message in messages:
-        name = await get_message_sender_name(message) or "Unknown"
+        name = _quote_display_name(await get_message_sender_name(message), "Unknown")
         text = await get_text_or_caption(message) or "[message]"
         sender_id = await get_message_sender_id(message)
         text_lines = _wrap_quote_text(draw, text, text_font, content_width)
@@ -122,7 +188,9 @@ async def _render_quote_locally(messages, is_reply):
         reply_lines = []
         reply_name = ""
         if is_reply and message.reply_to_message:
-            reply_name = await get_message_sender_name(message.reply_to_message) or "Reply"
+            reply_name = _quote_display_name(
+                await get_message_sender_name(message.reply_to_message), "Reply"
+            )
             reply_text = await get_text_or_caption(message.reply_to_message) or "[message]"
             reply_lines = _wrap_quote_text(draw, reply_text, reply_font, content_width - 24)[:2]
 
@@ -399,8 +467,8 @@ async def pyrogram_to_quotly(messages, is_reply):
         the_message_dict_to_append["avatar"] = True
         the_message_dict_to_append["from"] = {}
         the_message_dict_to_append["from"]["id"] = await get_message_sender_id(message)
-        the_message_dict_to_append["from"]["name"] = await get_message_sender_name(
-            message
+        the_message_dict_to_append["from"]["name"] = _quote_display_name(
+            await get_message_sender_name(message)
         )
         the_message_dict_to_append["from"][
             "username"
@@ -411,7 +479,9 @@ async def pyrogram_to_quotly(messages, is_reply):
         )
         if message.reply_to_message and is_reply:
             the_message_dict_to_append["replyMessage"] = {
-                "name": await get_message_sender_name(message.reply_to_message),
+                "name": _quote_display_name(
+                    await get_message_sender_name(message.reply_to_message), "Reply"
+                ),
                 "text": await get_text_or_caption(message.reply_to_message),
                 "chatId": await get_message_sender_id(message.reply_to_message),
             }
@@ -424,11 +494,12 @@ async def pyrogram_to_quotly(messages, is_reply):
         try:
             r = await fetch.post(endpoint, json=payload)
             content_type = (r.headers.get("content-type") or "").lower()
+            body = r.content
             if not r.is_error and (
                 content_type.startswith("image/")
-                or r.read().startswith((b"RIFF", b"\x89PNG", b"\xff\xd8"))
+                or body.startswith((b"RIFF", b"\x89PNG", b"\xff\xd8"))
             ):
-                return r.read()
+                return body
             try:
                 errors.append(f"{endpoint}: {r.json()}")
             except Exception:
