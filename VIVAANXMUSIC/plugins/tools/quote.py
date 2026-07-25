@@ -19,6 +19,14 @@ fetch = AsyncClient(
     },
     timeout=Timeout(20),
 )
+QUOTE_JSON_ENDPOINTS = (
+    "https://quote.yuri.ly/generate",
+    "https://bot.lyo.su/quote/generate",
+)
+QUOTE_BINARY_ENDPOINTS = (
+    "https://quote.yuri.ly/generate.webp",
+    "https://bot.lyo.su/quote/generate.png",
+)
 # ------------------------------------------------------------------------
 class QuotlyException(Exception):
     pass
@@ -356,8 +364,11 @@ async def pyrogram_to_quotly(messages, is_reply):
         messages = [messages]
     payload = {
         "type": "quote",
-        "format": "png",
+        "format": "webp",
         "backgroundColor": "#1b1429",
+        "width": 512,
+        "scale": 2,
+        "emojiBrand": "apple",
         "messages": [],
     }
 # ------------------------------------------------------------------------------------------------------------
@@ -409,26 +420,41 @@ async def pyrogram_to_quotly(messages, is_reply):
         payload["messages"].append(the_message_dict_to_append)
     errors = []
 
-    try:
-        r = await fetch.post("https://bot.lyo.su/quote/generate", json=payload)
-        if not r.is_error:
-            data = r.json()
-            image_data = ((data.get("result") or {}).get("image") or "").strip()
-            if image_data:
-                return base64.b64decode(image_data)
-            errors.append("quote/generate returned no image")
-        else:
-            errors.append(str(r.json()))
-    except Exception as exc:
-        errors.append(str(exc))
+    for endpoint in QUOTE_BINARY_ENDPOINTS:
+        try:
+            r = await fetch.post(endpoint, json=payload)
+            content_type = (r.headers.get("content-type") or "").lower()
+            if not r.is_error and (
+                content_type.startswith("image/")
+                or r.read().startswith((b"RIFF", b"\x89PNG", b"\xff\xd8"))
+            ):
+                return r.read()
+            try:
+                errors.append(f"{endpoint}: {r.json()}")
+            except Exception:
+                errors.append(f"{endpoint}: HTTP {r.status_code}")
+        except Exception as exc:
+            errors.append(f"{endpoint}: {exc}")
 
-    try:
-        r = await fetch.post("https://bot.lyo.su/quote/generate.png", json=payload)
-        if not r.is_error:
-            return r.read()
-        errors.append(str(r.json()))
-    except Exception as exc:
-        errors.append(str(exc))
+    for endpoint in QUOTE_JSON_ENDPOINTS:
+        try:
+            r = await fetch.post(endpoint, json=payload)
+            if not r.is_error:
+                data = r.json()
+                image_data = (
+                    ((data.get("result") or {}).get("image") or data.get("image") or "")
+                    .strip()
+                )
+                if image_data:
+                    return base64.b64decode(image_data)
+                errors.append(f"{endpoint}: returned no image")
+            else:
+                try:
+                    errors.append(f"{endpoint}: {r.json()}")
+                except Exception:
+                    errors.append(f"{endpoint}: HTTP {r.status_code}")
+        except Exception as exc:
+            errors.append(f"{endpoint}: {exc}")
 
     try:
         return await _render_quote_locally(messages, is_reply)
