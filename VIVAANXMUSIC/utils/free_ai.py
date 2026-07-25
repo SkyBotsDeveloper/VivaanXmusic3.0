@@ -47,6 +47,7 @@ CHAT_API_URL = "https://api-xqwa.onrender.com/chat/"
 ELITE_CHAT_COMPLETIONS_URL = f"{ELITE_LLM_API_BASE}/chat/completions"
 AIRFORCE_CHAT_COMPLETIONS_URL = "https://api.airforce/v1/chat/completions"
 IMAGE_GEN_URL = "https://death-image.ashlynn.workers.dev/generate"
+POLLINATIONS_IMAGE_URL = "https://image.pollinations.ai/prompt/{prompt}"
 IMAGE_ENHANCE_URL = "https://arimagex.netlify.app/api/enhance"
 IMAGE_REMOVEBG_URL = "https://arimagex.netlify.app/api/removebg"
 OCR_SPACE_API_URL = "https://api.ocr.space/parse/image"
@@ -3708,6 +3709,16 @@ async def generate_image(prompt: str) -> bytes:
         trust_env=False,
     ) as client:
         failures: list[str] = []
+
+        async def download_image(url: str, *, params: dict | None = None) -> bytes:
+            image_response = await client.get(url, params=params)
+            content_type = (image_response.headers.get("content-type") or "").lower()
+            if image_response.status_code != 200:
+                raise FreeAIError("Generated image could not be downloaded.")
+            if not content_type.startswith("image/"):
+                raise FreeAIError("Generated image download returned a non-image payload.")
+            return image_response.content
+
         for attempt in range(3):
             try:
                 response = await client.get(IMAGE_GEN_URL, params=params)
@@ -3729,14 +3740,30 @@ async def generate_image(prompt: str) -> bytes:
                         detail = "Image generation service did not return an image."
                     raise FreeAIError(detail)
 
-                image_response = await client.get(images[0])
-                if image_response.status_code != 200:
-                    raise FreeAIError("Generated image could not be downloaded.")
-                return image_response.content
+                return await download_image(images[0])
             except (httpx.HTTPError, FreeAIError) as exc:
                 failures.append(str(exc))
                 if attempt < 2:
                     await asyncio.sleep(1 + attempt)
+
+        pollinations_params = {
+            "width": 1024,
+            "height": 1024,
+            "nologo": "true",
+            "safe": "true",
+            "model": "flux",
+        }
+        pollinations_url = POLLINATIONS_IMAGE_URL.format(prompt=quote(prompt, safe=""))
+        for attempt in range(2):
+            try:
+                return await download_image(
+                    pollinations_url,
+                    params=pollinations_params,
+                )
+            except (httpx.HTTPError, FreeAIError) as exc:
+                failures.append(f"Pollinations: {exc}")
+                if attempt < 1:
+                    await asyncio.sleep(1)
 
     details = "\n".join(failures[-3:])
     raise FreeAIError(f"Image generation service is temporarily unavailable.\n{details}")
