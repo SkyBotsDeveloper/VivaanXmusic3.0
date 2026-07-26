@@ -48,6 +48,16 @@ def int_env(name: str, default: int) -> int:
         return default
 
 
+def bool_env(name: str, default: bool = True) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() not in {"0", "false", "off", "no"}
+
+
+STREAM_HTTP_PROBE_TIMEOUT = max(2, int_env("YOUTUBE_STREAM_HTTP_PROBE_TIMEOUT", 5))
+STREAM_PREFLIGHT_TIMEOUT = max(3, int_env("YOUTUBE_STREAM_PREFLIGHT_TIMEOUT", 7))
+STREAM_PREFLIGHT_ENABLED = bool_env("YOUTUBE_STREAM_PREFLIGHT", True)
 DOWNLOAD_CACHE_MAX_BYTES = max(0, int_env("DOWNLOAD_CACHE_MAX_MB", 2048)) * 1024 * 1024
 DOWNLOAD_CACHE_MIN_FREE_BYTES = max(0, int_env("DOWNLOAD_CACHE_MIN_FREE_MB", 512)) * 1024 * 1024
 
@@ -111,6 +121,105 @@ async def shell_cmd(cmd):
             return stdout
         return stderr
     return stdout
+
+
+async def validate_playable_stream_url(url: str, media_type: str = "audio") -> bool:
+    if not url:
+        return False
+
+    loop = asyncio.get_running_loop()
+
+    def http_probe():
+        session = None
+        try:
+            session = requests.Session()
+            response = session.get(
+                url,
+                headers={
+                    "User-Agent": "Mozilla/5.0",
+                    "Range": "bytes=0-0",
+                },
+                stream=True,
+                timeout=STREAM_HTTP_PROBE_TIMEOUT,
+            )
+            if response.status_code not in {200, 206}:
+                return False
+            for chunk in response.iter_content(chunk_size=1):
+                return bool(chunk)
+            return True
+        except Exception:
+            return False
+        finally:
+            if session:
+                session.close()
+
+    if not await loop.run_in_executor(None, http_probe):
+        return False
+    if not STREAM_PREFLIGHT_ENABLED:
+        return True
+
+    args = [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-nostdin",
+        "-i",
+        url,
+        "-map",
+        "0:a:0",
+        "-t",
+        "1",
+        "-f",
+        "null",
+        "-",
+    ]
+    proc = None
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+            env=build_subprocess_env(),
+        )
+        _, stderr = await asyncio.wait_for(
+            proc.communicate(),
+            timeout=STREAM_PREFLIGHT_TIMEOUT,
+        )
+        if proc.returncode == 0:
+            return True
+        reason = (stderr or b"").decode("utf-8", errors="replace").strip()
+        if reason:
+            reason = reason.splitlines()[-1][:220]
+        logger.warning(
+            "YouTube stream preflight failed | media=%s | reason=%s",
+            media_type,
+            reason or f"ffmpeg exited with {proc.returncode}",
+        )
+        return False
+    except asyncio.TimeoutError:
+        if proc and proc.returncode is None:
+            proc.kill()
+            try:
+                await proc.communicate()
+            except Exception:
+                pass
+        logger.warning(
+            "YouTube stream preflight timed out | media=%s | timeout=%ss",
+            media_type,
+            STREAM_PREFLIGHT_TIMEOUT,
+        )
+        return False
+    except FileNotFoundError:
+        logger.warning("YouTube stream preflight skipped because ffmpeg is not installed.")
+        return True
+    except Exception as exc:
+        logger.warning(
+            "YouTube stream preflight failed | media=%s | reason=%s",
+            media_type,
+            exc,
+        )
+        return False
 
 
 class YouTubeAPI:
@@ -751,34 +860,8 @@ class YouTubeAPI:
             return await download_with_requests_fallback(url, filepath, headers)
 
         async def validate_stream_source(url):
-            if not url:
-                return False
-
-            def check_source():
-                session = None
-                try:
-                    session = create_session()
-                    response = session.get(
-                        url,
-                        headers={
-                            "User-Agent": "Mozilla/5.0",
-                            "Range": "bytes=0-0",
-                        },
-                        stream=True,
-                        timeout=12,
-                    )
-                    if response.status_code not in {200, 206}:
-                        return False
-                    for chunk in response.iter_content(chunk_size=1):
-                        return bool(chunk)
-                    return True
-                except Exception:
-                    return False
-                finally:
-                    if session:
-                        session.close()
-
-            return await loop.run_in_executor(None, check_source)
+            media_type = "video" if video else "audio"
+            return await validate_playable_stream_url(url, media_type)
 
         def schedule_background_cache(url, filepath, headers=None):
             if not url or not filepath or cached_media_ready(filepath):
