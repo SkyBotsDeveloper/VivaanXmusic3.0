@@ -689,17 +689,71 @@ class YouTubeAPI:
                     pass
             return None
 
-        def select_media_link(data, prefer_stream=False):
-            keys = (
-                ("streamLink", "directLink", "downloads")
-                if prefer_stream
-                else ("directLink", "streamLink", "downloads")
-            )
-            for key in keys:
-                value = data.get(key)
-                if isinstance(value, str) and value:
-                    return value
+        def first_media_url(value, media_format=None):
+            if isinstance(value, str):
+                value = value.strip()
+                return value or None
+            if isinstance(value, dict):
+                preferred_keys = (
+                    media_format,
+                    "url",
+                    "link",
+                    "downloadUrl",
+                    "download_url",
+                    "directLink",
+                    "streamLink",
+                    "audio_url",
+                    "video_url",
+                )
+                for key in preferred_keys:
+                    if not key:
+                        continue
+                    url = first_media_url(value.get(key), media_format)
+                    if url:
+                        return url
+                for item in value.values():
+                    url = first_media_url(item, media_format)
+                    if url:
+                        return url
+            if isinstance(value, (list, tuple)):
+                for item in value:
+                    url = first_media_url(item, media_format)
+                    if url:
+                        return url
             return None
+
+        def select_media_links(data, media_format, prefer_stream=False):
+            stream_keys = ("streamLink", "streamUrl", "stream_url")
+            download_keys = (
+                "directLink",
+                "directUrl",
+                "downloadLink",
+                "downloadUrl",
+                "download_url",
+                "downloads",
+            )
+            play_keys = (
+                stream_keys + download_keys
+                if prefer_stream
+                else download_keys + stream_keys
+            )
+            cache_keys = download_keys + stream_keys
+
+            def pick(keys):
+                for key in keys:
+                    url = first_media_url(data.get(key), media_format)
+                    if url:
+                        return key, url
+                return None, None
+
+            play_key, play_url = pick(play_keys)
+            cache_key, cache_url = pick(cache_keys)
+            return {
+                "play_key": play_key,
+                "play_url": play_url,
+                "cache_key": cache_key or play_key,
+                "cache_url": cache_url or play_url,
+            }
 
         def mark_source(vid_id, media_type, source, ok=True):
             state = "OK" if ok else "FAILED"
@@ -744,7 +798,22 @@ class YouTubeAPI:
                 message,
             )
 
-        def fetch_worker_fallback_link_sync(vid_id, media_format):
+        def schedule_worker_background_cache(media, filepath, media_type, vid_id):
+            cache_url = (media or {}).get("cache_url") or (media or {}).get("play_url")
+            if not cache_url:
+                return
+            logger.info(
+                "YouTube background cache scheduled | source=worker_primary | media=%s | video_id=%s | title=%s | play_link=%s | cache_link=%s | same_url=%s",
+                media_type,
+                vid_id,
+                log_title,
+                (media or {}).get("play_key") or "-",
+                (media or {}).get("cache_key") or "-",
+                cache_url == (media or {}).get("play_url"),
+            )
+            schedule_background_cache(cache_url, filepath)
+
+        def fetch_worker_fallback_links_sync(vid_id, media_format):
             if not WORKER_FALLBACK_API_URL or not WORKER_FALLBACK_API_KEY:
                 logger.warning("Worker fallback API URL/key not set. Skipping worker fallback.")
                 return None
@@ -773,8 +842,8 @@ class YouTubeAPI:
                     )
                     return None
 
-                media_url = select_media_link(data, prefer_stream=bool(stream))
-                if not media_url:
+                media = select_media_links(data, media_format, prefer_stream=bool(stream))
+                if not media.get("play_url"):
                     logger.error(
                         "Worker fallback API failed | format=%s | video_id=%s | title=%s | reason=no media url",
                         media_format,
@@ -782,7 +851,15 @@ class YouTubeAPI:
                         log_title,
                     )
                     return None
-                return media_url
+                logger.info(
+                    "Worker fallback API selected | format=%s | video_id=%s | title=%s | play_link=%s | cache_link=%s",
+                    media_format,
+                    vid_id,
+                    log_title,
+                    media.get("play_key") or "-",
+                    media.get("cache_key") or "-",
+                )
+                return media
             except Exception as e:
                 logger.error(
                     "Worker fallback API failed | format=%s | video_id=%s | title=%s | reason=%s",
@@ -796,9 +873,9 @@ class YouTubeAPI:
                 if session:
                     session.close()
 
-        async def get_worker_fallback_link(vid_id, media_format):
+        async def get_worker_fallback_links(vid_id, media_format):
             return await loop.run_in_executor(
-                None, fetch_worker_fallback_link_sync, vid_id, media_format
+                None, fetch_worker_fallback_links_sync, vid_id, media_format
             )
 
         async def audio_dl(vid_id):
@@ -821,13 +898,15 @@ class YouTubeAPI:
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
             }
 
-            worker_audio_url = await get_worker_fallback_link(vid_id, "mp3")
-            if worker_audio_url:
+            worker_audio = await get_worker_fallback_links(vid_id, "mp3")
+            if worker_audio:
+                worker_audio_url = worker_audio.get("play_url")
+                worker_audio_cache_url = worker_audio.get("cache_url") or worker_audio_url
                 if stream and await validate_stream_source(worker_audio_url):
                     mark_source(vid_id, "audio", "WORKER PRIMARY")
-                    schedule_background_cache(worker_audio_url, filepath)
+                    schedule_worker_background_cache(worker_audio, filepath, "audio", vid_id)
                     return worker_audio_url, False
-                result = await download_from_source(worker_audio_url, filepath)
+                result = await download_from_source(worker_audio_cache_url, filepath)
                 if result:
                     mark_source(vid_id, "audio", "WORKER PRIMARY")
                     return result, True
@@ -907,13 +986,15 @@ class YouTubeAPI:
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
             }
 
-            worker_video_url = await get_worker_fallback_link(vid_id, "mp4")
-            if worker_video_url:
+            worker_video = await get_worker_fallback_links(vid_id, "mp4")
+            if worker_video:
+                worker_video_url = worker_video.get("play_url")
+                worker_video_cache_url = worker_video.get("cache_url") or worker_video_url
                 if stream and await validate_stream_source(worker_video_url):
                     mark_source(vid_id, "video", "WORKER PRIMARY")
-                    schedule_background_cache(worker_video_url, filepath)
+                    schedule_worker_background_cache(worker_video, filepath, "video", vid_id)
                     return worker_video_url, False
-                result = await download_from_source(worker_video_url, filepath)
+                result = await download_from_source(worker_video_cache_url, filepath)
                 if result:
                     mark_source(vid_id, "video", "WORKER PRIMARY")
                     return result, True
