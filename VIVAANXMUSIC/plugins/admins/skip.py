@@ -9,6 +9,10 @@ from VIVAANXMUSIC.utils.database import get_loop
 from VIVAANXMUSIC.utils.decorators import AdminRightsCheck
 from VIVAANXMUSIC.utils.inline import close_markup, stream_markup
 from VIVAANXMUSIC.utils.stream.autoclear import auto_clean
+from VIVAANXMUSIC.utils.stream.autodelete import (
+    delete_queue_message,
+    remember_player_message,
+)
 from VIVAANXMUSIC.utils.stream.cards import schedule_stream_card
 from config import BANNED_USERS
 
@@ -97,6 +101,7 @@ async def skip(cli, message: Message, _, chat_id):
     videoid = check[0]["vidid"]
     status = True if str(streamtype) == "video" else None
     db[chat_id][0]["played"] = 0
+    await delete_queue_message(chat_id, check[0])
     exis = (check[0]).get("old_dur")
     if exis:
         db[chat_id][0]["dur"] = exis
@@ -197,6 +202,7 @@ async def skip(cli, message: Message, _, chat_id):
             reply_markup=InlineKeyboardMarkup(button),
         )
         db[chat_id][0]["mystic"] = run
+        remember_player_message(chat_id, run)
         db[chat_id][0]["markup"] = "tg"
     else:
         if videoid == "telegram":
@@ -224,6 +230,7 @@ async def skip(cli, message: Message, _, chat_id):
                 reply_markup=InlineKeyboardMarkup(button),
             )
             db[chat_id][0]["mystic"] = run
+            remember_player_message(chat_id, run)
             db[chat_id][0]["markup"] = "tg"
         elif videoid == "soundcloud":
             button = stream_markup(_, chat_id)
@@ -237,6 +244,7 @@ async def skip(cli, message: Message, _, chat_id):
                 reply_markup=InlineKeyboardMarkup(button),
             )
             db[chat_id][0]["mystic"] = run
+            remember_player_message(chat_id, run)
             db[chat_id][0]["markup"] = "tg"
         else:
             button = stream_markup(_, chat_id)

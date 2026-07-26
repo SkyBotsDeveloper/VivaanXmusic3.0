@@ -8,6 +8,7 @@ from VIVAANXMUSIC.core.mongo import mongodb
 authdb = mongodb.adminauth
 authuserdb = mongodb.authuser
 autoenddb = mongodb.autoend
+autodeletedb = mongodb.autodelete
 autoplaydb = mongodb.autoplay
 assdb = mongodb.assistants
 blacklist_chatdb = mongodb.blacklistChat
@@ -31,6 +32,7 @@ active = []
 activevideo = []
 assistantdict = {}
 autoend = {}
+autodelete = {}
 autoplay = {}
 count = {}
 channelconnect = {}
@@ -239,6 +241,27 @@ async def set_autoplay(chat_id: int, mode: bool):
     enabled = bool(mode)
     autoplay[chat_id] = enabled
     await autoplaydb.update_one(
+        {"chat_id": chat_id}, {"$set": {"mode": enabled}}, upsert=True
+    )
+
+
+async def get_autodelete(chat_id: int) -> bool:
+    mode = autodelete.get(chat_id)
+    if mode is None:
+        data = await autodeletedb.find_one({"chat_id": chat_id})
+        if not data:
+            autodelete[chat_id] = False
+            return False
+        mode = bool(data.get("mode"))
+        autodelete[chat_id] = mode
+        return mode
+    return bool(mode)
+
+
+async def set_autodelete(chat_id: int, mode: bool):
+    enabled = bool(mode)
+    autodelete[chat_id] = enabled
+    await autodeletedb.update_one(
         {"chat_id": chat_id}, {"$set": {"mode": enabled}}, upsert=True
     )
 

@@ -42,6 +42,10 @@ from VIVAANXMUSIC.utils.formatters import check_duration, seconds_to_min, speed_
 from VIVAANXMUSIC.utils.inline.play import stream_markup
 from VIVAANXMUSIC.security import build_subprocess_env
 from VIVAANXMUSIC.utils.stream.autoclear import auto_clean
+from VIVAANXMUSIC.utils.stream.autodelete import (
+    delete_queue_message,
+    remember_player_message,
+)
 from VIVAANXMUSIC.utils.stream.cards import schedule_stream_card
 from VIVAANXMUSIC.utils.stream.precache import schedule_youtube_precache_for_chat
 from VIVAANXMUSIC.utils.errors import capture_internal_err, send_large_error
@@ -122,7 +126,10 @@ async def _clear_(chat_id: int) -> None:
     _cancel_playback_watchdog(chat_id)
     playback_recovery_attempts.pop(chat_id, None)
     popped = db.pop(chat_id, None)
-    if popped:
+    if isinstance(popped, list):
+        for item in popped:
+            await auto_clean(item)
+    elif popped:
         await auto_clean(popped)
     db[chat_id] = []
     for call_id, info in list(vc_join_call_map.items()):
@@ -668,7 +675,9 @@ class Call:
         try:
             check = db.get(chat_id)
             if check:
-                check.pop(0)
+                popped = check.pop(0)
+                if popped:
+                    await auto_clean(popped)
         except (IndexError, KeyError):
             pass
         await remove_active_video_chat(chat_id)
@@ -1028,6 +1037,7 @@ class Call:
             streamtype = current.get("streamtype") or "audio"
             videoid = current.get("vidid")
             db[chat_id][0]["played"] = 0
+            await delete_queue_message(chat_id, current)
 
             exis = current.get("old_dur")
             if exis:
@@ -1182,6 +1192,7 @@ class Call:
                     reply_markup=InlineKeyboardMarkup(button),
                 )
                 db[chat_id][0]["mystic"] = run
+                remember_player_message(chat_id, run)
                 db[chat_id][0]["markup"] = "tg"
                 return
 
@@ -1208,6 +1219,7 @@ class Call:
                         reply_markup=InlineKeyboardMarkup(button),
                     )
                     db[chat_id][0]["mystic"] = run
+                    remember_player_message(chat_id, run)
                     db[chat_id][0]["markup"] = "tg"
 
                 elif videoid == "soundcloud":
@@ -1221,6 +1233,7 @@ class Call:
                         reply_markup=InlineKeyboardMarkup(button),
                     )
                     db[chat_id][0]["mystic"] = run
+                    remember_player_message(chat_id, run)
                     db[chat_id][0]["markup"] = "tg"
 
                 else:

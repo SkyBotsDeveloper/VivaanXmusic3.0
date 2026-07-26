@@ -39,11 +39,36 @@ from VIVAANXMUSIC.utils.decorators import ActualAdminCB, languageCB
 from VIVAANXMUSIC.utils.formatters import seconds_to_min
 from VIVAANXMUSIC.utils.inline import close_markup, stream_markup, stream_markup_timer
 from VIVAANXMUSIC.utils.stream.autoclear import auto_clean
+from VIVAANXMUSIC.utils.stream.autodelete import (
+    delete_queue_message,
+    remember_player_message,
+)
 from VIVAANXMUSIC.utils.stream.cards import schedule_stream_card
 
 
 checker = {}
 upvoters = {}
+
+
+async def _safe_edit_callback_message(callback: CallbackQuery, text: str, reply_markup=None):
+    try:
+        await callback.edit_message_text(text, reply_markup=reply_markup)
+    except Exception:
+        pass
+
+
+async def _safe_reply_callback_message(callback: CallbackQuery, text: str, reply_markup=None):
+    try:
+        return await callback.message.reply_text(text, reply_markup=reply_markup)
+    except Exception:
+        try:
+            return await app.send_message(
+                callback.message.chat.id,
+                text,
+                reply_markup=reply_markup,
+            )
+        except Exception:
+            return None
 
 
 def parse_chat_info(chat_info: str):
@@ -165,8 +190,15 @@ async def manage_callback(client, callback: CallbackQuery, _):
         await callback.answer()
         await JARVIS.stop_stream(chat_id)
         await set_loop(chat_id, 0)
-        await callback.message.reply_text(_["admin_5"].format(user_mention), reply_markup=close_markup(_))
-        await callback.message.delete()
+        await _safe_reply_callback_message(
+            callback,
+            _["admin_5"].format(user_mention),
+            reply_markup=close_markup(_),
+        )
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
 
     elif command == "Mute":
         if await is_muted(chat_id):
@@ -225,16 +257,18 @@ async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: 
             if popped:
                 await auto_clean(popped)
             if not playlist:
-                await callback.edit_message_text(text_msg)
-                await callback.message.reply_text(
+                await _safe_edit_callback_message(callback, text_msg)
+                await _safe_reply_callback_message(
+                    callback,
                     _["admin_6"].format(user_mention, callback.message.chat.title),
                     reply_markup=close_markup(_)
                 )
                 return await JARVIS.stop_stream(chat_id)
         except Exception:
             try:
-                await callback.edit_message_text(text_msg)
-                await callback.message.reply_text(
+                await _safe_edit_callback_message(callback, text_msg)
+                await _safe_reply_callback_message(
+                    callback,
                     _["admin_6"].format(user_mention, callback.message.chat.title),
                     reply_markup=close_markup(_)
                 )
@@ -260,6 +294,7 @@ async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: 
     status = True if str(streamtype) == "video" else None
 
     db[chat_id][0]["played"] = 0
+    await delete_queue_message(chat_id, current_track)
     if current_track.get("old_dur"):
         db[chat_id][0]["dur"] = current_track["old_dur"]
         db[chat_id][0]["seconds"] = current_track["old_second"]
@@ -296,7 +331,7 @@ async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: 
             button=buttons,
             markup="tg",
         )
-        await callback.edit_message_text(text_msg, reply_markup=close_markup(_))
+        await _safe_edit_callback_message(callback, text_msg, reply_markup=close_markup(_))
 
     elif "vid_" in queued:
         mystic = await callback.message.reply_text(_["call_7"], disable_web_page_preview=True)
@@ -352,7 +387,7 @@ async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: 
             button=buttons,
             markup="stream",
         )
-        await callback.edit_message_text(text_msg, reply_markup=close_markup(_))
+        await _safe_edit_callback_message(callback, text_msg, reply_markup=close_markup(_))
         await mystic.delete()
 
     elif "index_" in queued:
@@ -367,8 +402,9 @@ async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: 
             reply_markup=InlineKeyboardMarkup(buttons)
         )
         db[chat_id][0]["mystic"] = run
+        remember_player_message(chat_id, run)
         db[chat_id][0]["markup"] = "tg"
-        await callback.edit_message_text(text_msg, reply_markup=close_markup(_))
+        await _safe_edit_callback_message(callback, text_msg, reply_markup=close_markup(_))
 
     else:
         if videoid in ["telegram", "soundcloud"]:
@@ -390,6 +426,7 @@ async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: 
                 reply_markup=InlineKeyboardMarkup(buttons)
             )
             db[chat_id][0]["mystic"] = run
+            remember_player_message(chat_id, run)
             db[chat_id][0]["markup"] = "tg"
         elif videoid == "soundcloud":
             buttons = stream_markup(_, chat_id)
@@ -399,6 +436,7 @@ async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: 
                 reply_markup=InlineKeyboardMarkup(buttons)
             )
             db[chat_id][0]["mystic"] = run
+            remember_player_message(chat_id, run)
             db[chat_id][0]["markup"] = "tg"
         else:
             buttons = stream_markup(_, chat_id)
@@ -416,7 +454,7 @@ async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: 
                 button=buttons,
                 markup="stream",
             )
-        await callback.edit_message_text(text_msg, reply_markup=close_markup(_))
+        await _safe_edit_callback_message(callback, text_msg, reply_markup=close_markup(_))
 
 
 async def handle_seek(callback: CallbackQuery, _, chat_id: int, command: str, user_mention: str):
