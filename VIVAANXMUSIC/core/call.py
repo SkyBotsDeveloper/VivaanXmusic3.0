@@ -1240,7 +1240,7 @@ class Call:
 
             elif "vid_" in queued:
                 mystic = await app.send_message(original_chat_id, _["call_7"])
-                file_path, direct, _ = await self._download_youtube_queue_source(
+                file_path, direct, source_mode = await self._download_youtube_queue_source(
                     videoid,
                     title,
                     mystic,
@@ -1265,7 +1265,7 @@ class Call:
                     await self._play_stream(client, chat_id, stream)
                 except:
                     fallback_modes = ("local",) if not direct else ("stream",)
-                    fallback_path, fallback_direct, _ = await self._download_youtube_queue_source(
+                    fallback_path, fallback_direct, fallback_mode = await self._download_youtube_queue_source(
                         videoid,
                         title,
                         mystic,
@@ -1284,7 +1284,11 @@ class Call:
                         ):
                             return
                         continue
-                    file_path, direct = fallback_path, fallback_direct
+                    file_path, direct, source_mode = (
+                        fallback_path,
+                        fallback_direct,
+                        fallback_mode,
+                    )
                     stream = dynamic_media_stream(path=file_path, video=video)
                     try:
                         await self._play_stream(client, chat_id, stream)
