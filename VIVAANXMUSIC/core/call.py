@@ -42,6 +42,7 @@ from VIVAANXMUSIC.utils.inline.play import stream_markup
 from VIVAANXMUSIC.security import build_subprocess_env
 from VIVAANXMUSIC.utils.stream.autoclear import auto_clean
 from VIVAANXMUSIC.utils.stream.cards import schedule_stream_card
+from VIVAANXMUSIC.utils.stream.precache import schedule_youtube_precache_for_chat
 from VIVAANXMUSIC.utils.errors import capture_internal_err, send_large_error
 
 autoend = {}
@@ -908,6 +909,7 @@ class Call:
 
                 button = stream_markup(_, chat_id)
                 await mystic.delete()
+                schedule_youtube_precache_for_chat(chat_id)
                 schedule_stream_card(
                     chat_id=chat_id,
                     original_chat_id=original_chat_id,

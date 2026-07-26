@@ -60,6 +60,12 @@ async def put_queue(
     else:
         db[chat_id].append(put)
     autoclean.append(file)
+    try:
+        from VIVAANXMUSIC.utils.stream.precache import schedule_youtube_precache_for_chat
+
+        schedule_youtube_precache_for_chat(chat_id)
+    except Exception:
+        pass
 
 
 async def put_queue_index(
