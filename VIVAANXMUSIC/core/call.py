@@ -66,6 +66,8 @@ PLAYBACK_WATCHDOG_GRACE_SECONDS = 20
 PLAYBACK_WATCHDOG_RECHECK_SECONDS = 30
 PLAYBACK_EARLY_END_GRACE_SECONDS = 25
 PLAYBACK_EARLY_END_MAX_RECOVERIES = 1
+empty_vc_since = {}
+empty_vc_watchdogs = {}
 
 
 def _safe_int(value, default: int = 0) -> int:
@@ -75,9 +77,26 @@ def _safe_int(value, default: int = 0) -> int:
         return default
 
 
+EMPTY_VC_GRACE_SECONDS = max(60, _safe_int(os.getenv("EMPTY_VC_GRACE_SECONDS"), 300))
+EMPTY_VC_CHECK_INTERVAL = max(15, _safe_int(os.getenv("EMPTY_VC_CHECK_INTERVAL"), 30))
+
+
 def _cancel_playback_watchdog(chat_id: int) -> None:
     playback_watchdog_tokens[chat_id] = playback_watchdog_tokens.get(chat_id, 0) + 1
     task = playback_watchdogs.pop(chat_id, None)
+    if not task or task.done():
+        return
+    try:
+        current = asyncio.current_task()
+    except RuntimeError:
+        current = None
+    if task is not current:
+        task.cancel()
+
+
+def _cancel_empty_vc_watchdog(chat_id: int) -> None:
+    empty_vc_since.pop(chat_id, None)
+    task = empty_vc_watchdogs.pop(chat_id, None)
     if not task or task.done():
         return
     try:
@@ -124,6 +143,7 @@ def is_too_many_open_files(err: Exception) -> bool:
 
 async def _clear_(chat_id: int) -> None:
     _cancel_playback_watchdog(chat_id)
+    _cancel_empty_vc_watchdog(chat_id)
     playback_recovery_attempts.pop(chat_id, None)
     popped = db.pop(chat_id, None)
     if isinstance(popped, list):
@@ -181,6 +201,120 @@ class Call:
             lock = asyncio.Lock()
             self._stream_locks[chat_id] = lock
         return lock
+
+    @staticmethod
+    def _ignored_vc_user_ids() -> set[int]:
+        ignored = set()
+        try:
+            from VIVAANXMUSIC.core.userbot import assistantids
+
+            ignored.update(int(user_id) for user_id in assistantids if user_id)
+        except Exception:
+            pass
+        bot_id = getattr(app, "id", None)
+        if bot_id:
+            ignored.add(int(bot_id))
+        return ignored
+
+    async def _real_vc_listener_ids(self, assistant: PyTgCalls, chat_id: int) -> set[int]:
+        participants = await assistant.get_participants(chat_id)
+        ignored = self._ignored_vc_user_ids()
+        listeners = set()
+        for participant in participants or []:
+            user_id = getattr(participant, "user_id", None)
+            if not user_id:
+                continue
+            user_id = int(user_id)
+            if user_id in ignored:
+                continue
+            listeners.add(user_id)
+        return listeners
+
+    async def _empty_vc_elapsed(self, assistant: PyTgCalls, chat_id: int) -> tuple[bool, float]:
+        listeners = await self._real_vc_listener_ids(assistant, chat_id)
+        if listeners:
+            empty_vc_since.pop(chat_id, None)
+            return False, 0.0
+
+        now = time.monotonic()
+        started = empty_vc_since.setdefault(chat_id, now)
+        return True, now - started
+
+    async def _allow_autoplay_for_vc_state(self, chat_id: int) -> bool:
+        try:
+            assistant = await group_assistant(self, chat_id)
+            is_empty, elapsed = await self._empty_vc_elapsed(assistant, chat_id)
+        except Exception as err:
+            LOGGER(__name__).warning(
+                "Autoplay listener check skipped | chat_id=%s | reason=%s",
+                chat_id,
+                err,
+            )
+            return True
+        return not is_empty or elapsed < EMPTY_VC_GRACE_SECONDS
+
+    def _schedule_empty_vc_watchdog(self, chat_id: int) -> None:
+        task = empty_vc_watchdogs.get(chat_id)
+        if task and not task.done():
+            return
+        empty_vc_watchdogs[chat_id] = asyncio.create_task(
+            self._empty_vc_watchdog_loop(chat_id)
+        )
+
+    async def _send_empty_vc_stop_notice(self, notify_chat_id: int) -> None:
+        try:
+            await app.send_message(
+                int(notify_chat_id),
+                "Playback stopped because no listeners were in the voice chat for 5 minutes.",
+            )
+        except Exception:
+            pass
+
+    async def _empty_vc_watchdog_loop(self, chat_id: int) -> None:
+        try:
+            while True:
+                if chat_id not in self.active_calls or not db.get(chat_id):
+                    empty_vc_since.pop(chat_id, None)
+                    return
+
+                try:
+                    assistant = await group_assistant(self, chat_id)
+                    is_empty, elapsed = await self._empty_vc_elapsed(assistant, chat_id)
+                except Exception as err:
+                    LOGGER(__name__).warning(
+                        "Empty VC watchdog check failed | chat_id=%s | reason=%s",
+                        chat_id,
+                        err,
+                    )
+                    await asyncio.sleep(EMPTY_VC_CHECK_INTERVAL)
+                    continue
+
+                if not is_empty or elapsed < EMPTY_VC_GRACE_SECONDS:
+                    await asyncio.sleep(EMPTY_VC_CHECK_INTERVAL)
+                    continue
+
+                queue = db.get(chat_id) or []
+                notify_chat_id = chat_id
+                if queue and isinstance(queue[0], dict):
+                    notify_chat_id = queue[0].get("chat_id") or chat_id
+
+                LOGGER(__name__).info(
+                    "Stopping playback because VC has no listeners | chat_id=%s | empty_seconds=%s",
+                    chat_id,
+                    int(elapsed),
+                )
+                await self.stop_stream(chat_id)
+                await self._send_empty_vc_stop_notice(notify_chat_id)
+                return
+        except asyncio.CancelledError:
+            raise
+        finally:
+            try:
+                current_task = asyncio.current_task()
+            except RuntimeError:
+                current_task = None
+            if empty_vc_watchdogs.get(chat_id) is current_task:
+                empty_vc_watchdogs.pop(chat_id, None)
 
     @staticmethod
     def _track_signature(track: dict) -> tuple:
@@ -818,6 +952,7 @@ class Call:
         if video:
             await add_active_video_chat(chat_id)
         await self.maybe_start_vc_join_notifier(chat_id, original_chat_id)
+        self._schedule_empty_vc_watchdog(chat_id)
         self._schedule_playback_watchdog(assistant, chat_id, initial_delay=2)
 
         if await is_autoend():
@@ -828,6 +963,15 @@ class Call:
 
     async def _enqueue_autoplay_track(self, chat_id: int, finished_track: dict) -> bool:
         if not finished_track or not await get_autoplay(chat_id):
+            return False
+        if not await self._allow_autoplay_for_vc_state(chat_id):
+            LOGGER(__name__).info(
+                "Autoplay blocked because VC has no listeners | chat_id=%s",
+                chat_id,
+            )
+            await self._send_empty_vc_stop_notice(
+                finished_track.get("chat_id", chat_id)
+            )
             return False
 
         queued_file = str(finished_track.get("file") or "")
