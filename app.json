@@ -84,12 +84,12 @@
     "WORKER_FALLBACK_API_ATTEMPTS": {
       "description": "Worker API attempts for transient 429/5xx failures.",
       "required": false,
-      "value": "2"
+      "value": "3"
     },
     "WORKER_FALLBACK_API_RETRY_DELAY_MS": {
       "description": "Base delay between transient Worker API retries, in milliseconds.",
       "required": false,
-      "value": "400"
+      "value": "1000"
     },
     "YOUTUBE_STREAM_HTTP_PROBE_TIMEOUT": {
       "description": "Seconds to wait for the first byte from a Worker media stream.",
