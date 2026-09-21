@@ -938,7 +938,17 @@ class YouTubeAPI:
             return None
 
         def select_media_links(data, media_format, prefer_stream=False):
-            stream_keys = ("streamLink", "streamUrl", "stream_url")
+            stream_keys = (
+                "streamingUrl",
+                "streaming_url",
+                "playbackUrl",
+                "playback_url",
+                "streamLink",
+                "streamUrl",
+                "stream_url",
+                "audioUrl",
+                "audio_url",
+            )
             download_keys = (
                 "directLink",
                 "directUrl",
