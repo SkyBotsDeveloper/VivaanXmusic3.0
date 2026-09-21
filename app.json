@@ -91,6 +91,16 @@
       "required": false,
       "value": "400"
     },
+    "YOUTUBE_STREAM_HTTP_PROBE_TIMEOUT": {
+      "description": "Seconds to wait for the first byte from a Worker media stream.",
+      "required": false,
+      "value": "15"
+    },
+    "YOUTUBE_STREAM_PREFLIGHT_TIMEOUT": {
+      "description": "Seconds allowed for Worker stream audio validation.",
+      "required": false,
+      "value": "15"
+    },
     "DEEP_API": {
       "description": "(Optional) DeepAI API key for enabling AI-powered features. Get it from https://deepai.org/.",
       "required": false,
