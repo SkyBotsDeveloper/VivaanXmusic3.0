@@ -4,6 +4,7 @@ import os
 import re
 import shlex
 import shutil
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Union
 import string
@@ -60,6 +61,11 @@ STREAM_PREFLIGHT_TIMEOUT = max(3, int_env("YOUTUBE_STREAM_PREFLIGHT_TIMEOUT", 7)
 STREAM_PREFLIGHT_ENABLED = bool_env("YOUTUBE_STREAM_PREFLIGHT", True)
 DOWNLOAD_CACHE_MAX_BYTES = max(0, int_env("DOWNLOAD_CACHE_MAX_MB", 2048)) * 1024 * 1024
 DOWNLOAD_CACHE_MIN_FREE_BYTES = max(0, int_env("DOWNLOAD_CACHE_MIN_FREE_MB", 512)) * 1024 * 1024
+WORKER_FALLBACK_API_ATTEMPTS = min(3, max(1, int_env("WORKER_FALLBACK_API_ATTEMPTS", 2)))
+WORKER_FALLBACK_API_RETRY_DELAY_MS = min(
+    5000,
+    max(0, int_env("WORKER_FALLBACK_API_RETRY_DELAY_MS", 400)),
+)
 
 def build_yt_dlp_args(args: list[str]) -> list[str]:
     return list(args)
@@ -1053,7 +1059,25 @@ class YouTubeAPI:
                     "format": media_format,
                 }
 
-                response = session.get(api_url, params=payload, timeout=75)
+                response = None
+                for attempt in range(WORKER_FALLBACK_API_ATTEMPTS):
+                    response = session.get(api_url, params=payload, timeout=25)
+                    if response.status_code not in {429, 500, 502, 503, 504}:
+                        break
+                    if attempt + 1 >= WORKER_FALLBACK_API_ATTEMPTS:
+                        response.raise_for_status()
+                    logger.warning(
+                        "Worker fallback API transient response | format=%s | video_id=%s | "
+                        "status=%s | retry=%s/%s",
+                        media_format,
+                        vid_id,
+                        response.status_code,
+                        attempt + 1,
+                        WORKER_FALLBACK_API_ATTEMPTS,
+                    )
+                    response.close()
+                    time.sleep((WORKER_FALLBACK_API_RETRY_DELAY_MS * (attempt + 1)) / 1000)
+
                 response.raise_for_status()
                 data = response.json()
 
