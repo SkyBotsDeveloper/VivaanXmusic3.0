@@ -1,3 +1,5 @@
+import asyncio
+
 from pyrogram import Client
 
 import config
@@ -7,6 +9,9 @@ from ..logging import LOGGER
 assistants = []
 assistantids = []
 
+ASSISTANT_START_TIMEOUT = 60
+ASSISTANT_STEP_TIMEOUT = 15
+
 GROUPS_TO_JOIN = [
     "aboutvivaan",
     "VivaanSupport",
@@ -14,6 +19,18 @@ GROUPS_TO_JOIN = [
     "AboutSidXD",
     "VivaanNetwork",
 ]
+
+
+async def _run_with_timeout(awaitable, timeout: int, label: str):
+    try:
+        return await asyncio.wait_for(awaitable, timeout=timeout)
+    except asyncio.TimeoutError:
+        raise TimeoutError(f"{label} timed out after {timeout}s") from None
+
+
+def _has_session(value) -> bool:
+    session = str(value or "").strip()
+    return bool(session and session.lower() not in {"none", "null"})
 
 
 # Initialize userbots
@@ -63,37 +80,70 @@ class Userbot:
             config.STRING4,
             config.STRING5,
         ][index - 1]
-        if not string_attr:
-            return
+        if not _has_session(string_attr):
+            return False
 
         try:
-            await client.start()
+            LOGGER(__name__).info(f"Starting Assistant {index}...")
+            await _run_with_timeout(
+                client.start(),
+                ASSISTANT_START_TIMEOUT,
+                f"Assistant {index} client.start()",
+            )
+
+            me = await _run_with_timeout(
+                client.get_me(),
+                ASSISTANT_STEP_TIMEOUT,
+                f"Assistant {index} get_me()",
+            )
+            client.id, client.name, client.username = me.id, me.first_name, me.username
+
+            if index not in assistants:
+                assistants.append(index)
+            if me.id not in assistantids:
+                assistantids.append(me.id)
+
+            LOGGER(__name__).info(f"Assistant {index} authenticated as {client.name}")
+
             for group in GROUPS_TO_JOIN:
                 try:
-                    await client.join_chat(group)
-                except Exception:
-                    pass
-
-            assistants.append(index)
+                    await _run_with_timeout(
+                        client.join_chat(group),
+                        ASSISTANT_STEP_TIMEOUT,
+                        f"Assistant {index} join_chat({group})",
+                    )
+                except Exception as e:
+                    LOGGER(__name__).warning(
+                        f"Assistant {index} could not join @{group}: {e}"
+                    )
 
             try:
-                await client.send_message(
-                    config.LOGGER_ID, f"Vivaan's Assistant {index} Started"
+                await _run_with_timeout(
+                    client.send_message(
+                        config.LOGGER_ID, f"Vivaan's Assistant {index} Started"
+                    ),
+                    ASSISTANT_STEP_TIMEOUT,
+                    f"Assistant {index} log message",
                 )
-            except Exception:
-                LOGGER(__name__).error(
-                    f"Assistant {index} can't access the log group. Check permissions!"
+            except Exception as e:
+                LOGGER(__name__).warning(
+                    f"Assistant {index} can't send log group startup message: {e}"
                 )
-                exit()
-
-            me = await client.get_me()
-            client.id, client.name, client.username = me.id, me.first_name, me.username
-            assistantids.append(me.id)
 
             LOGGER(__name__).info(f"Assistant {index} Started as {client.name}")
+            return True
 
         except Exception as e:
             LOGGER(__name__).error(f"Failed to start Assistant {index}: {e}")
+            try:
+                await _run_with_timeout(
+                    client.stop(),
+                    ASSISTANT_STEP_TIMEOUT,
+                    f"Assistant {index} stop after failed start",
+                )
+            except Exception:
+                pass
+            return False
 
     async def start(self):
         LOGGER(__name__).info("Starting Vivaan's Assistants...")
@@ -102,6 +152,12 @@ class Userbot:
         await self.start_assistant(self.three, 3)
         await self.start_assistant(self.four, 4)
         await self.start_assistant(self.five, 5)
+        if not assistants:
+            LOGGER(__name__).error(
+                "No assistants started. Check STRING_SESSION values and assistant logs."
+            )
+            exit()
+        LOGGER(__name__).info(f"Assistants ready: {', '.join(map(str, assistants))}")
 
     async def stop(self):
         LOGGER(__name__).info("Stopping Assistants...")

@@ -1,3 +1,4 @@
+import asyncio
 import random
 from typing import Dict, List, Union
 
@@ -7,6 +8,7 @@ from VIVAANXMUSIC.core.mongo import mongodb
 authdb = mongodb.adminauth
 authuserdb = mongodb.authuser
 autoenddb = mongodb.autoend
+autodeletedb = mongodb.autodelete
 autoplaydb = mongodb.autoplay
 assdb = mongodb.assistants
 blacklist_chatdb = mongodb.blacklistChat
@@ -30,6 +32,7 @@ active = []
 activevideo = []
 assistantdict = {}
 autoend = {}
+autodelete = {}
 autoplay = {}
 count = {}
 channelconnect = {}
@@ -43,6 +46,28 @@ playtype = {}
 skipmode = {}
 mute = {}
 vcnotify = {}
+
+ASSISTANT_WAIT_TIMEOUT = 30
+ASSISTANT_WAIT_INTERVAL = 0.5
+
+
+async def _available_assistants() -> list[int]:
+    from VIVAANXMUSIC.core.userbot import assistants
+
+    if assistants:
+        return list(assistants)
+
+    deadline = asyncio.get_running_loop().time() + ASSISTANT_WAIT_TIMEOUT
+    while not assistants and asyncio.get_running_loop().time() < deadline:
+        await asyncio.sleep(ASSISTANT_WAIT_INTERVAL)
+
+    if not assistants:
+        raise RuntimeError(
+            "No active assistant client is available. Check STRING_SESSION values "
+            "and assistant startup logs."
+        )
+    return list(assistants)
+
 
 async def get_assistant_number(chat_id: int) -> str:
     assistant = assistantdict.get(chat_id)
@@ -72,8 +97,7 @@ async def set_assistant_new(chat_id, number):
 
 
 async def set_assistant(chat_id):
-    from VIVAANXMUSIC.core.userbot import assistants
-
+    assistants = await _available_assistants()
     ran_assistant = random.choice(assistants)
     assistantdict[chat_id] = ran_assistant
     await assdb.update_one(
@@ -86,7 +110,7 @@ async def set_assistant(chat_id):
 
 
 async def get_assistant(chat_id: int) -> str:
-    from VIVAANXMUSIC.core.userbot import assistants
+    assistants = await _available_assistants()
 
     assistant = assistantdict.get(chat_id)
     if not assistant:
@@ -113,8 +137,7 @@ async def get_assistant(chat_id: int) -> str:
 
 
 async def set_calls_assistant(chat_id):
-    from VIVAANXMUSIC.core.userbot import assistants
-
+    assistants = await _available_assistants()
     ran_assistant = random.choice(assistants)
     assistantdict[chat_id] = ran_assistant
     await assdb.update_one(
@@ -126,7 +149,7 @@ async def set_calls_assistant(chat_id):
 
 
 async def group_assistant(self, chat_id: int) -> int:
-    from VIVAANXMUSIC.core.userbot import assistants
+    assistants = await _available_assistants()
 
     assistant = assistantdict.get(chat_id)
     if not assistant:
@@ -218,6 +241,27 @@ async def set_autoplay(chat_id: int, mode: bool):
     enabled = bool(mode)
     autoplay[chat_id] = enabled
     await autoplaydb.update_one(
+        {"chat_id": chat_id}, {"$set": {"mode": enabled}}, upsert=True
+    )
+
+
+async def get_autodelete(chat_id: int) -> bool:
+    mode = autodelete.get(chat_id)
+    if mode is None:
+        data = await autodeletedb.find_one({"chat_id": chat_id})
+        if not data:
+            autodelete[chat_id] = False
+            return False
+        mode = bool(data.get("mode"))
+        autodelete[chat_id] = mode
+        return mode
+    return bool(mode)
+
+
+async def set_autodelete(chat_id: int, mode: bool):
+    enabled = bool(mode)
+    autodelete[chat_id] = enabled
+    await autodeletedb.update_one(
         {"chat_id": chat_id}, {"$set": {"mode": enabled}}, upsert=True
     )
 
@@ -543,6 +587,11 @@ async def add_served_user(user_id: int):
     if is_served:
         return
     return await usersdb.insert_one({"user_id": user_id})
+
+
+async def remove_served_user(user_id: int):
+    if await is_served_user(user_id):
+        await usersdb.delete_one({"user_id": user_id})
 
 
 async def get_served_chats() -> list:

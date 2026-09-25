@@ -1,7 +1,9 @@
 import asyncio
 import os
+import tempfile
 from math import ceil
 from typing import Dict, List, Tuple
+from uuid import uuid4
 
 import edge_tts
 from pyrogram import Client, filters
@@ -20,7 +22,7 @@ _VOICES_LOCK = asyncio.Lock()
 
 PER_ROW = 4          # 4 buttons per row
 PER_PAGE = 16        # 4 × 4 grid per page
-TMP_DIR = "/tmp"   # location for temporary audio / text files
+TMP_DIR = tempfile.gettempdir()
 
 # ---------------------------------------------------------------------------
 # Helper functions
@@ -169,7 +171,7 @@ async def cmd_tts(client: Client, message: Message):
             parse_mode=ParseMode.MARKDOWN,
         )
 
-    tmp = os.path.join(TMP_DIR, f"tts_{message.from_user.id}.mp3")
+    tmp = os.path.join(TMP_DIR, f"tts_{message.from_user.id}_{uuid4().hex}.mp3")
     try:
         await client.send_chat_action(message.chat.id, ChatAction.RECORD_AUDIO)
         await _synthesize(voice, text, tmp)
@@ -278,7 +280,7 @@ async def cb_tts(client: Client, callback: CallbackQuery):
 
         # model chosen → synthesize
         voice = parts["v"]
-        tmp = os.path.join(TMP_DIR, f"tts_{callback.from_user.id}.mp3")
+        tmp = os.path.join(TMP_DIR, f"tts_{callback.from_user.id}_{uuid4().hex}.mp3")
         try:
             await client.send_chat_action(callback.message.chat.id, ChatAction.RECORD_AUDIO)
             await _synthesize(voice, text, tmp)
@@ -312,7 +314,7 @@ async def cmd_voiceall(client: Client, message: Message):
     lines = [
         f"{v['short_name']} — {v['locale']} ({v['gender']})" for v in _voices
     ]
-    path = os.path.join(TMP_DIR, f"voices_{message.from_user.id}.txt")
+    path = os.path.join(TMP_DIR, f"voices_{message.from_user.id}_{uuid4().hex}.txt")
     with open(path, "w", encoding="utf-8") as fp:
         fp.write("\n".join(lines))
 

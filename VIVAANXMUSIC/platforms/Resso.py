@@ -15,6 +15,9 @@ class RessoAPI:
         return bool(re.search(self.regex, link or ""))
 
     async def track(self, url, playid: Union[bool, str] = None):
+        # Resso has been discontinued; fail fast instead of timing out.
+        return False
+
         if playid:
             url = self.base + url
 

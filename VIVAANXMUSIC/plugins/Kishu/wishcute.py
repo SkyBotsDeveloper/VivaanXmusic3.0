@@ -1,5 +1,6 @@
-from pyrogram import Client, filters, enums
+from pyrogram import filters, enums
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+import asyncio
 import random
 import requests
 from VIVAANXMUSIC import app
@@ -10,6 +11,10 @@ SUPPORT_BTN = InlineKeyboardMarkup(
 )
 
 CUTE_VIDEO = "https://telegra.ph/file/528d0563175669e123a75.mp4"
+NEKOS_BEST_HEADERS = {
+    "Accept": "application/json",
+    "User-Agent": "VivaanXMusicBot (https://github.com/VivaanXMusic)",
+}
 
 
 @app.on_message(filters.command("wish"))
@@ -18,7 +23,13 @@ async def wish(_, m):
         return await m.reply_text("❌ ᴀᴅᴅ ʏᴏᴜʀ ᴡɪꜱʜ ʙᴀʙʏ 🥀!")
 
     try:
-        api = requests.get("https://nekos.best/api/v2/happy").json()
+        response = await asyncio.to_thread(
+            requests.get,
+            "https://nekos.best/api/v2/happy",
+            headers=NEKOS_BEST_HEADERS,
+            timeout=12,
+        )
+        api = response.json()
         url = api["results"][0]["url"]
     except Exception:
         return await m.reply_text("⚠️ Couldn't fetch animation, try again later.")

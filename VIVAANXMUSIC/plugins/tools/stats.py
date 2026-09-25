@@ -1,4 +1,6 @@
 import platform
+from html import escape
+from io import BytesIO
 from sys import version as pyver
 
 import psutil
@@ -70,6 +72,100 @@ async def overall_stats(client, CallbackQuery, _):
         await CallbackQuery.message.reply_video(
             video=config.STATS_VID_URL, caption=text, reply_markup=upl
         )
+
+
+def _format_bytes(size):
+    try:
+        size = float(size)
+    except (TypeError, ValueError):
+        return "0 B"
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if abs(size) < 1024:
+            return f"{size:.2f} {unit}"
+        size /= 1024
+    return f"{size:.2f} PB"
+
+
+async def _safe_count(collection_name):
+    try:
+        return await mongodb[collection_name].count_documents({})
+    except Exception as exc:
+        return f"error: {exc}"
+
+
+async def _mongo_stats_report():
+    stats = await mongodb.command("dbstats")
+    collection_names = sorted(await mongodb.list_collection_names())
+    try:
+        database_names = sorted(await mongodb.client.list_database_names())
+    except Exception:
+        database_names = []
+
+    known_counts = {
+        "All chat docs": await mongodb.chats.count_documents({}),
+        "Valid served chats": await mongodb.chats.count_documents({"chat_id": {"$lt": 0}}),
+        "All user docs": await mongodb.tgusersdb.count_documents({}),
+        "Valid served users": await mongodb.tgusersdb.count_documents({"user_id": {"$gt": 0}}),
+        "Blacklisted chats": await mongodb.blacklistChat.count_documents({}),
+        "Blocked users": await mongodb.blockedusers.count_documents({}),
+        "Gbanned users": await mongodb.gban.count_documents({}),
+        "Sudo config docs": await mongodb.sudoers.count_documents({}),
+        "Assistant assignments": await mongodb.assistants.count_documents({}),
+        "Auth chats": await mongodb.adminauth.count_documents({}),
+        "Auth user docs": await mongodb.authuser.count_documents({}),
+        "Language docs": await mongodb.language.count_documents({}),
+        "Autoplay docs": await mongodb.autoplay.count_documents({}),
+        "VC notify docs": await mongodb.vcnotify.count_documents({}),
+    }
+
+    lines = [
+        "📊 ᴍᴏɴɢᴏ sᴛᴀᴛs ʀᴇᴘᴏʀᴛ",
+        "",
+        f"ᴅᴀᴛᴀʙᴀsᴇ: {escape(str(stats.get('db', 'Vivaan')))}",
+        f"ᴄᴏʟʟᴇᴄᴛɪᴏɴs: {stats.get('collections', 0):,}",
+        f"ᴏʙᴊᴇᴄᴛs: {stats.get('objects', 0):,}",
+        f"ᴅᴀᴛᴀ sɪᴢᴇ: {_format_bytes(stats.get('dataSize', 0))}",
+        f"sᴛᴏʀᴀɢᴇ sɪᴢᴇ: {_format_bytes(stats.get('storageSize', 0))}",
+        f"ɪɴᴅᴇx sɪᴢᴇ: {_format_bytes(stats.get('indexSize', 0))}",
+        f"ᴛᴏᴛᴀʟ sɪᴢᴇ: {_format_bytes(stats.get('totalSize', 0))}",
+    ]
+    if database_names:
+        lines.append(f"ᴀᴠᴀɪʟᴀʙʟᴇ ᴅʙs: {escape(', '.join(database_names))}")
+    lines.extend(["", "ᴠɪsɪʙʟᴇ sᴛᴀᴛ ᴄʜᴇᴄᴋ"])
+
+    for label, count in known_counts.items():
+        lines.append(f"{label}: {count:,}")
+
+    lines.extend(["", "ᴄᴏʟʟᴇᴄᴛɪᴏɴ ᴅᴏᴄᴜᴍᴇɴᴛs"])
+    for collection_name in collection_names:
+        count = await _safe_count(collection_name)
+        if isinstance(count, int):
+            count_text = f"{count:,}"
+        else:
+            count_text = escape(str(count))
+        lines.append(f"{collection_name}: {count_text}")
+
+    return "\n".join(lines)
+
+
+@app.on_message(filters.command(["fetchstats", "mongostats", "dbstats", "fullstats"]) & filters.user(config.OWNER_ID))
+async def mongo_stats_dump(client, message: Message):
+    status = await message.reply_text("Fetching Mongo stats...")
+    try:
+        report = await _mongo_stats_report()
+    except Exception as exc:
+        return await status.edit_text(f"Failed to fetch Mongo stats:\n<code>{escape(str(exc))}</code>")
+
+    if len(report) <= 3900:
+        return await status.edit_text(f"<pre>{report}</pre>")
+
+    bio = BytesIO(report.encode("utf-8"))
+    bio.name = "mongo_stats.txt"
+    await message.reply_document(
+        document=bio,
+        caption="Mongo stats report",
+    )
+    await status.delete()
 
 
 @app.on_callback_query(filters.regex("bot_stats_sudo"))

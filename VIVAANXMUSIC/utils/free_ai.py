@@ -13,6 +13,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass
+from io import BytesIO
 from urllib.parse import quote
 
 import httpx
@@ -20,7 +21,7 @@ from Crypto.Cipher import AES
 from Crypto.Hash import SHA256
 from Crypto.Protocol.KDF import PBKDF2
 from gradio_client import Client as GradioClient, handle_file
-from PIL import Image
+from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 
 import config as runtime_config
 from VIVAANXMUSIC.security import build_subprocess_env
@@ -34,12 +35,19 @@ HF_TOKENS = getattr(runtime_config, "HF_TOKENS", "")
 OCR_SPACE_API_KEY = getattr(runtime_config, "OCR_SPACE_API_KEY", "helloworld")
 REPLICATE_API_TOKEN = getattr(runtime_config, "REPLICATE_API_TOKEN", None)
 REPLICATE_API_TOKENS = getattr(runtime_config, "REPLICATE_API_TOKENS", "")
+ELITE_LLM_API_BASE = str(
+    getattr(runtime_config, "ELITE_LLM_API_BASE", "https://elite-llms.vercel.app/v1")
+).rstrip("/")
+ELITE_LLM_API_KEY = getattr(runtime_config, "ELITE_LLM_API_KEY", "theelitekey")
 
 
 HTTP_TIMEOUT = httpx.Timeout(45.0, connect=10.0)
 HTTP_HEADERS = {"User-Agent": "VivaanX/FreeAI/1.0"}
 CHAT_API_URL = "https://api-xqwa.onrender.com/chat/"
+ELITE_CHAT_COMPLETIONS_URL = f"{ELITE_LLM_API_BASE}/chat/completions"
+AIRFORCE_CHAT_COMPLETIONS_URL = "https://api.airforce/v1/chat/completions"
 IMAGE_GEN_URL = "https://death-image.ashlynn.workers.dev/generate"
+POLLINATIONS_IMAGE_URL = "https://image.pollinations.ai/prompt/{prompt}"
 IMAGE_ENHANCE_URL = "https://arimagex.netlify.app/api/enhance"
 IMAGE_REMOVEBG_URL = "https://arimagex.netlify.app/api/removebg"
 OCR_SPACE_API_URL = "https://api.ocr.space/parse/image"
@@ -74,7 +82,7 @@ HF_WAN22_PREVIEW2_SPACE = "r3gm/wan2-2-fp8da-aoti-preview2"
 HF_WAN22_OBSXRVER_SPACE = "obsxrver/WAN22-I2V-Demo"
 HF_WAN22_DREAM_SPACE = "dream2589632147/Dream-wan2-2-faster-Pro"
 HF_IMAGE_EDIT_SPACE = "Qwen/Qwen-Image-Edit-2511"
-HF_IMAGE_EDIT_FAST_SPACE = "Nichotin/Qwen-Image-Edit-2511-Fast-ZeroGPU"
+HF_IMAGE_EDIT_FAST_SPACE = "linoyts/Qwen-Image-Edit-2511-Fast"
 HF_IMAGE_EDIT_ALT_SPACE = "lenML/Qwen-Image-Edit-2511-Fast"
 HF_IMAGE_OBJECT_SPACE = "prithivMLmods/Qwen-Image-Edit-Object-Manipulator"
 HF_FACE_SWAP_SPACE = "V0pr0S/ComfyUI-Reactor-Fast-Face-Swap-CPU"
@@ -87,7 +95,33 @@ DETAILED_VISION_PROMPT = (
 )
 VISION_PROVIDER_TIMEOUT = 50
 OCR_VISIBLE_TEXT_LIMIT = 900
-CHAT_MODEL_CANDIDATES = ("gpt-4", "gpt-4o-mini")
+CHAT_MODEL_CANDIDATES = ("gpt-4o-mini", "gpt-4")
+ELITE_CHAT_MODEL_FALLBACKS = {
+    "eliteai": ("gpt-5-mini", "gpt-4o-mini", "qwen3-235b-a22b-2507", "deepseek-chat"),
+    "chatgpt": ("gpt-5-mini", "gpt-4o-mini", "gpt-4.1", "gpt-4o"),
+    "gpt": ("gpt-5-mini", "gpt-4o-mini", "gpt-4.1", "gpt-4o"),
+    "jarvis": ("gpt-5-mini", "qwen3-235b-a22b-2507", "deepseek-chat", "gpt-4o-mini"),
+    "assis": ("gpt-5-mini", "qwen3-235b-a22b-2507", "deepseek-chat", "gpt-4o-mini"),
+    "gemini": ("gemini-2.0-flash", "gpt-5-mini", "gpt-4o-mini"),
+    "bard": ("gemini-2.0-flash", "gpt-5-mini", "gpt-4o-mini"),
+    "llama": ("llama-4-scout", "qwen3-235b-a22b-2507", "deepseek-chat"),
+    "mistral": ("qwen3-235b-a22b-2507", "deepseek-chat", "llama-4-scout"),
+    "claude": ("claude-sonnet-4.6", "claude-opus-4.6", "gpt-5-mini"),
+    "geminivision": ("gemini-2.0-flash", "gpt-5-mini", "qwen3-235b-a22b-2507"),
+}
+AIRFORCE_CHAT_MODEL_FALLBACKS = {
+    "eliteai": ("gpt-4o-mini", "deepseek-chat", "llama-3.3-70b"),
+    "chatgpt": ("gpt-4o-mini", "gpt-4o", "deepseek-chat"),
+    "gpt": ("gpt-4o-mini", "gpt-4o", "deepseek-chat"),
+    "jarvis": ("gpt-4o-mini", "deepseek-chat", "llama-3.3-70b"),
+    "assis": ("gpt-4o-mini", "deepseek-chat", "llama-3.3-70b"),
+    "gemini": ("gpt-4o-mini", "deepseek-chat"),
+    "bard": ("gpt-4o-mini", "deepseek-chat"),
+    "llama": ("llama-3.3-70b", "gpt-4o-mini", "deepseek-chat"),
+    "mistral": ("mistral-small-latest", "gpt-4o-mini", "deepseek-chat"),
+    "claude": ("gpt-4o-mini", "deepseek-chat"),
+    "geminivision": ("gpt-4o-mini", "deepseek-chat"),
+}
 CHAT_ALIAS_PROFILES = {
     "eliteai": {
         "display_name": "Elite AI",
@@ -215,6 +249,13 @@ BLOCKED_RESPONSE_MARKERS = (
     'add a "api_key"',
     "no yupp accounts configured",
     "invalid model",
+    "does not exist or is not available",
+    "authentication required",
+    "queue full",
+    "bad gateway",
+    "application error",
+    "internal server error",
+    "service unavailable",
     "something went wrong. please try again later.",
 )
 VISION_UPSTREAM_ERROR_MARKERS = (
@@ -235,12 +276,150 @@ IMAGE_EDIT_ERROR_MARKERS = (
     "upstream gradio app has raised an exception",
     "provider timed out",
 )
+GENERATION_SAFETY_MESSAGE = (
+    "I can't generate that request. Please try a different safe prompt."
+)
+GENERATION_BLOCKLIST = {
+    "sexual": (
+        "porn",
+        "porns",
+        "porno",
+        "pornos",
+        "pornographic",
+        "xxx",
+        "nsfw",
+        "nude",
+        "nudes",
+        "nudity",
+        "naked",
+        "sex",
+        "sexy",
+        "sexual",
+        "erotic",
+        "erotica",
+        "fetish",
+        "fetishes",
+        "strip",
+        "stripping",
+        "stripper",
+        "strippers",
+        "lingerie",
+        "underwear",
+        "breast",
+        "breasts",
+        "boobs",
+        "boob",
+        "butt",
+        "ass",
+        "asses",
+        "blowjob",
+        "blowjobs",
+        "handjob",
+        "handjobs",
+        "cum",
+        "cumming",
+        "orgasm",
+        "orgasms",
+        "onlyfans",
+    ),
+    "sexual_abuse": (
+        "rape",
+        "raped",
+        "raping",
+        "molest",
+        "molests",
+        "molested",
+        "molestation",
+        "sexual abuse",
+        "sexual abusing",
+        "child abuse",
+        "child porn",
+        "child porno",
+        "child pornography",
+        "childporn",
+        "cp",
+        "loli",
+        "lolis",
+        "lolita",
+        "lolitas",
+        "minor sex",
+        "minors sex",
+        "underage sex",
+        "underage porn",
+    ),
+    "drugs": (
+        "drug",
+        "drugs",
+        "drugged",
+        "drugging",
+        "cocaine",
+        "heroin",
+        "meth",
+        "methamphetamine",
+        "marijuana",
+        "weed",
+        "cannabis",
+        "hashish",
+        "hash",
+        "lsd",
+        "mdma",
+        "ecstasy",
+        "opium",
+        "opioid",
+        "opioids",
+        "joint",
+        "joints",
+        "bong",
+        "bongs",
+        "snorting",
+        "snort",
+        "overdose",
+        "overdoses",
+    ),
+    "abuse_violence": (
+        "abuse",
+        "abuses",
+        "abusing",
+        "abused",
+        "torture",
+        "tortures",
+        "torturing",
+        "tortured",
+        "gore",
+        "gory",
+        "bloodbath",
+        "behead",
+        "beheading",
+        "decapitate",
+        "dismember",
+        "mutilate",
+        "brutal murder",
+        "murder scene",
+        "kill someone",
+        "suicide",
+        "self harm",
+        "self-harm",
+    ),
+    "hate_extremism": (
+        "hate speech",
+        "racist propaganda",
+        "nazi propaganda",
+        "terrorist propaganda",
+        "isis propaganda",
+        "kkk",
+        "genocide",
+    ),
+}
 PROMO_URL_PATTERN = re.compile(
     r"https?://(?:t\.me|op\.wtf|ar-hosting\.pages\.dev)\S*",
     re.IGNORECASE,
 )
 TRY_AGAIN_PATTERN = re.compile(
     r"try again in (\d+):(\d+):(\d+)",
+    re.IGNORECASE,
+)
+SECONDS_RETRY_PATTERN = re.compile(
+    r"(?:try again|guaranteed response is) in (\d+) seconds?",
     re.IGNORECASE,
 )
 DEFAULT_VISION_PATTERN = re.compile(r"^describe this image\.?$", re.IGNORECASE)
@@ -380,6 +559,12 @@ def _sanitize_chat_text(text: str | None) -> str:
     if not raw:
         return ""
 
+    raw = THINK_BLOCK_PATTERN.sub("", raw).strip()
+    raw = re.sub(r"^```[\w-]*\s*", "", raw)
+    raw = re.sub(r"\s*```$", "", raw)
+    if not raw:
+        return ""
+
     lowered_raw = raw.lower()
     if any(marker in lowered_raw for marker in BLOCKED_RESPONSE_MARKERS):
         return ""
@@ -401,6 +586,51 @@ def _sanitize_chat_text(text: str | None) -> str:
     cleaned = "\n".join(cleaned_lines).strip()
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     return cleaned
+
+
+def _normalize_generation_prompt(prompt: str | None) -> tuple[str, str]:
+    lowered = str(prompt or "").casefold()
+    spaced = re.sub(r"[_\W]+", " ", lowered)
+    spaced = re.sub(r"\s+", " ", spaced).strip()
+    compact = re.sub(r"[^a-z0-9]+", "", lowered)
+    return spaced, compact
+
+
+def _has_obfuscated_generation_term(prompt: str | None, term: str) -> bool:
+    compact_term = re.sub(r"[^a-z0-9]+", "", str(term or "").casefold())
+    if len(compact_term) < 2:
+        return False
+    raw = str(prompt or "").casefold()
+    pattern = r"(?<![a-z0-9])" + r"[\W_]*".join(
+        re.escape(char) for char in compact_term
+    ) + r"(?![a-z0-9])"
+    return re.search(pattern, raw) is not None
+
+
+def _contains_generation_blocked_term(prompt: str | None) -> bool:
+    spaced, compact = _normalize_generation_prompt(prompt)
+    if not spaced and not compact:
+        return False
+
+    for terms in GENERATION_BLOCKLIST.values():
+        for term in terms:
+            term_spaced, term_compact = _normalize_generation_prompt(term)
+            if not term_spaced:
+                continue
+            if " " in term_spaced:
+                if term_spaced in spaced or term_compact in compact:
+                    return True
+                continue
+            if re.search(rf"\b{re.escape(term_spaced)}\b", spaced):
+                return True
+            if _has_obfuscated_generation_term(prompt, term_compact):
+                return True
+    return False
+
+
+def _ensure_safe_generation_prompt(prompt: str | None):
+    if _contains_generation_blocked_term(prompt):
+        raise FreeAIError(GENERATION_SAFETY_MESSAGE)
 
 
 def _is_identity_query(prompt: str | None) -> bool:
@@ -526,6 +756,206 @@ def _write_temp_image(image_bytes: bytes, mime_type: str) -> str:
         return handle.name
 
 
+def _enhance_image_locally(image_bytes: bytes) -> bytes:
+    with Image.open(BytesIO(image_bytes)) as image:
+        image.load()
+        has_alpha = image.mode in {"RGBA", "LA"} or (
+            image.mode == "P" and "transparency" in image.info
+        )
+        converted = image.convert("RGBA" if has_alpha else "RGB")
+        width, height = converted.size
+        max_side = max(width, height, 1)
+        if max_side < 2048:
+            scale = min(2.0, 2048 / max_side)
+            converted = converted.resize(
+                (
+                    max(1, int(round(width * scale))),
+                    max(1, int(round(height * scale))),
+                ),
+                Image.Resampling.LANCZOS,
+            )
+
+        converted = ImageEnhance.Contrast(converted).enhance(1.08)
+        converted = ImageEnhance.Color(converted).enhance(1.04)
+        converted = converted.filter(
+            ImageFilter.UnsharpMask(radius=1.2, percent=115, threshold=3)
+        )
+
+        buffer = BytesIO()
+        converted.save(buffer, format="PNG", optimize=True)
+        return buffer.getvalue()
+
+
+def _remove_background_locally(image_bytes: bytes) -> bytes:
+    try:
+        import cv2
+        import numpy as np
+
+        with Image.open(BytesIO(image_bytes)) as image:
+            image.load()
+            source = image.convert("RGB")
+
+        rgb = np.array(source)
+        bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+        height, width = bgr.shape[:2]
+        if height < 4 or width < 4:
+            raise FreeAIError("Image is too small to process.")
+
+        pad_x = max(1, int(width * 0.06))
+        pad_y = max(1, int(height * 0.06))
+        rect = (
+            pad_x,
+            pad_y,
+            max(1, width - (pad_x * 2)),
+            max(1, height - (pad_y * 2)),
+        )
+        mask = np.zeros((height, width), np.uint8)
+        bg_model = np.zeros((1, 65), np.float64)
+        fg_model = np.zeros((1, 65), np.float64)
+        cv2.grabCut(bgr, mask, rect, bg_model, fg_model, 5, cv2.GC_INIT_WITH_RECT)
+        alpha = np.where((mask == cv2.GC_FGD) | (mask == cv2.GC_PR_FGD), 255, 0).astype(
+            "uint8"
+        )
+        kernel = np.ones((3, 3), np.uint8)
+        alpha = cv2.morphologyEx(alpha, cv2.MORPH_OPEN, kernel, iterations=1)
+        alpha = cv2.morphologyEx(alpha, cv2.MORPH_CLOSE, kernel, iterations=2)
+        alpha = cv2.GaussianBlur(alpha, (5, 5), 0)
+
+        rgba = np.dstack((rgb, alpha))
+        output = Image.fromarray(rgba, "RGBA")
+        buffer = BytesIO()
+        output.save(buffer, format="PNG", optimize=True)
+        return buffer.getvalue()
+    except FreeAIError:
+        raise
+    except Exception:
+        with Image.open(BytesIO(image_bytes)) as image:
+            image.load()
+            source = image.convert("RGBA")
+            pixels = source.load()
+            width, height = source.size
+            corners = [
+                source.getpixel((0, 0))[:3],
+                source.getpixel((width - 1, 0))[:3],
+                source.getpixel((0, height - 1))[:3],
+                source.getpixel((width - 1, height - 1))[:3],
+            ]
+            bg = tuple(sum(channel) // len(corners) for channel in zip(*corners))
+            threshold = 38
+            for y in range(height):
+                for x in range(width):
+                    r, g, b, a = pixels[x, y]
+                    distance = abs(r - bg[0]) + abs(g - bg[1]) + abs(b - bg[2])
+                    if distance < threshold:
+                        pixels[x, y] = (r, g, b, 0)
+                    elif distance < threshold * 2:
+                        pixels[x, y] = (r, g, b, min(a, 150))
+            buffer = BytesIO()
+            source.save(buffer, format="PNG", optimize=True)
+            return buffer.getvalue()
+
+
+LOCAL_EDIT_COLORS = {
+    "red": (220, 38, 38),
+    "blue": (37, 99, 235),
+    "green": (22, 163, 74),
+    "yellow": (234, 179, 8),
+    "orange": (249, 115, 22),
+    "purple": (147, 51, 234),
+    "pink": (236, 72, 153),
+    "cyan": (6, 182, 212),
+    "teal": (20, 184, 166),
+    "black": (24, 24, 27),
+    "white": (245, 245, 245),
+}
+
+
+def _pick_local_edit_color(prompt: str):
+    lowered = f" {prompt.lower()} "
+    for name, rgb in LOCAL_EDIT_COLORS.items():
+        if f" {name} " in lowered or f"{name}ish" in lowered:
+            return rgb
+    return None
+
+
+def _edit_image_locally(prompt: str, image_path: str) -> bytes:
+    lowered = (prompt or "").lower()
+    with Image.open(image_path) as image:
+        image.load()
+        converted = image.convert("RGBA")
+
+    applied = False
+
+    if ("remove" in lowered and "background" in lowered) or "transparent background" in lowered:
+        buffer = BytesIO()
+        converted.save(buffer, format="PNG")
+        return _remove_background_locally(buffer.getvalue())
+
+    if any(word in lowered for word in ("grayscale", "greyscale", "black and white", "monochrome")):
+        alpha = converted.getchannel("A")
+        converted = ImageOps.grayscale(converted).convert("RGBA")
+        converted.putalpha(alpha)
+        applied = True
+
+    target_color = _pick_local_edit_color(prompt)
+    if target_color:
+        alpha = converted.getchannel("A")
+        gray = ImageOps.grayscale(converted)
+        tinted = ImageOps.colorize(gray, black=(8, 8, 12), white=target_color).convert(
+            "RGBA"
+        )
+        tinted.putalpha(alpha)
+        converted = Image.blend(converted, tinted, 0.72)
+        applied = True
+
+    if any(word in lowered for word in ("brighter", "brighten", "lighten")):
+        converted = ImageEnhance.Brightness(converted).enhance(1.28)
+        applied = True
+
+    if any(word in lowered for word in ("darker", "darken", "dim")):
+        converted = ImageEnhance.Brightness(converted).enhance(0.72)
+        applied = True
+
+    if any(word in lowered for word in ("contrast", "pop")):
+        converted = ImageEnhance.Contrast(converted).enhance(1.18)
+        applied = True
+
+    if any(word in lowered for word in ("blur", "soften")):
+        converted = converted.filter(ImageFilter.GaussianBlur(radius=2.0))
+        applied = True
+
+    if any(word in lowered for word in ("sharpen", "clearer", "enhance")):
+        converted = converted.filter(
+            ImageFilter.UnsharpMask(radius=1.4, percent=140, threshold=3)
+        )
+        applied = True
+
+    if "flip horizontal" in lowered or "mirror" in lowered:
+        converted = ImageOps.mirror(converted)
+        applied = True
+
+    if "flip vertical" in lowered:
+        converted = ImageOps.flip(converted)
+        applied = True
+
+    if "rotate left" in lowered:
+        converted = converted.rotate(90, expand=True)
+        applied = True
+    elif "rotate right" in lowered:
+        converted = converted.rotate(-90, expand=True)
+        applied = True
+    elif "upside down" in lowered or "rotate 180" in lowered:
+        converted = converted.rotate(180, expand=True)
+        applied = True
+
+    if not applied:
+        raise FreeAIError("No local fallback is available for this edit prompt.")
+
+    buffer = BytesIO()
+    converted.save(buffer, format="PNG", optimize=True)
+    return buffer.getvalue()
+
+
 def _prepare_video_reference_image(image_bytes: bytes, mime_type: str) -> str:
     source_path = _write_temp_image(image_bytes, mime_type)
     prepared_path: str | None = None
@@ -586,6 +1016,9 @@ def _cooldown_seconds_from_error(message: str) -> int | None:
     if match:
         hours, minutes, seconds = map(int, match.groups())
         return (hours * 3600) + (minutes * 60) + seconds
+    seconds_match = SECONDS_RETRY_PATTERN.search(text)
+    if seconds_match:
+        return max(5, int(seconds_match.group(1)))
 
     lowered = text.lower()
     if (
@@ -596,6 +1029,16 @@ def _cooldown_seconds_from_error(message: str) -> int | None:
         or "insufficient credit" in lowered
     ):
         return 30 * 60
+    if (
+        "429" in lowered
+        or "rate limit" in lowered
+        or "too many requests" in lowered
+        or "queue full" in lowered
+        or "service unavailable" in lowered
+        or "bad gateway" in lowered
+        or "application error" in lowered
+    ):
+        return 5 * 60
     if "up to tasks can be run at a time" in lowered:
         return 60
     if "queue is too long" in lowered:
@@ -2035,7 +2478,142 @@ async def _run_video_provider_batch(
     return None
 
 
-async def _chat_request(
+def _chat_models_for_alias(alias: str) -> tuple[str, ...]:
+    models = ELITE_CHAT_MODEL_FALLBACKS.get(alias.lower())
+    if models:
+        return models
+    return ELITE_CHAT_MODEL_FALLBACKS["gpt"]
+
+
+def _airforce_models_for_alias(alias: str) -> tuple[str, ...]:
+    models = AIRFORCE_CHAT_MODEL_FALLBACKS.get(alias.lower())
+    if models:
+        return models
+    return AIRFORCE_CHAT_MODEL_FALLBACKS["gpt"]
+
+
+def _extract_openai_error(payload) -> str:
+    if isinstance(payload, dict):
+        error = payload.get("error")
+        if isinstance(error, dict):
+            message = error.get("message") or error.get("detail") or error.get("code")
+            if message:
+                return str(message)
+        if error:
+            return str(error)
+    return _extract_json_error(payload)
+
+
+def _extract_openai_content(payload) -> tuple[str, str]:
+    if not isinstance(payload, dict):
+        return "", ""
+
+    choices = payload.get("choices") or []
+    if not isinstance(choices, list) or not choices:
+        return "", ""
+
+    first = choices[0] or {}
+    message = first.get("message") or {}
+    content = message.get("content")
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, dict):
+                text = item.get("text") or item.get("content")
+                if text:
+                    parts.append(str(text))
+            elif item:
+                parts.append(str(item))
+        content = "\n".join(parts)
+    elif content is None:
+        content = first.get("text") or payload.get("response")
+
+    return str(payload.get("model") or ""), _sanitize_chat_text(str(content or ""))
+
+
+async def _elite_chat_request(
+    client: httpx.AsyncClient,
+    prompt: str,
+    model: str,
+    system_prompt: str | None = None,
+) -> ChatResult:
+    if not ELITE_LLM_API_BASE:
+        raise FreeAIError("Elite LLM API base is not configured.")
+    if not ELITE_LLM_API_KEY:
+        raise FreeAIError("Elite LLM API key is not configured.")
+
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
+
+    response = await client.post(
+        ELITE_CHAT_COMPLETIONS_URL,
+        headers={
+            "Authorization": f"Bearer {ELITE_LLM_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": model,
+            "messages": messages,
+            "temperature": 0.6,
+            "max_tokens": 1800,
+        },
+    )
+    try:
+        payload = response.json()
+    except Exception as exc:
+        raise FreeAIError(
+            f"Elite LLM returned a non-JSON response ({response.status_code})."
+        ) from exc
+
+    if response.status_code != 200:
+        raise FreeAIError(_extract_openai_error(payload))
+
+    returned_model, cleaned = _extract_openai_content(payload)
+    if not cleaned:
+        raise FreeAIError("Elite LLM response was empty or blocked.")
+    return ChatResult(model=returned_model or model, content=cleaned)
+
+
+async def _airforce_chat_request(
+    client: httpx.AsyncClient,
+    prompt: str,
+    model: str,
+    system_prompt: str | None = None,
+) -> ChatResult:
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
+
+    response = await client.post(
+        AIRFORCE_CHAT_COMPLETIONS_URL,
+        headers={"Content-Type": "application/json"},
+        json={
+            "model": model,
+            "messages": messages,
+            "temperature": 0.6,
+            "max_tokens": 1800,
+        },
+    )
+    try:
+        payload = response.json()
+    except Exception as exc:
+        raise FreeAIError(
+            f"Airforce API returned a non-JSON response ({response.status_code})."
+        ) from exc
+
+    if response.status_code != 200:
+        raise FreeAIError(_extract_openai_error(payload))
+
+    returned_model, cleaned = _extract_openai_content(payload)
+    if not cleaned:
+        raise FreeAIError("Airforce API response was empty or blocked.")
+    return ChatResult(model=returned_model or model, content=cleaned)
+
+
+async def _legacy_chat_request(
     client: httpx.AsyncClient,
     prompt: str,
     model: str,
@@ -2046,7 +2624,12 @@ async def _chat_request(
         params["systemprompt"] = system_prompt
 
     response = await client.get(CHAT_API_URL, params=params)
-    payload = response.json()
+    try:
+        payload = response.json()
+    except Exception as exc:
+        raise FreeAIError(
+            f"Legacy chat returned a non-JSON response ({response.status_code})."
+        ) from exc
     if response.status_code != 200 or payload.get("successful") != "success":
         raise FreeAIError(_extract_json_error(payload))
 
@@ -2079,22 +2662,75 @@ async def generate_chat_response(
         follow_redirects=True,
         trust_env=False,
     ) as client:
+        for model in _chat_models_for_alias(alias):
+            provider_key = f"chat:elite:{model}"
+            if _provider_cooldown_remaining(provider_key) > 0:
+                failures.append(f"Elite {model}: cooling down")
+                continue
+            try:
+                result = await _elite_chat_request(
+                    client,
+                    prompt,
+                    model,
+                    combined_system_prompt,
+                )
+                _clear_provider_cooldown(provider_key)
+                return ChatResult(
+                    model=display_name,
+                    content=result.content,
+                )
+            except (httpx.HTTPError, FreeAIError) as exc:
+                message = str(exc)
+                _set_provider_cooldown(provider_key, message)
+                failures.append(f"Elite {model}: {message}")
+
+        for model in _airforce_models_for_alias(alias):
+            provider_key = f"chat:airforce:{model}"
+            if _provider_cooldown_remaining(provider_key) > 0:
+                failures.append(f"Airforce {model}: cooling down")
+                continue
+            try:
+                result = await _airforce_chat_request(
+                    client,
+                    prompt,
+                    model,
+                    combined_system_prompt,
+                )
+                _clear_provider_cooldown(provider_key)
+                return ChatResult(
+                    model=display_name,
+                    content=result.content,
+                )
+            except (httpx.HTTPError, FreeAIError) as exc:
+                message = str(exc)
+                _set_provider_cooldown(provider_key, message)
+                failures.append(f"Airforce {model}: {message}")
+
         for model in CHAT_MODEL_CANDIDATES:
             for attempt in range(2):
+                provider_key = f"chat:legacy:{model}"
+                if _provider_cooldown_remaining(provider_key) > 0:
+                    failures.append(f"Legacy {model}: cooling down")
+                    break
                 try:
-                    result = await _chat_request(
+                    result = await _legacy_chat_request(
                         client,
                         prompt,
                         model,
                         combined_system_prompt,
                     )
+                    _clear_provider_cooldown(provider_key)
                     return ChatResult(
                         model=display_name,
                         content=result.content,
                     )
                 except (httpx.HTTPError, FreeAIError) as exc:
-                    failures.append(f"{model} attempt {attempt + 1}: {exc}")
-    details = "\n".join(failures[:4])
+                    message = str(exc)
+                    _set_provider_cooldown(provider_key, message)
+                    failures.append(f"Legacy {model} attempt {attempt + 1}: {message}")
+                    if _provider_cooldown_remaining(provider_key) > 0:
+                        break
+    details = "\n".join(failures[:8])
     raise FreeAIError(f"Chat service is temporarily unavailable.\n{details}")
 
 
@@ -2945,6 +3581,7 @@ async def edit_image_bytes(
     text_prompt = (prompt or "").strip()
     if not text_prompt:
         raise FreeAIError("Please describe the image edit you want.")
+    _ensure_safe_generation_prompt(text_prompt)
     if not images:
         raise FreeAIError("Please reply to an image first.")
 
@@ -3037,9 +3674,18 @@ async def edit_image_bytes(
                 _set_image_edit_route_cooldown(route_key, message)
                 continue
 
-        raise FreeAIError(
-            "Image editing service is temporarily unavailable right now. Try again later."
-        )
+        try:
+            return await asyncio.to_thread(_edit_image_locally, text_prompt, image_paths[0])
+        except Exception as exc:
+            local_message = str(exc).strip()
+            if local_message:
+                raise FreeAIError(
+                    "Image editing service is temporarily unavailable right now. "
+                    f"Local fallback could not handle this prompt: {local_message}"
+                ) from exc
+            raise FreeAIError(
+                "Image editing service is temporarily unavailable right now. Try again later."
+            ) from exc
     finally:
         for path in image_paths:
             _remove_file(path)
@@ -3048,6 +3694,7 @@ async def edit_image_bytes(
 
 
 async def generate_image(prompt: str) -> bytes:
+    _ensure_safe_generation_prompt(prompt)
     params = {
         "prompt": prompt,
         "image": 1,
@@ -3061,27 +3708,65 @@ async def generate_image(prompt: str) -> bytes:
         follow_redirects=True,
         trust_env=False,
     ) as client:
-        response = await client.get(IMAGE_GEN_URL, params=params)
-        try:
-            payload = response.json()
-        except Exception as exc:
-            raise FreeAIError("Image generation service returned an invalid response.") from exc
+        failures: list[str] = []
 
-        images = payload.get("images") or [] if isinstance(payload, dict) else []
-        if response.status_code != 200 or not images:
-            detail = (
-                _extract_json_error(payload)
-                if isinstance(payload, dict)
-                else "Image generation service did not return an image."
-            )
-            if not detail or detail == "Unknown upstream error.":
-                detail = "Image generation service did not return an image."
-            raise FreeAIError(detail)
+        async def download_image(url: str, *, params: dict | None = None) -> bytes:
+            image_response = await client.get(url, params=params)
+            content_type = (image_response.headers.get("content-type") or "").lower()
+            if image_response.status_code != 200:
+                raise FreeAIError("Generated image could not be downloaded.")
+            if not content_type.startswith("image/"):
+                raise FreeAIError("Generated image download returned a non-image payload.")
+            return image_response.content
 
-        image_response = await client.get(images[0])
-        if image_response.status_code != 200:
-            raise FreeAIError("Generated image could not be downloaded.")
-        return image_response.content
+        for attempt in range(3):
+            try:
+                response = await client.get(IMAGE_GEN_URL, params=params)
+                try:
+                    payload = response.json()
+                except Exception as exc:
+                    raise FreeAIError(
+                        "Image generation service returned an invalid response."
+                    ) from exc
+
+                images = payload.get("images") or [] if isinstance(payload, dict) else []
+                if response.status_code != 200 or not images:
+                    detail = (
+                        _extract_json_error(payload)
+                        if isinstance(payload, dict)
+                        else "Image generation service did not return an image."
+                    )
+                    if not detail or detail == "Unknown upstream error.":
+                        detail = "Image generation service did not return an image."
+                    raise FreeAIError(detail)
+
+                return await download_image(images[0])
+            except (httpx.HTTPError, FreeAIError) as exc:
+                failures.append(str(exc))
+                if attempt < 2:
+                    await asyncio.sleep(1 + attempt)
+
+        pollinations_params = {
+            "width": 1024,
+            "height": 1024,
+            "nologo": "true",
+            "safe": "true",
+            "model": "flux",
+        }
+        pollinations_url = POLLINATIONS_IMAGE_URL.format(prompt=quote(prompt, safe=""))
+        for attempt in range(2):
+            try:
+                return await download_image(
+                    pollinations_url,
+                    params=pollinations_params,
+                )
+            except (httpx.HTTPError, FreeAIError) as exc:
+                failures.append(f"Pollinations: {exc}")
+                if attempt < 1:
+                    await asyncio.sleep(1)
+
+    details = "\n".join(failures[-3:])
+    raise FreeAIError(f"Image generation service is temporarily unavailable.\n{details}")
 
 
 async def process_image_bytes(
@@ -3098,30 +3783,47 @@ async def process_image_bytes(
         raise FreeAIError(f"Unsupported image mode: {mode}")
 
     payload = {"imageUrl": _build_data_uri(mime_type, image_bytes)}
-    async with httpx.AsyncClient(
-        timeout=HTTP_TIMEOUT,
-        headers=HTTP_HEADERS,
-        follow_redirects=True,
-        trust_env=False,
-    ) as client:
-        response = await client.post(endpoint, json=payload)
-        content_type = (response.headers.get("content-type") or "").lower()
-        if response.status_code != 200:
+    try:
+        async with httpx.AsyncClient(
+            timeout=HTTP_TIMEOUT,
+            headers=HTTP_HEADERS,
+            follow_redirects=True,
+            trust_env=False,
+        ) as client:
+            response = await client.post(endpoint, json=payload)
+            content_type = (response.headers.get("content-type") or "").lower()
+            if response.status_code != 200:
+                if "application/json" in content_type:
+                    raise FreeAIError(_extract_json_error(response.json()))
+                raise FreeAIError("Image processing service returned a non-200 response.")
             if "application/json" in content_type:
-                raise FreeAIError(_extract_json_error(response.json()))
-            raise FreeAIError("Image processing service returned a non-200 response.")
-        if "application/json" in content_type:
-            payload = response.json()
-            image_url = payload.get("imageUrl")
-            if not image_url:
-                raise FreeAIError(_extract_json_error(payload))
-            image_response = await client.get(image_url)
-            if image_response.status_code != 200:
-                raise FreeAIError("Processed image could not be downloaded.")
-            return image_response.content
-        if not content_type.startswith("image/"):
-            raise FreeAIError("Image processing service returned an unexpected payload.")
-        return response.content
+                payload = response.json()
+                image_url = payload.get("imageUrl")
+                if not image_url:
+                    raise FreeAIError(_extract_json_error(payload))
+                image_response = await client.get(image_url)
+                if image_response.status_code != 200:
+                    raise FreeAIError("Processed image could not be downloaded.")
+                return image_response.content
+            if not content_type.startswith("image/"):
+                raise FreeAIError(
+                    "Image processing service returned an unexpected payload."
+                )
+            return response.content
+    except Exception as exc:
+        if mode == "enhance":
+            try:
+                return await asyncio.to_thread(_enhance_image_locally, image_bytes)
+            except Exception:
+                pass
+        if mode == "removebg":
+            try:
+                return await asyncio.to_thread(_remove_background_locally, image_bytes)
+            except Exception:
+                pass
+        if isinstance(exc, FreeAIError):
+            raise
+        raise FreeAIError(f"Image processing service failed: {exc}") from exc
 
 
 async def generate_video(
@@ -3137,6 +3839,7 @@ async def generate_video(
 
     if not text_prompt:
         text_prompt = "make this image come alive, smooth cinematic motion"
+    _ensure_safe_generation_prompt(text_prompt)
 
     reference_image_path = None
     used_reference_image = False

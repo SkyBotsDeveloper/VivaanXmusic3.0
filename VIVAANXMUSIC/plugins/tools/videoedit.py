@@ -1,6 +1,7 @@
 import asyncio
 import os
 import subprocess
+import tempfile
 
 from pydub import AudioSegment
 from pyrogram import filters
@@ -32,61 +33,62 @@ async def remove_media(_, message: Message):
         )
 
     command = message.command[1].lower()
+    if command not in {"audio", "video"}:
+        return await message.reply_text(
+            "Invalid command. Use `/remove audio` or `/remove video`."
+        )
+
     processing_msg = await message.reply_text("Processing media...")
 
     file_path = None
     try:
-        file_path = await replied.download(file_name="media_input.mp4")
+        with tempfile.TemporaryDirectory(prefix="vivaan_remove_") as work_dir:
+            file_path = await replied.download(
+                file_name=os.path.join(work_dir, "media_input.mp4")
+            )
 
-        if command == "audio":
-            output_video = "output_video.mp4"
+            if command == "audio":
+                output_video = os.path.join(work_dir, "output_video.mp4")
 
-            def process_video():
-                subprocess.run(
-                    [
-                        "ffmpeg",
-                        "-hide_banner",
-                        "-loglevel",
-                        "error",
-                        "-i",
-                        file_path,
-                        "-c",
-                        "copy",
-                        "-an",
-                        output_video,
-                    ],
-                    env=build_subprocess_env(),
-                    check=True,
+                def process_video():
+                    subprocess.run(
+                        [
+                            "ffmpeg",
+                            "-hide_banner",
+                            "-loglevel",
+                            "error",
+                            "-i",
+                            file_path,
+                            "-c",
+                            "copy",
+                            "-an",
+                            output_video,
+                        ],
+                        env=build_subprocess_env(),
+                        check=True,
+                    )
+
+                await asyncio.to_thread(process_video)
+                await app.send_video(
+                    message.chat.id,
+                    output_video,
+                    caption="Video with audio removed.",
                 )
 
-            await asyncio.to_thread(process_video)
-            await app.send_video(
-                message.chat.id,
-                output_video,
-                caption="Video with audio removed.",
-            )
-            os.remove(output_video)
+            else:
+                output_audio = os.path.join(work_dir, "output_audio.mp3")
 
-        elif command == "video":
-            output_audio = "output_audio.mp3"
+                def process_audio():
+                    audio = AudioSegment.from_file(file_path)
+                    audio = audio.set_channels(1)
+                    audio.export(output_audio, format="mp3")
 
-            def process_audio():
-                audio = AudioSegment.from_file(file_path)
-                audio = audio.set_channels(1)
-                audio.export(output_audio, format="mp3")
-
-            await asyncio.to_thread(process_audio)
-            await app.send_audio(
-                message.chat.id,
-                output_audio,
-                caption="Audio extracted after removing video.",
-            )
-            os.remove(output_audio)
-
-        else:
-            return await message.reply_text(
-                "Invalid command. Use `/remove audio` or `/remove video`."
-            )
+                await asyncio.to_thread(process_audio)
+                await app.send_audio(
+                    message.chat.id,
+                    output_audio,
+                    caption="Audio extracted after removing video.",
+                )
 
     except Exception as exc:
         await message.reply_text(f"Error: {exc}")

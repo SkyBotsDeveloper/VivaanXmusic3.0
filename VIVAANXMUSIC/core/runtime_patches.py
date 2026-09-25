@@ -1,11 +1,13 @@
 import asyncio
+import inspect
 import re
 import subprocess
 from json import JSONDecodeError
-from typing import Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 from ntgcalls import FFmpegError
 from pytgcalls import ffmpeg as pytgcalls_ffmpeg
+from pytgcalls.types import Cache as PytgCallsCache
 
 
 _PATCHES_APPLIED = False
@@ -73,10 +75,40 @@ async def cached_cleanup_commands(
     return new_commands
 
 
+def patch_pytgcalls_cache_put() -> None:
+    put = getattr(PytgCallsCache, "put", None)
+    if not callable(put):
+        return
+
+    try:
+        params = inspect.signature(put).parameters
+    except (TypeError, ValueError):
+        params = {}
+
+    if len(params) >= 4:
+        return
+
+    original_put = put
+
+    def compatible_put(self, chat_id: int, data: Any, persistent: bool = False) -> None:
+        result = original_put(self, chat_id, data)
+        if persistent:
+            try:
+                entry = getattr(self, "_store", {}).get(chat_id)
+                if entry is not None and hasattr(entry, "time"):
+                    entry.time = 0
+            except Exception:
+                pass
+        return result
+
+    PytgCallsCache.put = compatible_put
+
+
 def apply_runtime_patches() -> None:
     global _PATCHES_APPLIED
     if _PATCHES_APPLIED:
         return
 
     pytgcalls_ffmpeg.cleanup_commands = cached_cleanup_commands
+    patch_pytgcalls_cache_put()
     _PATCHES_APPLIED = True

@@ -1,6 +1,13 @@
+import asyncio
 import os
 import re
+import shutil
+import tempfile
+from html import unescape
+from pathlib import Path
+
 import httpx
+import yt_dlp
 from pyrogram import filters
 from pyrogram.enums import ChatAction
 from pyrogram.types import (
@@ -24,8 +31,13 @@ from VIVAANXMUSIC.utils.inline.song import song_markup
 
 SONG_COMMAND = ["song"]
 APPLE_SPOTIFY_COMMANDS = ["apple", "spotify"]
-SPOTIFY_TRACK_URL = re.compile(r"^https://open\.spotify\.com/track/", re.IGNORECASE)
+SPOTIFY_TRACK_URL = re.compile(
+    r"^https://open\.spotify\.com/(?:intl-[a-z-]+/)?track/",
+    re.IGNORECASE,
+)
 APPLE_TRACK_URL = re.compile(r"^https://music\.apple\.com/.+", re.IGNORECASE)
+META_TAG = re.compile(r"<meta\s+[^>]*>", re.IGNORECASE)
+META_ATTR = re.compile(r"([a-zA-Z_:.-]+)\s*=\s*([\"'])(.*?)\2", re.IGNORECASE | re.DOTALL)
 SPOTIFY_OG_TITLE = re.compile(
     r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']',
     re.IGNORECASE,
@@ -35,6 +47,21 @@ SPOTIFY_OG_DESC = re.compile(
     re.IGNORECASE,
 )
 APPLE_TRACK_ID = re.compile(r"(?:[?&]i=|/song/[^/]+/)(\d+)", re.IGNORECASE)
+SONG_HTTP_TIMEOUT = httpx.Timeout(20.0, connect=8.0)
+SONG_HTTP_LIMITS = httpx.Limits(
+    max_connections=8,
+    max_keepalive_connections=3,
+    keepalive_expiry=20.0,
+)
+SONG_HTTP_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    )
+}
+_song_http_client: httpx.AsyncClient | None = None
+_song_http_lock = asyncio.Lock()
+_song_download_semaphore = asyncio.Semaphore(3)
 
 
 class InlineKeyboardBuilder(list):
@@ -42,19 +69,230 @@ class InlineKeyboardBuilder(list):
         self.append(list(buttons))
 
 
+async def _get_song_http_client() -> httpx.AsyncClient:
+    global _song_http_client
+    async with _song_http_lock:
+        if _song_http_client is None or _song_http_client.is_closed:
+            _song_http_client = httpx.AsyncClient(
+                timeout=SONG_HTTP_TIMEOUT,
+                headers=SONG_HTTP_HEADERS,
+                follow_redirects=True,
+                trust_env=False,
+                limits=SONG_HTTP_LIMITS,
+            )
+        return _song_http_client
+
+
+async def close_song_http_client() -> None:
+    global _song_http_client
+    async with _song_http_lock:
+        if _song_http_client and not _song_http_client.is_closed:
+            await _song_http_client.aclose()
+        _song_http_client = None
+
+
+def _safe_song_title(title: str | None, fallback: str = "song") -> str:
+    cleaned = re.sub(r"[\\/*?:\"<>|]+", "_", str(title or fallback))
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" .")
+    return (cleaned or fallback)[:120]
+
+
+def _valid_file(path: str | None) -> bool:
+    return bool(path and os.path.exists(path) and os.path.getsize(path) > 0)
+
+
+def _meta_content(page: str, keys: set[str]) -> str | None:
+    for tag in META_TAG.findall(page or ""):
+        attrs = {
+            key.lower(): unescape(value)
+            for key, _quote, value in META_ATTR.findall(tag)
+        }
+        meta_key = (attrs.get("property") or attrs.get("name") or "").lower()
+        content = re.sub(r"\s+", " ", attrs.get("content") or "").strip()
+        if meta_key in keys and content:
+            return content
+    return None
+
+
+def _clean_apple_metadata_text(text: str | None) -> str:
+    cleaned = unescape(str(text or ""))
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    cleaned = re.sub(r"\s*[-|]\s*Apple Music\s*$", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+on Apple Music\.?\s*$", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"^Listen to\s+", "", cleaned, flags=re.IGNORECASE)
+    return cleaned.strip(" -|")
+
+
+def _apple_slug_query(link: str) -> str | None:
+    match = re.search(r"/(?:song|album)/([^/?#]+)", link or "", re.IGNORECASE)
+    if not match:
+        return None
+    slug = unescape(match.group(1)).replace("-", " ").replace("_", " ")
+    slug = re.sub(r"\s+", " ", slug).strip()
+    return slug or None
+
+
+def _query_from_itunes_song(song: dict) -> str | None:
+    track_name = str(song.get("trackName") or "").strip()
+    artist_name = str(song.get("artistName") or "").strip()
+    query = f"{track_name} {artist_name}".strip()
+    return query or None
+
+
+async def _lookup_itunes_track(client: httpx.AsyncClient, track_id: str) -> str | None:
+    response = await client.get(
+        "https://itunes.apple.com/lookup",
+        params={"id": track_id, "entity": "song"},
+    )
+    response.raise_for_status()
+    payload = response.json()
+    results = payload.get("results") or []
+    if not results:
+        return None
+    song = next(
+        (
+            item
+            for item in results
+            if str(item.get("wrapperType") or "").lower() == "track"
+            or str(item.get("kind") or "").lower() == "song"
+        ),
+        None,
+    )
+    return _query_from_itunes_song(song or results[0])
+
+
+async def _search_itunes_track(client: httpx.AsyncClient, term: str) -> str | None:
+    response = await client.get(
+        "https://itunes.apple.com/search",
+        params={"term": term, "entity": "song", "limit": 1},
+    )
+    response.raise_for_status()
+    payload = response.json()
+    results = payload.get("results") or []
+    if not results:
+        return None
+    return _query_from_itunes_song(results[0])
+
+
+def _apple_query_from_page(page: str) -> str | None:
+    title = _clean_apple_metadata_text(
+        _meta_content(page, {"og:title", "twitter:title"})
+    )
+    description = _clean_apple_metadata_text(
+        _meta_content(page, {"og:description", "description"})
+    )
+    for text in (description, title):
+        match = re.search(
+            r"(.+?)\s+by\s+(.+?)(?:\s+on Apple Music|\.|$)",
+            text or "",
+            re.IGNORECASE,
+        )
+        if match:
+            song_name = re.sub(
+                r"\s*-\s*(?:Song|Single|Album|EP)\s*$",
+                "",
+                match.group(1).strip(),
+                flags=re.IGNORECASE,
+            )
+            return f"{song_name} {match.group(2).strip()}".strip()
+    return title or None
+
+
+async def _get_song_query(message: Message) -> tuple[str | None, bool]:
+    url = await YouTube.url(message)
+    if url:
+        return url.strip(), True
+
+    source = (message.text or message.caption or "").strip()
+    parts = source.split(None, 1)
+    if len(parts) > 1 and parts[1].strip():
+        return parts[1].strip(), False
+
+    replied = message.reply_to_message
+    if replied:
+        replied_text = (replied.text or replied.caption or "").strip()
+        if replied_text:
+            return replied_text, False
+
+    return None, False
+
+
+async def _download_audio_with_ytdlp(vidid: str, title: str) -> tuple[str | None, str | None]:
+    temp_dir = tempfile.mkdtemp(prefix="vivaan_song_")
+    safe_title = _safe_song_title(title, vidid)
+    outtmpl = os.path.join(temp_dir, f"{safe_title}.%(ext)s")
+    url = f"https://www.youtube.com/watch?v={vidid}"
+
+    def run_download():
+        options = {
+            "format": "bestaudio/best",
+            "outtmpl": outtmpl,
+            "quiet": True,
+            "no_warnings": True,
+            "noplaylist": True,
+            "geo_bypass": True,
+            "nocheckcertificate": True,
+            "retries": 2,
+            "socket_timeout": 25,
+            "prefer_ffmpeg": True,
+            "postprocessors": [
+                {
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "mp3",
+                    "preferredquality": "192",
+                }
+            ],
+        }
+        with yt_dlp.YoutubeDL(options) as ydl:
+            ydl.download([url])
+
+    try:
+        await asyncio.to_thread(run_download)
+        for path in Path(temp_dir).glob("*"):
+            if path.is_file() and path.suffix.lower() == ".mp3" and path.stat().st_size > 0:
+                return str(path), temp_dir
+    except Exception:
+        pass
+
+    shutil.rmtree(temp_dir, ignore_errors=True)
+    return None, None
+
+
+async def _download_song_audio(vidid: str, title: str, mystic) -> tuple[str | None, str | None]:
+    async with _song_download_semaphore:
+        try:
+            result = await YouTube.download(vidid, mystic, videoid=True)
+            file_path = result[0] if isinstance(result, tuple) else result
+            if _valid_file(file_path):
+                return file_path, None
+        except Exception:
+            pass
+        return await _download_audio_with_ytdlp(vidid, title)
+
+
 async def _handle_song_audio_request(message: Message, lang):
     mystic = await message.reply_text(lang["play_1"])
 
-    url = await YouTube.url(message)
-    query = url or (message.text.split(None, 1)[1] if len(message.command) > 1 else None)
+    query, is_url = await _get_song_query(message)
     if not query:
         return await mystic.edit_text(lang["song_2"])
 
-    if url and not await YouTube.exists(url):
-        return await mystic.edit_text(lang["song_5"])
+    resolved_query = query
+    if is_url and not await YouTube.exists(query):
+        try:
+            resolved_query = await _resolve_link_query(query)
+        except Exception:
+            resolved_query = None
+        if not resolved_query or resolved_query == query:
+            return await mystic.edit_text(lang["song_5"])
+    elif not is_url:
+        try:
+            resolved_query = await _resolve_link_query(query)
+        except Exception:
+            resolved_query = query
 
     try:
-        title, dur_min, dur_sec, _thumb, vidid = await YouTube.details(query)
+        title, dur_min, dur_sec, _thumb, vidid = await YouTube.details(resolved_query)
     except Exception:
         return await mystic.edit_text(lang["play_3"])
 
@@ -66,7 +304,7 @@ async def _handle_song_audio_request(message: Message, lang):
     file_path = None
     try:
         await mystic.edit_text(lang["song_8"])
-        file_path, _ = await YouTube.download(vidid, mystic, videoid=True)
+        file_path, cleanup_dir = await _download_song_audio(vidid, title, mystic)
         if not file_path:
             raise RuntimeError("no audio file")
 
@@ -85,27 +323,19 @@ async def _handle_song_audio_request(message: Message, lang):
                 os.remove(file_path)
             except Exception:
                 pass
+        if "cleanup_dir" in locals() and cleanup_dir:
+            shutil.rmtree(cleanup_dir, ignore_errors=True)
 
 
 async def _resolve_spotify_query(link: str) -> str | None:
     if not SPOTIFY_TRACK_URL.search(link or ""):
         return None
-    async with httpx.AsyncClient(
-        timeout=httpx.Timeout(20.0, connect=10.0),
-        follow_redirects=True,
-        trust_env=False,
-        headers={
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-            )
-        },
-    ) as client:
-        response = await client.get(
-            "https://open.spotify.com/oembed",
-            params={"url": link},
-        )
-        response.raise_for_status()
+    client = await _get_song_http_client()
+    response = await client.get(
+        "https://open.spotify.com/oembed",
+        params={"url": link},
+    )
+    response.raise_for_status()
     payload = response.json()
     title = re.sub(
         r"\s*\|\s*Spotify\s*$",
@@ -122,40 +352,35 @@ async def _resolve_spotify_query(link: str) -> str | None:
 async def _resolve_apple_query(link: str) -> str | None:
     if not APPLE_TRACK_URL.search(link or ""):
         return None
+    client = await _get_song_http_client()
+
     match = APPLE_TRACK_ID.search(link)
-    if not match:
-        return None
-    track_id = match.group(1)
-    async with httpx.AsyncClient(
-        timeout=httpx.Timeout(20.0, connect=10.0),
-        follow_redirects=True,
-        trust_env=False,
-        headers={"User-Agent": "Mozilla/5.0"},
-    ) as client:
-        response = await client.get(
-            "https://itunes.apple.com/lookup",
-            params={"id": track_id, "entity": "song"},
-        )
-        response.raise_for_status()
-        payload = response.json()
-    results = payload.get("results") or []
-    if not results:
-        return None
-    song = next(
-        (
-            item
-            for item in results
-            if str(item.get("wrapperType") or "").lower() == "track"
-            or str(item.get("kind") or "").lower() == "song"
-        ),
-        None,
-    )
-    if not song:
-        song = results[0]
-    track_name = str(song.get("trackName") or "").strip()
-    artist_name = str(song.get("artistName") or "").strip()
-    query = f"{track_name} {artist_name}".strip()
-    return query or None
+    if match:
+        try:
+            query = await _lookup_itunes_track(client, match.group(1))
+            if query:
+                return query
+        except Exception:
+            pass
+
+    try:
+        response = await client.get(link)
+        if response.status_code < 400:
+            query = _apple_query_from_page(response.text)
+            if query:
+                return query
+    except Exception:
+        pass
+
+    slug_query = _apple_slug_query(link)
+    if slug_query:
+        try:
+            query = await _search_itunes_track(client, slug_query)
+            if query:
+                return query
+        except Exception:
+            pass
+    return slug_query
 
 
 async def _resolve_link_query(query: str) -> str | None:
@@ -171,7 +396,7 @@ async def _resolve_link_query(query: str) -> str | None:
 
 async def _handle_platform_song_request(message: Message, lang, platform_name: str):
     mystic = await message.reply_text(lang["play_1"])
-    query = message.text.split(None, 1)[1] if len(message.command) > 1 else None
+    query, _is_url = await _get_song_query(message)
     if not query:
         return await mystic.edit_text(f"Usage: /{platform_name} [link]")
 
@@ -196,7 +421,7 @@ async def _handle_platform_song_request(message: Message, lang, platform_name: s
     file_path = None
     try:
         await mystic.edit_text(lang["song_8"])
-        file_path, _ = await YouTube.download(vidid, mystic, videoid=True)
+        file_path, cleanup_dir = await _download_song_audio(vidid, title, mystic)
         if not file_path:
             raise RuntimeError("no audio file")
 
@@ -215,6 +440,8 @@ async def _handle_platform_song_request(message: Message, lang, platform_name: s
                 os.remove(file_path)
             except Exception:
                 pass
+        if "cleanup_dir" in locals() and cleanup_dir:
+            shutil.rmtree(cleanup_dir, ignore_errors=True)
 
 
 # ───────────────────────────── COMMANDS ───────────────────────────── #

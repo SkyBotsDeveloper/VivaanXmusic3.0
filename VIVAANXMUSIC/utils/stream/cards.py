@@ -5,6 +5,7 @@ from pyrogram.types import InlineKeyboardMarkup
 
 from VIVAANXMUSIC import app
 from VIVAANXMUSIC.misc import db
+from VIVAANXMUSIC.utils.stream.autodelete import remember_player_message
 from VIVAANXMUSIC.utils.thumbnails import get_thumb
 
 
@@ -53,6 +54,7 @@ async def _deliver_stream_card(
             return
 
         db[chat_id][0]["mystic"] = run
+        remember_player_message(chat_id, run)
         db[chat_id][0]["markup"] = markup
     except Exception:
         return

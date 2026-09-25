@@ -1,6 +1,7 @@
 import os
 import shutil
 import tempfile
+import asyncio
 
 import git
 from pyrogram import Client, filters
@@ -65,14 +66,29 @@ async def clone_and_zip_repo(repo_url: str) -> tuple[str, str]:
     archive_base = os.path.join(temp_root, repo_name)
 
     try:
-        git.Repo.clone_from(
+        return await asyncio.to_thread(
+            _clone_and_zip_repo_sync,
             safe_repo_url,
             repo_path,
-            env=build_subprocess_env(),
-            multi_options=["--depth=1", "--single-branch"],
+            archive_base,
+            temp_root,
         )
-        zip_file = shutil.make_archive(archive_base, "zip", repo_path)
-        return zip_file, temp_root
     except Exception:
         shutil.rmtree(temp_root, ignore_errors=True)
         raise
+
+
+def _clone_and_zip_repo_sync(
+    safe_repo_url: str,
+    repo_path: str,
+    archive_base: str,
+    temp_root: str,
+) -> tuple[str, str]:
+    git.Repo.clone_from(
+        safe_repo_url,
+        repo_path,
+        env=build_subprocess_env(),
+        multi_options=["--depth=1", "--single-branch"],
+    )
+    zip_file = shutil.make_archive(archive_base, "zip", repo_path)
+    return zip_file, temp_root

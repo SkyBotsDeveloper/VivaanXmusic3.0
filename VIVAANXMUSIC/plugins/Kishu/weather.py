@@ -14,6 +14,11 @@ GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
 WEATHER_URL = "https://api.open-meteo.com/v1/forecast"
 
 
+async def close_weather_http_client() -> None:
+    if not http.is_closed:
+        await http.aclose()
+
+
 def weather_code_to_text(code: int | None) -> str:
     mapping = {
         0: "Clear sky",

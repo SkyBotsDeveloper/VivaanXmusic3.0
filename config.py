@@ -27,7 +27,8 @@ SONG_DOWNLOAD_DURATION = int(getenv("SONG_DOWNLOAD_DURATION", "1200"))
 SONG_DOWNLOAD_DURATION_LIMIT = int(getenv("SONG_DOWNLOAD_DURATION_LIMIT", "1800"))
 TG_AUDIO_FILESIZE_LIMIT = int(getenv("TG_AUDIO_FILESIZE_LIMIT", "157286400"))
 TG_VIDEO_FILESIZE_LIMIT = int(getenv("TG_VIDEO_FILESIZE_LIMIT", "1288490189999"))
-PLAYLIST_FETCH_LIMIT = int(getenv("PLAYLIST_FETCH_LIMIT", "30"))
+QUEUE_LIMIT = int(getenv("QUEUE_LIMIT", "10"))
+PLAYLIST_FETCH_LIMIT = int(getenv("PLAYLIST_FETCH_LIMIT", str(QUEUE_LIMIT)))
 
 # ── External APIs ──────────────────────────────────────────────────────────────
 API_URL = getenv("API_URL")        # optional
@@ -39,10 +40,12 @@ GENVID_USE_PUBLIC_FALLBACKS = getenv("GENVID_USE_PUBLIC_FALLBACKS", "0")
 HF_TOKEN = getenv("HF_TOKEN")  # optional
 HF_TOKENS = getenv("HF_TOKENS", "")  # optional comma-separated pool
 OCR_SPACE_API_KEY = getenv("OCR_SPACE_API_KEY", "helloworld")  # optional shared free key
+ELITE_LLM_API_BASE = getenv("ELITE_LLM_API_BASE", "https://elite-llms.vercel.app/v1")
+ELITE_LLM_API_KEY = getenv("ELITE_LLM_API_KEY", "theelitekey")
 
 # Vars For API End Pont.
-YTPROXY_URL = getenv("YTPROXY_URL", 'https://tgapi.xbitcode.com') ## xBit Music Endpoint.
-YT_API_KEY = getenv("YT_API_KEY" , None ) ## Your API key like: xbit_10000000xx0233 Get from  https://t.me/tgmusic_apibot
+YTPROXY_URL = getenv("YTPROXY_URL", "") ## Optional xBit fallback endpoint.
+YT_API_KEY = getenv("YT_API_KEY" , None ) ## Optional xBit API key like: xbit_10000000xx0233
 
 # ── Hosting / deployment ───────────────────────────────────────────────────────
 HEROKU_APP_NAME = getenv("HEROKU_APP_NAME")
@@ -59,14 +62,14 @@ SUPPORT_CHAT = getenv("SUPPORT_CHAT", "https://t.me/VivaanSupport")
 
 # ── Assistant auto-leave ───────────────────────────────────────────────────────
 AUTO_LEAVING_ASSISTANT = True
-AUTO_LEAVE_ASSISTANT_TIME = int(getenv("ASSISTANT_LEAVE_TIME", "604800"))
+AUTO_LEAVE_ASSISTANT_TIME = int(getenv("ASSISTANT_LEAVE_TIME", "15000"))
 
 # ── Debug ──────────────────────────────────────────────────────────────────────
 DEBUG_IGNORE_LOG = True
 
 # ── Spotify (optional) ─────────────────────────────────────────────────────────
-SPOTIFY_CLIENT_ID = getenv("SPOTIFY_CLIENT_ID", "22b6125bfe224587b722d6815002db2b")
-SPOTIFY_CLIENT_SECRET = getenv("SPOTIFY_CLIENT_SECRET", "c9c63c6fbf2f467c8bc68624851e9773")
+SPOTIFY_CLIENT_ID = getenv("SPOTIFY_CLIENT_ID", "")
+SPOTIFY_CLIENT_SECRET = getenv("SPOTIFY_CLIENT_SECRET", "")
 
 # ── Session strings (optional) ─────────────────────────────────────────────────
 STRING1 = getenv("STRING_SESSION")

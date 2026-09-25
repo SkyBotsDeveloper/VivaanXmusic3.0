@@ -51,15 +51,55 @@
       "required": true,
       "value": ""
     },
+    "QUEUE_LIMIT": {
+      "description": "Maximum number of tracks allowed in one chat queue, including the currently playing track.",
+      "required": false,
+      "value": "10"
+    },
+    "PLAYLIST_FETCH_LIMIT": {
+      "description": "Maximum number of tracks imported from one playlist request.",
+      "required": false,
+      "value": "10"
+    },
     "YTPROXY_URL": {
-      "description": "(Optional) URL of a custom API server used for music downloads or other services.",
-      "required": true,
+      "description": "(Optional) Primary xBit music API endpoint. Leave as default unless you use another compatible endpoint.",
+      "required": false,
       "value": "https://tgapi.xbitcode.com"
     },
     "YT_API_KEY": {
-      "description": "(Optional) API Key associated with your custom music download server (used with API_URL).",
-      "required": true,
+      "description": "(Optional) API key associated with your primary xBit music API endpoint.",
+      "required": false,
       "value": ""
+    },
+    "WORKER_FALLBACK_API_URL": {
+      "description": "(Optional) YouTube fallback converter API endpoint.",
+      "required": false,
+      "value": "https://youtubenewapi.skybotsdeveloper.workers.dev"
+    },
+    "WORKER_FALLBACK_API_KEY": {
+      "description": "(Optional) API key for the YouTube fallback converter API.",
+      "required": false,
+      "value": "itsmesid"
+    },
+    "WORKER_FALLBACK_API_ATTEMPTS": {
+      "description": "Worker API attempts for transient 429/5xx failures.",
+      "required": false,
+      "value": "3"
+    },
+    "WORKER_FALLBACK_API_RETRY_DELAY_MS": {
+      "description": "Base delay between transient Worker API retries, in milliseconds.",
+      "required": false,
+      "value": "1000"
+    },
+    "YOUTUBE_STREAM_HTTP_PROBE_TIMEOUT": {
+      "description": "Seconds to wait for the first byte from a Worker media stream.",
+      "required": false,
+      "value": "15"
+    },
+    "YOUTUBE_STREAM_PREFLIGHT_TIMEOUT": {
+      "description": "Seconds allowed for Worker stream audio validation.",
+      "required": false,
+      "value": "15"
     },
     "DEEP_API": {
       "description": "(Optional) DeepAI API key for enabling AI-powered features. Get it from https://deepai.org/.",

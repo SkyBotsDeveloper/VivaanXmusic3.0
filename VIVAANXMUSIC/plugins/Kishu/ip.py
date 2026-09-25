@@ -9,6 +9,7 @@ import html
 
 IPINFO_TOKEN = "6274faab58da61"
 IPQUALITYSCORE_API_KEY = "952ztTq41AxoXam43pStVjVNcEjo1ntQ"
+PROXYCHECK_API_URL = "https://proxycheck.io/v2"
 
 # ---------- Helpers ----------
 
@@ -71,7 +72,7 @@ def _build_card(ip: str, info: dict, score: int | None) -> tuple[str, InlineKeyb
     maps_q = loc.replace(" ", "") if loc else ""
     maps_url = f"https://maps.google.com/?q={maps_q}" if maps_q else f"https://duckduckgo.com/?q={s_ip}"
     ipinfo_url = f"https://ipinfo.io/{s_ip}"
-    ipqs_url = f"https://www.ipqualityscore.com/free-ip-lookup-proxy-vpn-test/lookup/{s_ip}"
+    ipqs_url = f"https://proxycheck.io/v2/{s_ip}?vpn=1&asn=1&risk=1"
     abuse_url = f"https://www.abuseipdb.com/check/{s_ip}"
 
     text = (
@@ -99,7 +100,7 @@ def _build_card(ip: str, info: dict, score: int | None) -> tuple[str, InlineKeyb
                 InlineKeyboardButton("ℹ️ ipinfo", url=ipinfo_url),
             ],
             [
-                InlineKeyboardButton("🛡️ IPQualityScore", url=ipqs_url),
+                InlineKeyboardButton("🛡️ ProxyCheck", url=ipqs_url),
                 InlineKeyboardButton("🚫 AbuseIPDB", url=abuse_url),
             ],
         ]
@@ -129,6 +130,53 @@ async def fetch_ipqs(client: httpx.AsyncClient, ip: str) -> int | None:
     except Exception:
         pass
     return None
+
+
+def _proxycheck_to_ipinfo(ip: str, data: dict) -> dict:
+    latitude = data.get("latitude")
+    longitude = data.get("longitude")
+    loc = (
+        f"{latitude},{longitude}"
+        if latitude is not None and longitude is not None
+        else None
+    )
+    asn = str(data.get("asn") or "").strip()
+    provider = data.get("provider") or data.get("organisation")
+    org = f"{asn} {provider}".strip() if asn or provider else None
+    return {
+        "ip": ip,
+        "city": data.get("city"),
+        "region": data.get("region"),
+        "country": data.get("isocode"),
+        "loc": loc,
+        "org": org,
+        "timezone": data.get("timezone"),
+        "postal": data.get("postcode"),
+    }
+
+
+async def fetch_proxycheck(client: httpx.AsyncClient, ip: str) -> tuple[dict | None, int | None]:
+    try:
+        r = await client.get(
+            f"{PROXYCHECK_API_URL}/{ip}",
+            params={"vpn": 1, "asn": 1, "risk": 1},
+            timeout=12,
+        )
+        if r.status_code != 200:
+            return None, None
+        payload = r.json()
+        if payload.get("status") != "ok":
+            return None, None
+        data = payload.get(ip) or {}
+        risk = data.get("risk")
+        score = (
+            int(risk)
+            if isinstance(risk, (int, float, str)) and str(risk).isdigit()
+            else None
+        )
+        return _proxycheck_to_ipinfo(ip, data), score
+    except Exception:
+        return None, None
 
 # ---------- Command ----------
 
@@ -167,7 +215,17 @@ async def ip_info_and_score(_, message):
     async with httpx.AsyncClient(headers={"User-Agent": "VivaanX/IpIntel/1.0"}) as client:
         ipinfo_task = fetch_ipinfo(client, ip_raw)
         ipqs_task = fetch_ipqs(client, ip_raw)
-        ipinfo, score = await asyncio.gather(ipinfo_task, ipqs_task)
+        proxycheck_task = fetch_proxycheck(client, ip_raw)
+        ipinfo, score, (proxy_info, proxy_score) = await asyncio.gather(
+            ipinfo_task,
+            ipqs_task,
+            proxycheck_task,
+        )
+
+    if not ipinfo and proxy_info:
+        ipinfo = proxy_info
+    if score is None:
+        score = proxy_score
 
     if not ipinfo and score is None:
         await wait_msg.edit_text(

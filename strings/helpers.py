@@ -201,6 +201,7 @@ HELP_20 = """
 - /play, /vplay - play audio or video by query, URL, or replied media.
 - /playforce, /vplayforce - force-start a new track immediately.
 - /autoplay, /cautoplay [on|off] - continue with similar songs when the queue ends.
+- /autodelete [on|off] - delete queued-track notices and old stream cards automatically.
 - /settings, /setting - open group playback settings.
 - /playmode, /mode - switch direct/inline play mode.
 """
@@ -208,7 +209,6 @@ HELP_20 = """
 HELP_21 = """
 <b><u>Repo Info</u></b>
 
-- /repo - open repo/support buttons.
 - /pypi [package] - fetch package info from PyPI.
 - /downloadrepo [github url] - download a repository as a zip.
 """

@@ -1,5 +1,6 @@
-from pyrogram import Client, filters
+from pyrogram import filters
 from pyrogram.enums import ParseMode
+import asyncio
 import requests
 from VIVAANXMUSIC import app
 
@@ -7,7 +8,7 @@ from VIVAANXMUSIC import app
 def get_pypi_info(package_name):
     try:
         api_url = f"https://pypi.org/pypi/{package_name}/json"
-        response = requests.get(api_url)
+        response = requests.get(api_url, timeout=12)
         response.raise_for_status()
         return response.json()
     except Exception as e:
@@ -24,11 +25,12 @@ async def pypi_info_command(client, message):
         )
 
     package_name = message.command[1]
-    pypi_info = get_pypi_info(package_name)
+    pypi_info = await asyncio.to_thread(get_pypi_info, package_name)
 
     if pypi_info:
         info = pypi_info['info']
-        project_url = info['project_urls'].get('Homepage') or info.get('home_page', 'N/A')
+        project_urls = info.get('project_urls') or {}
+        project_url = project_urls.get('Homepage') or info.get('home_page') or 'N/A'
 
         info_message = (
             f"📦 **Package Name:** `{info['name']}`\n"

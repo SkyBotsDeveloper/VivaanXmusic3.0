@@ -1,6 +1,7 @@
 from pyrogram import Client, filters, enums
 from pyrogram.types import Message
 from datetime import datetime
+import asyncio
 from config import BOT_USERNAME
 from VIVAANXMUSIC import app
 import requests
@@ -21,7 +22,12 @@ async def handwrite(_, message: Message):
     msg = await message.reply_text("✍️ Please wait...\nWriting your text...")
 
     try:
-        response = requests.get(f"https://apis.xditya.me/write?text={text}")
+        response = await asyncio.to_thread(
+            requests.get,
+            "https://apis.xditya.me/write",
+            params={"text": text},
+            timeout=20,
+        )
         if response.status_code != 200:
             raise Exception("API Error")
         image_url = response.url

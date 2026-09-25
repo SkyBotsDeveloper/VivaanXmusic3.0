@@ -18,29 +18,39 @@ HEADERS = {
 }
 
 
+async def _tmdb_get_json(client: httpx.AsyncClient, path: str, params: dict) -> dict:
+    last_error = None
+    for _ in range(3):
+        try:
+            response = await client.get(f"{TMDB_BASE}{path}", params=params)
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPError as exc:
+            last_error = exc
+    raise last_error or httpx.HTTPError("TMDB request failed.")
+
+
 def _escape(text) -> str:
     return html.escape(str(text)) if text not in (None, "") else "N/A"
 
 
 async def get_movie_info(query: str) -> str:
     async with httpx.AsyncClient(timeout=15.0, headers=HEADERS, trust_env=False) as client:
-        search = await client.get(
-            f"{TMDB_BASE}/search/movie",
-            params={"api_key": TMDB_API_KEY, "query": query, "include_adult": "false"},
+        search_data = await _tmdb_get_json(
+            client,
+            "/search/movie",
+            {"api_key": TMDB_API_KEY, "query": query, "include_adult": "false"},
         )
-        search.raise_for_status()
-        search_data = search.json()
 
         if not search_data.get("results"):
             return "Movie not found."
 
         movie = search_data["results"][0]
-        details = await client.get(
-            f"{TMDB_BASE}/movie/{movie['id']}",
-            params={"api_key": TMDB_API_KEY, "append_to_response": "credits"},
+        details_data = await _tmdb_get_json(
+            client,
+            f"/movie/{movie['id']}",
+            {"api_key": TMDB_API_KEY, "append_to_response": "credits"},
         )
-        details.raise_for_status()
-        details_data = details.json()
 
     credits = details_data.get("credits") or {}
     actors = ", ".join(actor["name"] for actor in credits.get("cast", [])[:5]) or "N/A"

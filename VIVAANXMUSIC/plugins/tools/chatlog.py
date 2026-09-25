@@ -7,6 +7,7 @@ from typing import Optional
 
 from config import LOGGER_ID
 from VIVAANXMUSIC import app
+from VIVAANXMUSIC.utils.database import remove_served_chat
 
 BOT_INFO: Optional[types.User] = None
 BOT_ID: Optional[int] = None
@@ -124,6 +125,7 @@ async def on_left_chat_member(_, message: Message):
 
         remover = message.from_user.mention if message.from_user else "**ᴜɴᴋɴᴏᴡɴ ᴜsᴇʀ**"
         chat = message.chat
+        await remove_served_chat(chat.id)
 
         text = (
             "✫ **<u>#ʟᴇғᴛ_ɢʀᴏᴜᴘ</u>** ✫\n\n"

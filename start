@@ -1,1 +1,6 @@
-python3 -m VIVAANXMUSIC
+#!/usr/bin/env bash
+set -e
+
+ulimit -n 65535 2>/dev/null || ulimit -n 4096 2>/dev/null || true
+
+exec python3 -m VIVAANXMUSIC

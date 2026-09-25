@@ -9,7 +9,7 @@ from pyrogram.errors.exceptions.forbidden_403 import ChatWriteForbidden
 
 from config import DEBUG_IGNORE_LOG, LOGGER_ID
 from VIVAANXMUSIC import app
-from VIVAANXMUSIC.utils.exceptions import is_ignored_error
+from VIVAANXMUSIC.utils.exceptions import AssistantErr, is_ignored_error
 from VIVAANXMUSIC.utils.pastebin import VIVAANBIN
 from VIVAANXMUSIC.security import redact_secrets
 
@@ -126,6 +126,8 @@ def capture_internal_err(func):
     async def wrapper(*args, **kwargs):
         try:
             return await func(*args, **kwargs)
+        except AssistantErr:
+            raise
         except Exception as err:
             tb = "".join(traceback.format_exception(*sys.exc_info()))
             extras = {"Function": func.__name__}

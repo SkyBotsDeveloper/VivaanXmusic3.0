@@ -1,9 +1,23 @@
 import asyncio
+from os import getenv
 from typing import Union
 
+import config
 from VIVAANXMUSIC.misc import db
+from VIVAANXMUSIC.utils.exceptions import AssistantErr
 from VIVAANXMUSIC.utils.formatters import check_duration, seconds_to_min
 from config import autoclean, time_to_seconds
+
+QUEUE_LIMIT = int(getattr(config, "QUEUE_LIMIT", getenv("QUEUE_LIMIT", "10")))
+
+
+def _queue_limit_error() -> AssistantErr:
+    return AssistantErr(f"Queue limit reached. Only {QUEUE_LIMIT} tracks are allowed per chat.")
+
+
+def _ensure_queue_slot(chat_id) -> None:
+    if len(db.get(chat_id) or []) >= QUEUE_LIMIT:
+        raise _queue_limit_error()
 
 
 async def put_queue(
@@ -18,6 +32,7 @@ async def put_queue(
     stream,
     forceplay: Union[bool, str] = None,
 ):
+    _ensure_queue_slot(chat_id)
     title = title.title()
     try:
         duration_in_seconds = time_to_seconds(duration) - 3
@@ -45,6 +60,12 @@ async def put_queue(
     else:
         db[chat_id].append(put)
     autoclean.append(file)
+    try:
+        from VIVAANXMUSIC.utils.stream.precache import schedule_youtube_precache_for_chat
+
+        schedule_youtube_precache_for_chat(chat_id)
+    except Exception:
+        pass
 
 
 async def put_queue_index(
@@ -58,6 +79,7 @@ async def put_queue_index(
     stream,
     forceplay: Union[bool, str] = None,
 ):
+    _ensure_queue_slot(chat_id)
     if "20.212.146.162" in vidid:
         try:
             dur = await asyncio.get_event_loop().run_in_executor(
