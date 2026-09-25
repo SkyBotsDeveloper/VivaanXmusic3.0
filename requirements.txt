@@ -6,7 +6,7 @@ bs4
 deepai
 edge-tts
 gitpython
-gradio_client==2.5.0
+gradio_client==2.6.0
 gpytranslate
 gtts
 heroku3
