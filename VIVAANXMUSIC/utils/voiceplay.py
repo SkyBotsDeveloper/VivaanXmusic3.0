@@ -117,7 +117,7 @@ class VoicePlayManager:
             self._locks[chat_id] = lock
         return lock
 
-    def schedule_track_started(self, chat_id: int, original_chat_id: int) -> None:
+    def schedule_song_finished(self, chat_id: int, original_chat_id: int) -> None:
         existing = self._start_tasks.get(chat_id)
         if existing and not existing.done():
             return
@@ -143,7 +143,15 @@ class VoicePlayManager:
     async def start_listening(self, chat_id: int, original_chat_id: int) -> bool:
         async with self._lock(chat_id):
             setting = await get_voiceplay(chat_id)
-            if not setting["enabled"] or not await is_active_chat(chat_id):
+            from VIVAANXMUSIC.core.call import JARVIS
+
+            # Voice Play is an idle-VC interaction. It must never start while a
+            # song (or a queued replacement) is active.
+            if (
+                not setting["enabled"]
+                or chat_id not in JARVIS.active_calls
+                or await is_active_chat(chat_id)
+            ):
                 return False
             if chat_id in self._sessions:
                 return False
@@ -189,6 +197,13 @@ class VoicePlayManager:
         if start_task or session:
             await self._stop_capture(chat_id)
 
+    async def leave_if_idle(self, chat_id: int) -> None:
+        """Leave an idle Voice Play call without interrupting active music."""
+        from VIVAANXMUSIC.core.call import JARVIS
+
+        if chat_id in JARVIS.active_calls and not await is_active_chat(chat_id):
+            await JARVIS.stop_stream(chat_id)
+
     async def _stop_capture(self, chat_id: int) -> None:
         try:
             from VIVAANXMUSIC.core.call import JARVIS
@@ -216,10 +231,11 @@ class VoicePlayManager:
             await app.send_message(
                 session.original_chat_id,
                 "❌ Voice Play could not access the live VC audio and was disabled. "
-                "Normal music playback is still active.",
+                "The idle assistant is leaving the voice chat.",
             )
         except Exception:
             pass
+        await self.leave_if_idle(session.chat_id)
 
     async def handle_stream_frames(self, update) -> None:
         session = self._sessions.get(int(update.chat_id))
@@ -273,7 +289,9 @@ class VoicePlayManager:
             ),
         )
 
-        await self._speak(session, prompt, restore=prompt != "leave")
+        # Listening rounds only run after the previous track has ended, so
+        # there is no music stream to restore after the prompt.
+        await self._speak(session, prompt, restore=False)
         if self._sessions.get(session.chat_id) is not session or prompt == "leave":
             return
 
@@ -470,9 +488,10 @@ class VoicePlayManager:
                 await status.edit_text(f"❌ Could not queue that song: {err}")
             except Exception:
                 pass
-            # The speech was understood; an operational playback failure must
-            # not consume a listening attempt or force the assistant to leave.
+            # The speech was understood, so an operational playback failure
+            # must not consume a listening attempt. Close the now-idle call.
             self._sessions.pop(session.chat_id, None)
+            await self.leave_if_idle(session.chat_id)
             return True
         try:
             await status.delete()

@@ -8,7 +8,7 @@ from pyrogram.types import (
 
 from config import BANNED_USERS
 from VIVAANXMUSIC import app
-from VIVAANXMUSIC.utils.database import get_voiceplay, is_active_chat, set_voiceplay
+from VIVAANXMUSIC.utils.database import get_voiceplay, set_voiceplay
 from VIVAANXMUSIC.utils.decorators.admins import ActualAdminCB, AdminActual
 from VIVAANXMUSIC.utils.voiceplay import voiceplay_manager
 
@@ -47,6 +47,7 @@ async def voiceplay_command(_, message: Message, strings):
     if argument in {"off", "disable", "disabled"}:
         await set_voiceplay(message.chat.id, False, current["language"])
         await voiceplay_manager.stop_session(message.chat.id)
+        await voiceplay_manager.leave_if_idle(message.chat.id)
         return await message.reply_text(
             "⏹ <b>Voice Play disabled.</b> Normal music commands will keep working."
         )
@@ -86,6 +87,7 @@ async def voiceplay_callback(_, callback: CallbackQuery, strings):
         current = await get_voiceplay(chat_id)
         await set_voiceplay(chat_id, False, current["language"])
         await voiceplay_manager.stop_session(chat_id)
+        await voiceplay_manager.leave_if_idle(chat_id)
         await callback.answer("Voice Play disabled.")
         return await callback.message.edit_text(
             "⏹ <b>Voice Play disabled.</b> Normal music commands remain unchanged."
@@ -97,18 +99,12 @@ async def voiceplay_callback(_, callback: CallbackQuery, strings):
     await voiceplay_manager.stop_session(chat_id)
     await set_voiceplay(chat_id, True, choice)
     language_name = "Hindi / Hinglish" if choice == "hi" else "English"
-    active = await is_active_chat(chat_id)
     await callback.answer(f"Voice Play enabled in {language_name}.")
     await callback.message.edit_text(
         "✅ <b>Voice Play enabled</b>\n\n"
         f"Language: <b>{language_name}</b>\n"
-        + (
-            "The assistant will ask for the next song now."
-            if active
-            else "Start a song with /play. The assistant will then ask for the next song."
-        )
+        "Start a song with /play. After the final queued song finishes, "
+        "the assistant will ask what you want to hear next."
         + "\n\nSay phrases such as <i>play Sanam Re</i>, "
         "<i>Sanam Re song bajao</i>, or <i>Sanam Re laga do</i>.",
     )
-    if active:
-        voiceplay_manager.schedule_track_started(chat_id, chat_id)

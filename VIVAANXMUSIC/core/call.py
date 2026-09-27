@@ -37,10 +37,12 @@ from VIVAANXMUSIC.utils.database import (
     get_autoplay,
     get_lang,
     get_loop,
+    get_voiceplay,
     get_vcnotify,
     group_assistant,
     is_autoend,
     is_music_playing,
+    music_off,
     music_on,
     remove_active_chat,
     remove_active_video_chat,
@@ -59,6 +61,7 @@ from VIVAANXMUSIC.utils.stream.autodelete import (
 from VIVAANXMUSIC.utils.stream.cards import schedule_stream_card
 from VIVAANXMUSIC.utils.stream.precache import schedule_youtube_precache_for_chat
 from VIVAANXMUSIC.utils.errors import capture_internal_err, send_large_error
+from VIVAANXMUSIC.utils.voiceplay_policy import should_prompt_after_track
 
 autoend = {}
 counter = {}
@@ -835,19 +838,21 @@ class Call:
         *,
         restore: bool = True,
     ) -> bool:
-        """Briefly play a TTS prompt in VC, then resume the current track."""
+        """Play a TTS prompt in VC and optionally resume the current track."""
         if chat_id not in self.active_calls:
             return False
         assistant = await group_assistant(self, chat_id)
         spec = dict(self._active_stream_specs.get(chat_id) or {})
-        if not spec.get("path"):
+        if restore and not spec.get("path"):
             return False
 
         generation = self._stream_generations.get(chat_id, 0)
-        try:
-            elapsed_seconds = max(0, int(await assistant.time(chat_id)))
-        except Exception:
-            elapsed_seconds = 0
+        elapsed_seconds = 0
+        if restore:
+            try:
+                elapsed_seconds = max(0, int(await assistant.time(chat_id)))
+            except Exception:
+                pass
 
         duration = min(max(float(duration), 0.8), 20.0)
         voice_prompt_suppression_until[chat_id] = time.monotonic() + duration + 3
@@ -858,6 +863,8 @@ class Call:
         await asyncio.sleep(duration + 0.15)
 
         if not restore:
+            self._active_stream_specs.pop(chat_id, None)
+            self._stream_generations.pop(chat_id, None)
             return True
         if chat_id not in self.active_calls:
             return True
@@ -897,7 +904,7 @@ class Call:
         try:
             from VIVAANXMUSIC.utils.voiceplay import voiceplay_manager
 
-            voiceplay_manager.schedule_track_started(chat_id, original_chat_id)
+            voiceplay_manager.schedule_song_finished(chat_id, original_chat_id)
         except Exception as err:
             LOGGER(__name__).warning(
                 "Unable to schedule Voice Play | chat_id=%s | reason=%s",
@@ -980,13 +987,6 @@ class Call:
         stream = dynamic_media_stream(path=link, video=bool(video))
         await self._play_stream(assistant, chat_id, stream)
         self._schedule_playback_watchdog(assistant, chat_id)
-        queue = db.get(chat_id) or []
-        original_chat_id = (
-            queue[0].get("chat_id", chat_id)
-            if queue and isinstance(queue[0], dict)
-            else chat_id
-        )
-        self._schedule_voiceplay_round(chat_id, original_chat_id)
 
     @capture_internal_err
     async def vc_users(self, chat_id: int) -> list:
@@ -1108,7 +1108,6 @@ class Call:
         await self.maybe_start_vc_join_notifier(chat_id, original_chat_id)
         self._schedule_empty_vc_watchdog(chat_id)
         self._schedule_playback_watchdog(assistant, chat_id, initial_delay=2)
-        self._schedule_voiceplay_round(chat_id, original_chat_id)
 
         if await is_autoend():
             counter[chat_id] = {}
@@ -1185,6 +1184,29 @@ class Call:
     ) -> bool:
         if db.get(chat_id):
             return False
+
+        voiceplay = await get_voiceplay(chat_id)
+        if should_prompt_after_track(
+            enabled=voiceplay["enabled"],
+            call_active=chat_id in self.active_calls,
+            queue_empty=not db.get(chat_id),
+            track_finished=bool(finished_track),
+        ):
+            # The last song has naturally ended. Keep the assistant in the
+            # VC, mark playback idle so a spoken request starts immediately,
+            # and only now open the listening window.
+            await remove_active_video_chat(chat_id)
+            await remove_active_chat(chat_id)
+            await music_off(chat_id)
+            self._active_stream_specs.pop(chat_id, None)
+            self._stream_generations.pop(chat_id, None)
+            original_chat_id = (
+                finished_track.get("chat_id", chat_id)
+                if isinstance(finished_track, dict)
+                else chat_id
+            )
+            self._schedule_voiceplay_round(chat_id, original_chat_id)
+            return True
 
         if (
             allow_autoplay
@@ -1375,7 +1397,6 @@ class Call:
                 except Exception:
                     return await app.send_message(original_chat_id, text=_["call_6"])
                 self._schedule_playback_watchdog(client, chat_id)
-                self._schedule_voiceplay_round(chat_id, original_chat_id)
 
                 button = stream_markup(_, chat_id)
                 schedule_stream_card(
@@ -1451,7 +1472,6 @@ class Call:
                     except:
                         return await app.send_message(original_chat_id, text=_["call_6"])
                 self._schedule_playback_watchdog(client, chat_id)
-                self._schedule_voiceplay_round(chat_id, original_chat_id)
 
                 button = stream_markup(_, chat_id)
                 await mystic.delete()
@@ -1487,7 +1507,6 @@ class Call:
                 except:
                     return await app.send_message(original_chat_id, text=_["call_6"])
                 self._schedule_playback_watchdog(client, chat_id)
-                self._schedule_voiceplay_round(chat_id, original_chat_id)
 
                 button = stream_markup(_, chat_id)
                 run = await app.send_photo(
@@ -1508,7 +1527,6 @@ class Call:
                 except:
                     return await app.send_message(original_chat_id, text=_["call_6"])
                 self._schedule_playback_watchdog(client, chat_id)
-                self._schedule_voiceplay_round(chat_id, original_chat_id)
 
                 if videoid == "telegram":
                     button = stream_markup(_, chat_id)
