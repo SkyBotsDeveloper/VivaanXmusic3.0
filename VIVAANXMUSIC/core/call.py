@@ -15,7 +15,17 @@ from pyrogram.raw.types import PeerUser, UpdateGroupCallParticipants
 from pyrogram.types import InlineKeyboardMarkup
 from pytgcalls import PyTgCalls
 from pytgcalls.exceptions import NoActiveGroupCall
-from pytgcalls.types import AudioQuality, ChatUpdate, MediaStream, StreamEnded, Update, VideoQuality
+from pytgcalls.types import (
+    AudioQuality,
+    ChatUpdate,
+    Device,
+    Direction,
+    MediaStream,
+    StreamEnded,
+    StreamFrames,
+    Update,
+    VideoQuality,
+)
 
 import config
 from strings import get_string
@@ -61,6 +71,7 @@ vc_join_targets = {}
 vc_join_call_map = {}
 vc_join_event_cache = {}
 vc_join_notice_cache = {}
+voice_prompt_suppression_until = {}
 
 PLAYBACK_WATCHDOG_GRACE_SECONDS = 20
 PLAYBACK_WATCHDOG_RECHECK_SECONDS = 30
@@ -123,7 +134,7 @@ def validate_stream_path(path: str) -> str:
 
 def dynamic_media_stream(path: str, video: bool = False, ffmpeg_params: str = None) -> MediaStream:
     path = validate_stream_path(path)
-    return MediaStream(
+    stream = MediaStream(
         audio_path=path,
         media_path=path,
         audio_parameters=AudioQuality.MEDIUM if video else AudioQuality.STUDIO,
@@ -131,6 +142,10 @@ def dynamic_media_stream(path: str, video: bool = False, ffmpeg_params: str = No
         video_flags=(MediaStream.Flags.AUTO_DETECT if video else MediaStream.Flags.IGNORE),
         ffmpeg_parameters=ffmpeg_params,
     )
+    stream._vivaan_source_path = path
+    stream._vivaan_video = bool(video)
+    stream._vivaan_ffmpeg_params = ffmpeg_params
+    return stream
 
 
 def is_groupcall_invalid(err: Exception) -> bool:
@@ -163,6 +178,17 @@ async def _clear_(chat_id: int) -> None:
     await remove_active_video_chat(chat_id)
     await remove_active_chat(chat_id)
     await set_loop(chat_id, 0)
+    voice_prompt_suppression_until.pop(chat_id, None)
+    controller = globals().get("JARVIS")
+    if controller is not None:
+        controller._active_stream_specs.pop(chat_id, None)
+        controller._stream_generations.pop(chat_id, None)
+    try:
+        from VIVAANXMUSIC.utils.voiceplay import voiceplay_manager
+
+        await voiceplay_manager.stop_session(chat_id)
+    except Exception:
+        pass
 
 class Call:
     def __init__(self):
@@ -193,6 +219,8 @@ class Call:
 
         self.active_calls: set[int] = set()
         self._stream_locks: dict[int, asyncio.Lock] = {}
+        self._active_stream_specs: dict[int, dict] = {}
+        self._stream_generations: dict[int, int] = {}
 
 
     def _get_stream_lock(self, chat_id: int) -> asyncio.Lock:
@@ -738,6 +766,16 @@ class Call:
             for attempt in range(2):
                 try:
                     await assistant.play(chat_id, stream)
+                    source_path = getattr(stream, "_vivaan_source_path", None)
+                    if source_path:
+                        self._active_stream_specs[chat_id] = {
+                            "path": source_path,
+                            "video": bool(getattr(stream, "_vivaan_video", False)),
+                            "ffmpeg_params": getattr(stream, "_vivaan_ffmpeg_params", None),
+                        }
+                        self._stream_generations[chat_id] = (
+                            self._stream_generations.get(chat_id, 0) + 1
+                        )
                     return
                 except OSError as err:
                     if err.errno != 24 or attempt == 1:
@@ -764,6 +802,115 @@ class Call:
                         )
                     await asyncio.sleep(1)
 
+    @staticmethod
+    def _resume_ffmpeg_params(existing: str, offset_seconds: int) -> str:
+        existing = str(existing or "").strip()
+        if offset_seconds <= 0:
+            return existing or None
+
+        import re
+
+        match = re.search(r"(?:^|\s)-ss\s+([0-9:.]+)", existing)
+        if match:
+            value = match.group(1)
+            try:
+                if ":" in value:
+                    parts = [float(part) for part in value.split(":")]
+                    base = 0.0
+                    for part in parts:
+                        base = base * 60 + part
+                else:
+                    base = float(value)
+                replacement = f"-ss {base + offset_seconds:.3f}"
+                return existing[: match.start()] + " " + replacement + existing[match.end() :]
+            except (TypeError, ValueError):
+                pass
+        return f"{existing} -ss {offset_seconds}".strip()
+
+    async def play_voice_prompt(
+        self,
+        chat_id: int,
+        prompt_path: str,
+        duration: float,
+        *,
+        restore: bool = True,
+    ) -> bool:
+        """Briefly play a TTS prompt in VC, then resume the current track."""
+        if chat_id not in self.active_calls:
+            return False
+        assistant = await group_assistant(self, chat_id)
+        spec = dict(self._active_stream_specs.get(chat_id) or {})
+        if not spec.get("path"):
+            return False
+
+        generation = self._stream_generations.get(chat_id, 0)
+        try:
+            elapsed_seconds = max(0, int(await assistant.time(chat_id)))
+        except Exception:
+            elapsed_seconds = 0
+
+        duration = min(max(float(duration), 0.8), 20.0)
+        voice_prompt_suppression_until[chat_id] = time.monotonic() + duration + 3
+        prompt_stream = dynamic_media_stream(prompt_path, video=False)
+
+        async with self._get_stream_lock(chat_id):
+            await assistant.play(chat_id, prompt_stream)
+        await asyncio.sleep(duration + 0.15)
+
+        if not restore:
+            return True
+        if chat_id not in self.active_calls:
+            return True
+        if self._stream_generations.get(chat_id, 0) != generation:
+            return True
+
+        resume_params = self._resume_ffmpeg_params(
+            spec.get("ffmpeg_params"),
+            elapsed_seconds,
+        )
+        resumed = dynamic_media_stream(
+            spec["path"],
+            video=bool(spec.get("video")),
+            ffmpeg_params=resume_params,
+        )
+        try:
+            async with self._get_stream_lock(chat_id):
+                await assistant.play(chat_id, resumed)
+        except Exception:
+            LOGGER(__name__).warning(
+                "Voice prompt seek-resume failed; restarting current track | chat_id=%s",
+                chat_id,
+            )
+            fallback = dynamic_media_stream(
+                spec["path"],
+                video=bool(spec.get("video")),
+                ffmpeg_params=spec.get("ffmpeg_params"),
+            )
+            async with self._get_stream_lock(chat_id):
+                await assistant.play(chat_id, fallback)
+        self._active_stream_specs[chat_id] = spec
+        voice_prompt_suppression_until[chat_id] = time.monotonic() + 0.75
+        return True
+
+    @staticmethod
+    def _schedule_voiceplay_round(chat_id: int, original_chat_id: int) -> None:
+        try:
+            from VIVAANXMUSIC.utils.voiceplay import voiceplay_manager
+
+            voiceplay_manager.schedule_track_started(chat_id, original_chat_id)
+        except Exception as err:
+            LOGGER(__name__).warning(
+                "Unable to schedule Voice Play | chat_id=%s | reason=%s",
+                chat_id,
+                err,
+            )
+
+    @staticmethod
+    def suppress_stream_end(chat_id: int, seconds: float = 1.5) -> None:
+        voice_prompt_suppression_until[chat_id] = max(
+            voice_prompt_suppression_until.get(chat_id, 0),
+            time.monotonic() + max(0.1, seconds),
+        )
 
     @capture_internal_err
     async def pause_stream(self, chat_id: int) -> None:
@@ -833,6 +980,13 @@ class Call:
         stream = dynamic_media_stream(path=link, video=bool(video))
         await self._play_stream(assistant, chat_id, stream)
         self._schedule_playback_watchdog(assistant, chat_id)
+        queue = db.get(chat_id) or []
+        original_chat_id = (
+            queue[0].get("chat_id", chat_id)
+            if queue and isinstance(queue[0], dict)
+            else chat_id
+        )
+        self._schedule_voiceplay_round(chat_id, original_chat_id)
 
     @capture_internal_err
     async def vc_users(self, chat_id: int) -> list:
@@ -954,6 +1108,7 @@ class Call:
         await self.maybe_start_vc_join_notifier(chat_id, original_chat_id)
         self._schedule_empty_vc_watchdog(chat_id)
         self._schedule_playback_watchdog(assistant, chat_id, initial_delay=2)
+        self._schedule_voiceplay_round(chat_id, original_chat_id)
 
         if await is_autoend():
             counter[chat_id] = {}
@@ -1220,6 +1375,7 @@ class Call:
                 except Exception:
                     return await app.send_message(original_chat_id, text=_["call_6"])
                 self._schedule_playback_watchdog(client, chat_id)
+                self._schedule_voiceplay_round(chat_id, original_chat_id)
 
                 button = stream_markup(_, chat_id)
                 schedule_stream_card(
@@ -1295,6 +1451,7 @@ class Call:
                     except:
                         return await app.send_message(original_chat_id, text=_["call_6"])
                 self._schedule_playback_watchdog(client, chat_id)
+                self._schedule_voiceplay_round(chat_id, original_chat_id)
 
                 button = stream_markup(_, chat_id)
                 await mystic.delete()
@@ -1330,6 +1487,7 @@ class Call:
                 except:
                     return await app.send_message(original_chat_id, text=_["call_6"])
                 self._schedule_playback_watchdog(client, chat_id)
+                self._schedule_voiceplay_round(chat_id, original_chat_id)
 
                 button = stream_markup(_, chat_id)
                 run = await app.send_photo(
@@ -1350,6 +1508,7 @@ class Call:
                 except:
                     return await app.send_message(original_chat_id, text=_["call_6"])
                 self._schedule_playback_watchdog(client, chat_id)
+                self._schedule_voiceplay_round(chat_id, original_chat_id)
 
                 if videoid == "telegram":
                     button = stream_markup(_, chat_id)
@@ -1457,11 +1616,28 @@ class Call:
                         return
 
                 elif isinstance(update, StreamEnded):
-                    if update.stream_type == StreamEnded.Type.AUDIO:
+                    if (
+                        update.stream_type == StreamEnded.Type.AUDIO
+                        and update.device == Device.MICROPHONE
+                    ):
+                        if time.monotonic() < voice_prompt_suppression_until.get(
+                            update.chat_id, 0
+                        ):
+                            return
                         assistant = await group_assistant(self, update.chat_id)
                         if await self._recover_early_stream_end(assistant, update.chat_id):
                             return
                         await self.play(assistant, update.chat_id)
+
+                elif isinstance(update, StreamFrames):
+                    if not (
+                        update.direction == Direction.INCOMING
+                        and update.device == Device.MICROPHONE
+                    ):
+                        return
+                    from VIVAANXMUSIC.utils.voiceplay import voiceplay_manager
+
+                    await voiceplay_manager.handle_stream_frames(update)
 
             except AssistantErr as err:
                 LOGGER(__name__).warning(

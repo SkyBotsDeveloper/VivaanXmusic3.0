@@ -315,6 +315,8 @@ HELP_31 = """
 <b><u>Voice</u></b>
 
 - /vcinfo, /vcmembers - show current voice chat participants.
+- /voiceplay - enable Hindi/Hinglish or English spoken song requests in VC.
+- /voiceplay off - disable spoken song requests.
 - /activevc, /activevoice, /vc - list active voice chats.
 - /activev, /activevideo, /avc - list active video chats.
 - /ac, /av - show active voice/video chat counts.

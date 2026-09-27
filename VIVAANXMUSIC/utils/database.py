@@ -26,6 +26,7 @@ skipdb = mongodb.skipmode
 sudoersdb = mongodb.sudoers
 usersdb = mongodb.tgusersdb
 vcnotifydb = mongodb.vcnotify
+voiceplaydb = mongodb.voiceplay
 
 
 active = []
@@ -46,6 +47,7 @@ playtype = {}
 skipmode = {}
 mute = {}
 vcnotify = {}
+voiceplay = {}
 
 ASSISTANT_WAIT_TIMEOUT = 30
 ASSISTANT_WAIT_INTERVAL = 0.5
@@ -285,6 +287,36 @@ async def set_vcnotify(chat_id: int, mode: bool):
     await vcnotifydb.update_one(
         {"chat_id": chat_id}, {"$set": {"mode": enabled}}, upsert=True
     )
+
+
+async def get_voiceplay(chat_id: int) -> dict:
+    """Return the persistent Voice Play configuration for a chat."""
+    cached = voiceplay.get(chat_id)
+    if cached is not None:
+        return dict(cached)
+
+    data = await voiceplaydb.find_one({"chat_id": chat_id})
+    config = {
+        "enabled": bool((data or {}).get("enabled", False)),
+        "language": str((data or {}).get("language") or "en"),
+    }
+    if config["language"] not in {"hi", "en"}:
+        config["language"] = "en"
+    voiceplay[chat_id] = config
+    return dict(config)
+
+
+async def set_voiceplay(chat_id: int, enabled: bool, language: str = "en") -> dict:
+    """Persist Voice Play without coupling it to the bot's UI language."""
+    language = language if language in {"hi", "en"} else "en"
+    config = {"enabled": bool(enabled), "language": language}
+    voiceplay[chat_id] = config
+    await voiceplaydb.update_one(
+        {"chat_id": chat_id},
+        {"$set": config},
+        upsert=True,
+    )
+    return dict(config)
 
 
 async def get_vault_message(code: str) -> dict:
