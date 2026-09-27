@@ -8,7 +8,11 @@ from pyrogram.types import (
 
 from config import BANNED_USERS
 from VIVAANXMUSIC import app
-from VIVAANXMUSIC.utils.database import get_voiceplay, set_voiceplay
+from VIVAANXMUSIC.utils.database import (
+    enable_voiceplay_exclusive,
+    get_voiceplay,
+    set_voiceplay,
+)
 from VIVAANXMUSIC.utils.decorators.admins import ActualAdminCB, AdminActual
 from VIVAANXMUSIC.utils.voiceplay import voiceplay_manager
 
@@ -62,7 +66,7 @@ async def voiceplay_command(_, message: Message, strings):
         f"Current status: <b>{status}</b>\n\n"
         "Choose a language. While enabled, the assistant listens only during the "
         "short request window after its prompt. Three unsuccessful attempts will "
-        "disable Voice Play and make the assistant leave the VC.",
+        "make the assistant leave the VC; Voice Play will remain enabled for the group.",
         reply_markup=_language_keyboard(message.from_user.id),
     )
 
@@ -97,13 +101,18 @@ async def voiceplay_callback(_, callback: CallbackQuery, strings):
         return await callback.answer("Unknown language.", show_alert=True)
 
     await voiceplay_manager.stop_session(chat_id)
-    await set_voiceplay(chat_id, True, choice)
+    autoplay_was_enabled = await enable_voiceplay_exclusive(chat_id, choice)
     language_name = "Hindi / Hinglish" if choice == "hi" else "English"
     await callback.answer(f"Voice Play enabled in {language_name}.")
     await callback.message.edit_text(
         "✅ <b>Voice Play enabled</b>\n\n"
         f"Language: <b>{language_name}</b>\n"
-        "Start a song with /play. After the final queued song finishes, "
+        + (
+            "Autoplay: <b>OFF (disabled automatically)</b>\n"
+            if autoplay_was_enabled
+            else "Autoplay: <b>OFF</b>\n"
+        )
+        + "Start a song with /play. After the final queued song finishes, "
         "the assistant will ask what you want to hear next."
         + "\n\nSay phrases such as <i>play Sanam Re</i>, "
         "<i>Sanam Re song bajao</i>, or <i>Sanam Re laga do</i>.",

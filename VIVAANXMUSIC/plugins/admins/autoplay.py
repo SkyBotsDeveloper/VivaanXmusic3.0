@@ -2,13 +2,21 @@ from pyrogram import filters
 from pyrogram.types import Message
 
 from VIVAANXMUSIC import app
-from VIVAANXMUSIC.utils.database import get_autoplay, get_cmode, set_autoplay
+from VIVAANXMUSIC.utils.database import (
+    enable_autoplay_exclusive,
+    get_autoplay,
+    get_cmode,
+    set_autoplay,
+)
 from VIVAANXMUSIC.utils.decorators.admins import AdminActual
 from VIVAANXMUSIC.utils.inline import close_markup
+from VIVAANXMUSIC.utils.voiceplay import voiceplay_manager
 from config import BANNED_USERS
 
 
-@app.on_message(filters.command(["autoplay", "cautoplay"]) & filters.group & ~BANNED_USERS)
+@app.on_message(
+    filters.command(["autoplay", "cautoplay"]) & filters.group & ~BANNED_USERS
+)
 @AdminActual
 async def autoplay_control(_, message: Message, strings):
     usage = strings["admin_49"]
@@ -34,9 +42,16 @@ async def autoplay_control(_, message: Message, strings):
 
     state = message.text.split(None, 1)[1].strip().lower()
     if state in {"on", "enable", "enabled", "yes"}:
-        await set_autoplay(chat_id, True)
+        voiceplay_was_enabled = await enable_autoplay_exclusive(chat_id)
+        await voiceplay_manager.stop_session(chat_id)
+        await voiceplay_manager.leave_if_idle(chat_id)
+        mode_notice = (
+            "\n\n🎙 <b>Voice Play was turned off automatically.</b>"
+            if voiceplay_was_enabled
+            else ""
+        )
         return await message.reply_text(
-            strings["admin_50"].format(message.from_user.mention),
+            strings["admin_50"].format(message.from_user.mention) + mode_notice,
             reply_markup=close_markup(strings),
         )
 

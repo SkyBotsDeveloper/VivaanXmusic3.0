@@ -46,6 +46,7 @@ from VIVAANXMUSIC.utils.database import (
     music_on,
     remove_active_chat,
     remove_active_video_chat,
+    set_autoplay,
     set_loop,
     set_vcnotify,
 )
@@ -1192,6 +1193,11 @@ class Call:
             queue_empty=not db.get(chat_id),
             track_finished=bool(finished_track),
         ):
+            # Heal legacy or externally edited records where both modes are on.
+            # Voice Play already won this queue-end decision, so persist that
+            # choice before opening its listening window.
+            if await get_autoplay(chat_id):
+                await set_autoplay(chat_id, False)
             # The last song has naturally ended. Keep the assistant in the
             # VC, mark playback idle so a spoken request starts immediately,
             # and only now open the listening window.

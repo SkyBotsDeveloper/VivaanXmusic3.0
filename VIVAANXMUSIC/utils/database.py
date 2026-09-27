@@ -48,6 +48,7 @@ skipmode = {}
 mute = {}
 vcnotify = {}
 voiceplay = {}
+playback_mode_locks = {}
 
 ASSISTANT_WAIT_TIMEOUT = 30
 ASSISTANT_WAIT_INTERVAL = 0.5
@@ -317,6 +318,32 @@ async def set_voiceplay(chat_id: int, enabled: bool, language: str = "en") -> di
         upsert=True,
     )
     return dict(config)
+
+
+def _playback_mode_lock(chat_id: int) -> asyncio.Lock:
+    lock = playback_mode_locks.get(chat_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        playback_mode_locks[chat_id] = lock
+    return lock
+
+
+async def enable_autoplay_exclusive(chat_id: int) -> bool:
+    """Enable Autoplay and disable Voice Play as one in-process mode switch."""
+    async with _playback_mode_lock(chat_id):
+        current = await get_voiceplay(chat_id)
+        await set_voiceplay(chat_id, False, current["language"])
+        await set_autoplay(chat_id, True)
+        return bool(current["enabled"])
+
+
+async def enable_voiceplay_exclusive(chat_id: int, language: str) -> bool:
+    """Enable Voice Play and disable Autoplay as one in-process mode switch."""
+    async with _playback_mode_lock(chat_id):
+        autoplay_was_enabled = await get_autoplay(chat_id)
+        await set_autoplay(chat_id, False)
+        await set_voiceplay(chat_id, True, language)
+        return autoplay_was_enabled
 
 
 async def get_vault_message(code: str) -> dict:
@@ -650,7 +677,7 @@ async def add_served_chat(chat_id: int):
 async def remove_served_chat(chat_id: int):
     if await is_served_chat(chat_id):
         await chatsdb.delete_one({"chat_id": chat_id})
-    
+
 
 async def blacklisted_chats() -> list:
     chats_list = []
