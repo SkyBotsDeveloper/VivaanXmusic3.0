@@ -30,6 +30,7 @@ from VIVAANXMUSIC.utils.voiceplay_text import (
     song_query_candidates,
     song_title_similarity,
 )
+from VIVAANXMUSIC.utils.voiceplay_stt import GroqKeyPool, parse_api_keys
 
 
 def _env_int(name: str, default: int) -> int:
@@ -58,6 +59,21 @@ PRE_ROLL_BYTES = int(SAMPLE_RATE * SAMPLE_WIDTH * 0.4)
 COLLISION_WINDOW_SECONDS = 0.35
 MAX_TRANSCRIPTIONS = max(1, _env_int("VOICEPLAY_MAX_TRANSCRIPTIONS", 4))
 STT_TIMEOUT = max(8, _env_int("VOICEPLAY_STT_TIMEOUT", 15))
+GROQ_API_KEYS = parse_api_keys(
+    os.getenv("VOICEPLAY_GROQ_API_KEY"),
+    os.getenv("VOICEPLAY_GROQ_API_KEY2"),
+    os.getenv("VOICEPLAY_GROQ_API_KEYS"),
+    os.getenv("GROQ_API_KEY"),
+)
+GROQ_STT_MODEL = os.getenv(
+    "VOICEPLAY_STT_MODEL",
+    "whisper-large-v3-turbo",
+).strip()
+GROQ_STT = GroqKeyPool(
+    GROQ_API_KEYS,
+    model=GROQ_STT_MODEL,
+    timeout_seconds=STT_TIMEOUT,
+)
 
 VOICE_NAMES = {
     "hi": os.getenv("VOICEPLAY_HINDI_VOICE", "hi-IN-SwaraNeural"),
@@ -455,6 +471,21 @@ class VoicePlayManager:
                 timeout=STT_TIMEOUT,
             )
             acquired = True
+            if GROQ_STT.enabled:
+                try:
+                    transcript = await GROQ_STT.transcribe(
+                        raw_audio,
+                        sample_rate=SAMPLE_RATE,
+                        sample_width=SAMPLE_WIDTH,
+                    )
+                    if transcript:
+                        return [transcript], [transcript]
+                except Exception as err:
+                    LOGGER(__name__).warning(
+                        "Primary multilingual Voice Play STT failed; using fallback: %s",
+                        type(err).__name__,
+                    )
+
             results = await asyncio.wait_for(
                 asyncio.gather(
                     *(asyncio.to_thread(recognize, locale) for locale in locales),

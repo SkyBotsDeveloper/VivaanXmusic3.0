@@ -106,6 +106,26 @@
       "required": false,
       "value": ""
     },
+    "VOICEPLAY_GROQ_API_KEY": {
+      "description": "Primary free-tier Groq key for reliable multilingual Voice Play recognition. Keep it private.",
+      "required": false,
+      "value": ""
+    },
+    "VOICEPLAY_GROQ_API_KEY2": {
+      "description": "Optional authorized backup Groq key. Used automatically if the primary key is temporarily rate-limited or unavailable.",
+      "required": false,
+      "value": ""
+    },
+    "VOICEPLAY_GROQ_API_KEYS": {
+      "description": "Optional comma-separated pool of additional authorized Groq keys for round-robin failover.",
+      "required": false,
+      "value": ""
+    },
+    "VOICEPLAY_STT_MODEL": {
+      "description": "Groq multilingual speech-to-text model used by Voice Play.",
+      "required": false,
+      "value": "whisper-large-v3-turbo"
+    },
     "HEROKU_API_KEY": {
       "description": "Your Heroku account API key, required if you want the bot to support auto-updates or dynamic deployments.",
       "required": false,
