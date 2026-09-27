@@ -78,6 +78,27 @@ class VoicePlayPolicyTest(unittest.TestCase):
 
         self.assertEqual(scheduling_methods, ["_stop_if_queue_empty"])
 
+    def test_three_failed_attempts_do_not_disable_group_setting(self):
+        manager_path = MODULE_PATH.parent / "voiceplay.py"
+        tree = ast.parse(manager_path.read_text(encoding="utf-8"))
+        manager_class = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "VoicePlayManager"
+        )
+        failed_attempt = next(
+            node
+            for node in manager_class.body
+            if isinstance(node, ast.AsyncFunctionDef) and node.name == "_failed_attempt"
+        )
+        setting_writes = [
+            node
+            for node in ast.walk(failed_attempt)
+            if isinstance(node, ast.Call)
+            and getattr(node.func, "id", None) == "set_voiceplay"
+        ]
+        self.assertEqual(setting_writes, [])
+
 
 if __name__ == "__main__":
     unittest.main()

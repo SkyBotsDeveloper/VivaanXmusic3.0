@@ -25,7 +25,7 @@ from VIVAANXMUSIC.utils.database import (
     set_voiceplay,
 )
 from VIVAANXMUSIC.utils.formatters import time_to_seconds
-from VIVAANXMUSIC.utils.voiceplay_text import song_query_candidates
+from VIVAANXMUSIC.utils.voiceplay_text import rank_transcripts, song_query_candidates
 
 
 def _env_int(name: str, default: int) -> int:
@@ -47,9 +47,11 @@ SAMPLE_WIDTH = 2
 LISTEN_SECONDS = max(4, _env_int("VOICEPLAY_LISTEN_SECONDS", 8))
 SILENCE_SECONDS = max(0.6, _env_float("VOICEPLAY_SILENCE_SECONDS", 1.2))
 MIN_VOICE_SECONDS = max(0.2, _env_float("VOICEPLAY_MIN_VOICE_SECONDS", 0.45))
-VAD_THRESHOLD = max(50, _env_int("VOICEPLAY_VAD_THRESHOLD", 280))
+VAD_THRESHOLD = max(50, _env_int("VOICEPLAY_VAD_THRESHOLD", 160))
 MAX_ATTEMPTS = 3
 MAX_BUFFER_BYTES = SAMPLE_RATE * SAMPLE_WIDTH * (LISTEN_SECONDS + 2)
+PRE_ROLL_BYTES = int(SAMPLE_RATE * SAMPLE_WIDTH * 0.4)
+COLLISION_WINDOW_SECONDS = 0.35
 MAX_TRANSCRIPTIONS = max(1, _env_int("VOICEPLAY_MAX_TRANSCRIPTIONS", 4))
 STT_TIMEOUT = max(8, _env_int("VOICEPLAY_STT_TIMEOUT", 15))
 
@@ -81,9 +83,11 @@ class ListeningSession:
     attempt: int = 1
     accepting: bool = False
     buffers: dict[int, bytearray] = field(default_factory=dict)
+    pre_rolls: dict[int, bytearray] = field(default_factory=dict)
     voiced_seconds: dict[int, float] = field(default_factory=dict)
     source_users: dict[int, int] = field(default_factory=dict)
     voiced_sources: set[int] = field(default_factory=set)
+    last_voice_by_source: dict[int, float] = field(default_factory=dict)
     collision: bool = False
     listen_started: float = 0.0
     last_voice_at: float = 0.0
@@ -92,8 +96,10 @@ class ListeningSession:
     def reset_audio(self) -> None:
         self.accepting = False
         self.buffers.clear()
+        self.pre_rolls.clear()
         self.voiced_seconds.clear()
         self.voiced_sources.clear()
+        self.last_voice_by_source.clear()
         self.collision = False
         self.listen_started = 0.0
         self.last_voice_at = 0.0
@@ -257,18 +263,31 @@ class VoicePlayManager:
 
             if voiced:
                 session.voiced_sources.add(source)
-                if len(session.voiced_sources) > 1:
+                if any(
+                    other_source != source
+                    and now - last_seen <= COLLISION_WINDOW_SECONDS
+                    for other_source, last_seen in session.last_voice_by_source.items()
+                ):
                     session.collision = True
+                session.last_voice_by_source[source] = now
                 session.last_voice_at = now
                 session.voiced_seconds[source] = session.voiced_seconds.get(
                     source, 0.0
                 ) + (len(data) / (SAMPLE_RATE * SAMPLE_WIDTH))
 
-            if voiced or source in session.buffers:
-                buffer = session.buffers.setdefault(source, bytearray())
-                remaining = MAX_BUFFER_BYTES - len(buffer)
-                if remaining > 0:
-                    buffer.extend(data[:remaining])
+            buffer = session.buffers.get(source)
+            if buffer is None:
+                pre_roll = session.pre_rolls.setdefault(source, bytearray())
+                pre_roll.extend(data)
+                if len(pre_roll) > PRE_ROLL_BYTES:
+                    del pre_roll[:-PRE_ROLL_BYTES]
+                if voiced:
+                    session.buffers[source] = bytearray(pre_roll)
+                continue
+
+            remaining = MAX_BUFFER_BYTES - len(buffer)
+            if remaining > 0:
+                buffer.extend(data[:remaining])
 
     async def _assistant(self, chat_id: int):
         from VIVAANXMUSIC.core.call import JARVIS
@@ -353,34 +372,69 @@ class VoicePlayManager:
 
         source = valid_sources[0]
         audio_bytes = bytes(session.buffers.get(source) or b"")
-        transcript = await self._transcribe(audio_bytes, session.language)
-        if not transcript:
+        transcripts = await self._transcribe(audio_bytes, session.language)
+        if not transcripts:
             await self._failed_attempt(session)
             return
 
-        candidates = song_query_candidates(transcript)
+        candidates: list[str] = []
+        seen_candidates: set[str] = set()
+        for transcript in transcripts:
+            for candidate in song_query_candidates(transcript):
+                key = candidate.casefold()
+                if key in seen_candidates:
+                    continue
+                seen_candidates.add(key)
+                candidates.append(candidate)
         if not candidates:
             await self._failed_attempt(session)
             return
 
         user_id = session.source_users.get(source, 0)
-        success = await self._queue_song(session, candidates, transcript, user_id)
+        success = await self._queue_song(
+            session,
+            candidates,
+            transcripts[0],
+            user_id,
+        )
         if success:
             self._sessions.pop(session.chat_id, None)
             return
         await self._failed_attempt(session)
 
-    async def _transcribe(self, raw_audio: bytes, language: str) -> Optional[str]:
+    @staticmethod
+    def _normalize_audio(raw_audio: bytes) -> bytes:
+        try:
+            average = audioop.avg(raw_audio, SAMPLE_WIDTH)
+            if average:
+                raw_audio = audioop.bias(raw_audio, SAMPLE_WIDTH, -average)
+            peak = audioop.max(raw_audio, SAMPLE_WIDTH)
+            if 0 < peak < 12_000:
+                raw_audio = audioop.mul(
+                    raw_audio,
+                    SAMPLE_WIDTH,
+                    min(4.0, 12_000 / peak),
+                )
+        except Exception:
+            pass
+        return raw_audio
+
+    async def _transcribe(self, raw_audio: bytes, language: str) -> list[str]:
         if len(raw_audio) < SAMPLE_RATE * SAMPLE_WIDTH // 5:
-            return None
+            return []
 
-        locale = "hi-IN" if language == "hi" else "en-IN"
-        recognizer = sr.Recognizer()
-        recognizer.operation_timeout = STT_TIMEOUT
+        raw_audio = self._normalize_audio(raw_audio)
         audio = sr.AudioData(raw_audio, SAMPLE_RATE, SAMPLE_WIDTH)
+        locales = ("hi-IN", "en-IN") if language == "hi" else ("en-IN",)
 
-        def recognize():
-            return recognizer.recognize_google(audio, language=locale, show_all=True)
+        def recognize(locale: str):
+            recognizer = sr.Recognizer()
+            recognizer.operation_timeout = STT_TIMEOUT
+            return recognizer.recognize_google(
+                audio,
+                language=locale,
+                show_all=True,
+            )
 
         acquired = False
         try:
@@ -389,29 +443,42 @@ class VoicePlayManager:
                 timeout=STT_TIMEOUT,
             )
             acquired = True
-            result = await asyncio.wait_for(
-                asyncio.to_thread(recognize),
+            results = await asyncio.wait_for(
+                asyncio.gather(
+                    *(asyncio.to_thread(recognize, locale) for locale in locales),
+                    return_exceptions=True,
+                ),
                 timeout=STT_TIMEOUT,
             )
         except Exception as err:
             LOGGER(__name__).info("Voice Play transcription failed: %s", err)
-            return None
+            return []
         finally:
             if acquired:
                 self._transcription_slots.release()
 
-        if isinstance(result, str):
-            return result.strip() or None
-        alternatives = (
-            (result or {}).get("alternative", []) if isinstance(result, dict) else []
-        )
-        if not alternatives:
-            return None
-        best = alternatives[0]
-        confidence = best.get("confidence")
-        if confidence is not None and float(confidence) < 0.35:
-            return None
-        return str(best.get("transcript") or "").strip() or None
+        alternatives = []
+        for locale_index, result in enumerate(results):
+            if isinstance(result, Exception):
+                continue
+            if isinstance(result, str):
+                alternatives.append((result, None, locale_index, 0))
+                continue
+            matches = (
+                (result or {}).get("alternative", [])
+                if isinstance(result, dict)
+                else []
+            )
+            for alternative_index, match in enumerate(matches[:5]):
+                alternatives.append(
+                    (
+                        str(match.get("transcript") or ""),
+                        match.get("confidence"),
+                        locale_index,
+                        alternative_index,
+                    )
+                )
+        return rank_transcripts(alternatives)
 
     async def _queue_song(
         self,
@@ -505,12 +572,13 @@ class VoicePlayManager:
 
         if session.attempt >= MAX_ATTEMPTS:
             self._sessions.pop(session.chat_id, None)
-            await set_voiceplay(session.chat_id, False, session.language)
             await self._prepare_terminal_prompt(session)
             try:
                 await app.send_message(
                     session.original_chat_id,
-                    "Voice Play was disabled after 3 unsuccessful attempts. The assistant left the voice chat.",
+                    "I could not understand the request after 3 attempts, so the "
+                    "assistant left this voice chat. Voice Play is still enabled "
+                    "for the group and will be available after the next song.",
                 )
             except Exception:
                 pass

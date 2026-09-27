@@ -51,6 +51,24 @@ class SongQueryCandidatesTest(unittest.TestCase):
             "sanam re",
         )
 
+    def test_transcript_ranking_prefers_higher_confidence(self):
+        ranked = voiceplay_text.rank_transcripts(
+            [
+                ("wrong title", 0.41, 0, 0),
+                ("Aaj Ki Raat", 0.91, 1, 0),
+            ]
+        )
+        self.assertEqual(ranked[0], "Aaj Ki Raat")
+
+    def test_transcript_ranking_deduplicates_locales(self):
+        ranked = voiceplay_text.rank_transcripts(
+            [
+                ("Sanam Re", None, 0, 0),
+                ("sanam re", None, 1, 0),
+            ]
+        )
+        self.assertEqual(len(ranked), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

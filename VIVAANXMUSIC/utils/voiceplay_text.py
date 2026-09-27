@@ -1,6 +1,6 @@
 import re
 import unicodedata
-from typing import Iterable
+from typing import Iterable, Optional
 
 
 _FILLER_PATTERNS = (
@@ -49,4 +49,33 @@ def song_query_candidates(transcript: str) -> list[str]:
             continue
         if candidate.casefold() not in {item.casefold() for item in result}:
             result.append(candidate)
+    return result
+
+
+def rank_transcripts(
+    alternatives: Iterable[tuple[str, Optional[float], int, int]],
+) -> list[str]:
+    """Rank and deduplicate transcripts from one or more recognition locales."""
+    ranked: list[tuple[float, int, int, str]] = []
+    for transcript, confidence, locale_index, alternative_index in alternatives:
+        transcript = str(transcript or "").strip()
+        if not transcript:
+            continue
+        score = (
+            float(confidence)
+            if confidence is not None
+            else max(0.05, 0.25 - (alternative_index * 0.02))
+        )
+        if locale_index == 0:
+            score += 0.02
+        ranked.append((score, -locale_index, -alternative_index, transcript))
+
+    result: list[str] = []
+    seen: set[str] = set()
+    for _, _, _, transcript in sorted(ranked, reverse=True):
+        key = transcript.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(transcript)
     return result
