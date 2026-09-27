@@ -25,7 +25,11 @@ from VIVAANXMUSIC.utils.database import (
     set_voiceplay,
 )
 from VIVAANXMUSIC.utils.formatters import time_to_seconds
-from VIVAANXMUSIC.utils.voiceplay_text import rank_transcripts, song_query_candidates
+from VIVAANXMUSIC.utils.voiceplay_text import (
+    rank_transcripts,
+    song_query_candidates,
+    song_title_similarity,
+)
 
 
 def _env_int(name: str, default: int) -> int:
@@ -372,7 +376,10 @@ class VoicePlayManager:
 
         source = valid_sources[0]
         audio_bytes = bytes(session.buffers.get(source) or b"")
-        transcripts = await self._transcribe(audio_bytes, session.language)
+        transcripts, locale_queries = await self._transcribe(
+            audio_bytes,
+            session.language,
+        )
         if not transcripts:
             await self._failed_attempt(session)
             return
@@ -396,6 +403,7 @@ class VoicePlayManager:
             candidates,
             transcripts[0],
             user_id,
+            locale_queries,
         )
         if success:
             self._sessions.pop(session.chat_id, None)
@@ -419,9 +427,13 @@ class VoicePlayManager:
             pass
         return raw_audio
 
-    async def _transcribe(self, raw_audio: bytes, language: str) -> list[str]:
+    async def _transcribe(
+        self,
+        raw_audio: bytes,
+        language: str,
+    ) -> tuple[list[str], list[str]]:
         if len(raw_audio) < SAMPLE_RATE * SAMPLE_WIDTH // 5:
-            return []
+            return [], []
 
         raw_audio = self._normalize_audio(raw_audio)
         audio = sr.AudioData(raw_audio, SAMPLE_RATE, SAMPLE_WIDTH)
@@ -452,17 +464,21 @@ class VoicePlayManager:
             )
         except Exception as err:
             LOGGER(__name__).info("Voice Play transcription failed: %s", err)
-            return []
+            return [], []
         finally:
             if acquired:
                 self._transcription_slots.release()
 
         alternatives = []
+        locale_queries = []
         for locale_index, result in enumerate(results):
             if isinstance(result, Exception):
                 continue
             if isinstance(result, str):
-                alternatives.append((result, None, locale_index, 0))
+                transcript = result.strip()
+                if transcript:
+                    locale_queries.append(transcript)
+                    alternatives.append((transcript, None, locale_index, 0))
                 continue
             matches = (
                 (result or {}).get("alternative", [])
@@ -470,15 +486,21 @@ class VoicePlayManager:
                 else []
             )
             for alternative_index, match in enumerate(matches[:5]):
+                confidence = match.get("confidence")
+                if confidence is not None and float(confidence) < 0.30:
+                    continue
+                transcript = str(match.get("transcript") or "")
+                if alternative_index == 0 and transcript.strip():
+                    locale_queries.append(transcript.strip())
                 alternatives.append(
                     (
-                        str(match.get("transcript") or ""),
-                        match.get("confidence"),
+                        transcript,
+                        confidence,
                         locale_index,
                         alternative_index,
                     )
                 )
-        return rank_transcripts(alternatives)
+        return rank_transcripts(alternatives), locale_queries
 
     async def _queue_song(
         self,
@@ -486,16 +508,65 @@ class VoicePlayManager:
         candidates: list[str],
         transcript: str,
         user_id: int,
+        locale_queries: list[str],
     ) -> bool:
         details = None
         selected_query = None
+
+        unique_locale_queries = list(
+            dict.fromkeys(
+                query.strip() for query in locale_queries if str(query or "").strip()
+            )
+        )
+        if len(unique_locale_queries) > 1:
+            locale_results = await asyncio.gather(
+                *(YouTube.track(query) for query in unique_locale_queries[:2]),
+                return_exceptions=True,
+            )
+            resolved = []
+            for query, result in zip(unique_locale_queries, locale_results):
+                if isinstance(result, Exception) or not result:
+                    continue
+                item, _ = result
+                if item and item.get("vidid"):
+                    resolved.append((query, item))
+
+            if len(resolved) > 1:
+                first_query, first = resolved[0]
+                second_query, second = resolved[1]
+                same_video = first.get("vidid") == second.get("vidid")
+                title_agreement = song_title_similarity(
+                    str(first.get("title") or ""),
+                    str(second.get("title") or ""),
+                )
+                if not same_video and title_agreement < 0.72:
+                    LOGGER(__name__).info(
+                        "Voice Play rejected conflicting STT search results | chat_id=%s",
+                        session.chat_id,
+                    )
+                    return False
+                details = first
+                selected_query = first_query
+
         for query in candidates:
+            if details:
+                break
             try:
                 result, _ = await YouTube.track(query)
-                if result and result.get("vidid"):
-                    details = result
-                    selected_query = query
-                    break
+                if not result or not result.get("vidid"):
+                    continue
+                if (
+                    query.isascii()
+                    and song_title_similarity(
+                        query,
+                        str(result.get("title") or ""),
+                    )
+                    < 0.42
+                ):
+                    continue
+                details = result
+                selected_query = query
+                break
             except Exception:
                 continue
         if not details:

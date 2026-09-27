@@ -69,6 +69,32 @@ class SongQueryCandidatesTest(unittest.TestCase):
         )
         self.assertEqual(len(ranked), 1)
 
+    def test_song_title_similarity_matches_video_variants(self):
+        score = voiceplay_text.song_title_similarity(
+            "Ishqa Ve - Zeeshan Ali | Official Video",
+            "Ishqa Ve (Lyrics) - Zeeshan Ali",
+        )
+        self.assertGreaterEqual(score, 0.90)
+
+    def test_song_title_similarity_rejects_different_songs(self):
+        score = voiceplay_text.song_title_similarity(
+            "Ishqa Ve - Zeeshan Ali",
+            "Ve Maahi - Kesari",
+        )
+        self.assertLess(score, 0.72)
+
+    def test_spoken_title_is_more_relevant_than_wrong_popular_song(self):
+        intended = voiceplay_text.song_title_similarity(
+            "ishq ve chadye",
+            "Ishqa Ve - Zeeshan Ali | Official Video",
+        )
+        wrong = voiceplay_text.song_title_similarity(
+            "ishq ve chadye",
+            "Ve Maahi - Kesari",
+        )
+        self.assertGreaterEqual(intended, 0.42)
+        self.assertLess(wrong, 0.42)
+
 
 if __name__ == "__main__":
     unittest.main()

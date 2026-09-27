@@ -1,3 +1,4 @@
+from difflib import SequenceMatcher
 import re
 import unicodedata
 from typing import Iterable, Optional
@@ -79,3 +80,38 @@ def rank_transcripts(
         seen.add(key)
         result.append(transcript)
     return result
+
+
+def song_title_similarity(left: str, right: str) -> float:
+    """Compare search-result titles while ignoring common video-label noise."""
+    noise = {
+        "audio",
+        "full",
+        "latest",
+        "lyrics",
+        "lyrical",
+        "official",
+        "song",
+        "video",
+    }
+
+    def variants(value: str) -> list[str]:
+        value = unicodedata.normalize("NFKC", str(value or "")).casefold()
+        pieces = re.split(r"\s*(?:\||-|–|—|\(|\[)\s*", value)
+        result = []
+        for piece in [value, *pieces]:
+            words = re.findall(r"[\w]+", piece, flags=re.UNICODE)
+            cleaned = " ".join(word for word in words if word not in noise).strip()
+            if cleaned and cleaned not in result:
+                result.append(cleaned)
+        return result
+
+    left_variants = variants(left)
+    right_variants = variants(right)
+    if not left_variants or not right_variants:
+        return 0.0
+    return max(
+        SequenceMatcher(None, left_item, right_item).ratio()
+        for left_item in left_variants
+        for right_item in right_variants
+    )
