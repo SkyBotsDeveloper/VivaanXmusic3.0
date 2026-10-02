@@ -42,6 +42,9 @@ HF_TOKENS = getenv("HF_TOKENS", "")  # optional comma-separated pool
 OCR_SPACE_API_KEY = getenv("OCR_SPACE_API_KEY", "helloworld")  # optional shared free key
 ELITE_LLM_API_BASE = getenv("ELITE_LLM_API_BASE", "https://elite-llms.vercel.app/v1")
 ELITE_LLM_API_KEY = getenv("ELITE_LLM_API_KEY", "theelitekey")
+ESSE_API_URL = getenv("ESSE_API_URL", "https://esse.skybotsdeveloper.workers.dev")
+ESSE_API_KEY = getenv("ESSE_API_KEY", "")
+ESSE_TIMEOUT = getenv("ESSE_TIMEOUT", "20")
 
 # Vars For API End Pont.
 YTPROXY_URL = getenv("YTPROXY_URL", "") ## Optional xBit fallback endpoint.

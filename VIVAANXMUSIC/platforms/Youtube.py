@@ -26,6 +26,11 @@ from VIVAANXMUSIC.utils.formatters import time_to_seconds
 from VIVAANXMUSIC.utils.url_guard import is_safe_media_url
 from VIVAANXMUSIC.security import build_subprocess_env
 from VIVAANXMUSIC.utils.stream.source_status import set_youtube_source_status
+from VIVAANXMUSIC.utils.esse_autoplay import (
+    is_playable_autoplay_metadata,
+    is_configured as esse_is_configured,
+    select_or_fallback,
+)
 from config import DURATION_LIMIT, YT_API_KEY, YTPROXY_URL, autoclean
 
 logger = LOGGER(__name__)
@@ -278,14 +283,24 @@ class YouTubeAPI:
         if not videoid or videoid == current_videoid:
             return None
         duration_sec = self._duration_to_seconds(duration_min)
-        if not duration_sec or duration_sec > DURATION_LIMIT:
-            return None
-        if max_duration and duration_sec > max_duration:
-            return None
         title = result.get("title")
         thumbnails = result.get("thumbnails") or []
-        thumbnail = thumbnails[0]["url"].split("?")[0] if thumbnails else None
-        if not title or not thumbnail:
+        first_thumbnail = thumbnails[0] if thumbnails else None
+        thumbnail_url = (
+            first_thumbnail.get("url")
+            if isinstance(first_thumbnail, dict)
+            else None
+        )
+        thumbnail = thumbnail_url.split("?")[0] if isinstance(thumbnail_url, str) else None
+        if not is_playable_autoplay_metadata(
+            title,
+            videoid,
+            duration_sec,
+            thumbnail,
+            current_videoid,
+            DURATION_LIMIT,
+            max_duration,
+        ):
             return None
         return {
             "title": title,
@@ -495,26 +510,59 @@ class YouTubeAPI:
         title: str = "",
         max_duration: Union[int, None] = None,
     ) -> Union[dict, None]:
-        candidates = []
-
-        if videoid and Recommendations is not None:
-            try:
-                candidates = await Recommendations.get(videoid, timeout=5) or []
-            except Exception as err:
-                logger.warning("Autoplay recommendations failed for %s: %s", videoid, err)
-
-        if not candidates:
-            query = self._clean_autoplay_query(title)
-            if not query:
-                return None
+        async def resolve_esse_candidate(recommendation: dict):
+            query = f"{recommendation['title']} {recommendation['artist']}".strip()
             try:
                 search = VideosSearch(query, limit=12)
                 candidates = (await search.next()).get("result", [])
-            except Exception as err:
-                logger.warning("Autoplay fallback search failed for %s: %s", query, err)
+            except Exception:
                 return None
+            return await self._resolve_autoplay_candidates(
+                candidates, videoid, max_duration
+            )
 
+        async def legacy_autoplay():
+            candidates = []
+            if videoid and Recommendations is not None:
+                try:
+                    candidates = await Recommendations.get(videoid, timeout=5) or []
+                except Exception as err:
+                    logger.warning(
+                        "Autoplay recommendations failed for %s: %s", videoid, err
+                    )
+
+            if not candidates:
+                query = self._clean_autoplay_query(title)
+                if not query:
+                    return None
+                try:
+                    search = VideosSearch(query, limit=12)
+                    candidates = (await search.next()).get("result", [])
+                except Exception as err:
+                    logger.warning(
+                        "Autoplay fallback search failed for %s: %s", query, err
+                    )
+                    return None
+            return await self._resolve_autoplay_candidates(
+                candidates, videoid, max_duration
+            )
+
+        recommendation = await select_or_fallback(
+            title, None, resolve_esse_candidate, legacy_autoplay
+        )
+        if recommendation and esse_is_configured():
+            logger.info("Autoplay ESSE recommendation selected")
+        return recommendation
+
+    async def _resolve_autoplay_candidates(
+        self,
+        candidates: list,
+        videoid: str,
+        max_duration: Union[int, None] = None,
+    ) -> Union[dict, None]:
         for candidate in candidates:
+            if not isinstance(candidate, dict):
+                continue
             formatted = self._format_autoplay_candidate(candidate, videoid, max_duration)
             if formatted:
                 return formatted
@@ -531,12 +579,14 @@ class YouTubeAPI:
                 ) = await self.details(candidate_id, videoid=True)
             except Exception:
                 continue
-            if (
-                not resolved_videoid
-                or resolved_videoid == videoid
-                or not duration_sec
-                or duration_sec > DURATION_LIMIT
-                or (max_duration and duration_sec > max_duration)
+            if not is_playable_autoplay_metadata(
+                resolved_title,
+                resolved_videoid,
+                duration_sec,
+                thumbnail,
+                videoid,
+                DURATION_LIMIT,
+                max_duration,
             ):
                 continue
             return {

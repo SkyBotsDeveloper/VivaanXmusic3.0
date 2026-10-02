@@ -97,6 +97,9 @@ GENVID_USE_PUBLIC_FALLBACKS=0  # Optional - Set 1 if you still want no-key publi
 HF_TOKEN=            # Optional - Hugging Face token for better quota on free multimodal /geminivision spaces
 HF_TOKENS=           # Optional - Comma-separated Hugging Face token pool for Space-based fallbacks
 OCR_SPACE_API_KEY=helloworld  # Optional - OCR.Space key; shared free demo key works with low-rate OCR
+ESSE_API_URL=https://esse.skybotsdeveloper.workers.dev  # Optional - production ESSE API base URL
+ESSE_API_KEY=                 # Optional - ESSE API key; autoplay falls back to legacy YouTube recommendations when unset
+ESSE_TIMEOUT=20               # Optional - ESSE autoplay timeout in seconds; no automatic retries
 ```
 
 ⚠️ **Never expose raw cookies or tokens in public repos.** Use safe paste services like [Pastebin](https://pastebin.com) or [Batbin](https://batbin.me).
