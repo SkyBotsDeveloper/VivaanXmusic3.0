@@ -40,10 +40,6 @@ def _configuration():
     return api_key, base_url, timeout
 
 
-def is_configured():
-    return bool(ESSE_API_KEY and ESSE_API_KEY.strip())
-
-
 async def get_recommendations(song: str, artist: Optional[str] = None):
     """Return validated public ESSE candidates, or None on any safe failure."""
     api_key, base_url, timeout = _configuration()
@@ -139,5 +135,9 @@ async def select_or_fallback(song, artist, resolver, fallback):
         logger.warning("ESSE autoplay unavailable; using legacy autoplay")
         track = None
     if track:
+        logger.info("Autoplay ESSE recommendation selected")
         return track
-    return await fallback()
+    track = await fallback()
+    if track:
+        logger.info("Autoplay legacy recommendation used")
+    return track

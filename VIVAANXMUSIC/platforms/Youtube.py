@@ -28,7 +28,6 @@ from VIVAANXMUSIC.security import build_subprocess_env
 from VIVAANXMUSIC.utils.stream.source_status import set_youtube_source_status
 from VIVAANXMUSIC.utils.esse_autoplay import (
     is_playable_autoplay_metadata,
-    is_configured as esse_is_configured,
     select_or_fallback,
 )
 from config import DURATION_LIMIT, YT_API_KEY, YTPROXY_URL, autoclean
@@ -547,12 +546,9 @@ class YouTubeAPI:
                 candidates, videoid, max_duration
             )
 
-        recommendation = await select_or_fallback(
+        return await select_or_fallback(
             title, None, resolve_esse_candidate, legacy_autoplay
         )
-        if recommendation and esse_is_configured():
-            logger.info("Autoplay ESSE recommendation selected")
-        return recommendation
 
     async def _resolve_autoplay_candidates(
         self,

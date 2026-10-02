@@ -89,11 +89,15 @@ class EsseAutoplayTest(IsolatedAsyncioTestCase):
             with self.subTest(name=name):
                 fallback = AsyncMock(return_value={"vidid": "legacy"})
                 with patch.multiple(esse, ESSE_API_KEY="test-secret"), self.client_patch(handler):
-                    result = await esse.select_or_fallback(
-                        "Perfect", None, AsyncMock(), fallback
-                    )
+                    with self.assertLogs(esse.logger, level=logging.INFO) as captured:
+                        result = await esse.select_or_fallback(
+                            "Perfect", None, AsyncMock(), fallback
+                        )
                 self.assertEqual(result, {"vidid": "legacy"})
                 fallback.assert_awaited_once_with()
+                logs = "\n".join(captured.output)
+                self.assertIn("Autoplay legacy recommendation used", logs)
+                self.assertNotIn("Autoplay ESSE recommendation selected", logs)
 
     async def test_malformed_schema_falls_back(self):
         malformed = [
@@ -131,10 +135,12 @@ class EsseAutoplayTest(IsolatedAsyncioTestCase):
         resolver = AsyncMock(side_effect=[None, {"vidid": "playable"}])
         fallback = AsyncMock(return_value="legacy")
         with patch.object(esse, "get_recommendations", AsyncMock(return_value=candidates)):
-            result = await esse.select_or_fallback("Seed", None, resolver, fallback)
+            with self.assertLogs(esse.logger, level=logging.INFO) as captured:
+                result = await esse.select_or_fallback("Seed", None, resolver, fallback)
         self.assertEqual(result, {"vidid": "playable"})
         self.assertEqual(resolver.await_count, 2)
         fallback.assert_not_awaited()
+        self.assertIn("Autoplay ESSE recommendation selected", "\n".join(captured.output))
 
     async def test_all_unplayable_candidates_use_legacy_fallback(self):
         resolver = AsyncMock(return_value=None)
@@ -153,6 +159,28 @@ class EsseAutoplayTest(IsolatedAsyncioTestCase):
         self.assertEqual(result, {"vidid": "legacy"})
         self.assertEqual(resolver.await_count, 2)
         fallback.assert_awaited_once_with()
+
+    async def test_missing_key_uses_legacy_and_preserves_track_structure(self):
+        legacy_track = {
+            "title": "Legacy Song",
+            "duration_min": "3:12",
+            "duration_sec": 192,
+            "thumb": "https://img.example/legacy.jpg",
+            "vidid": "legacy-id",
+            "link": "https://www.youtube.com/watch?v=legacy-id",
+        }
+        fallback = AsyncMock(return_value=legacy_track)
+        with patch.multiple(esse, ESSE_API_KEY=""):
+            with self.assertLogs(esse.logger, level=logging.INFO) as captured:
+                result = await esse.select_or_fallback(
+                    "Seed", None, AsyncMock(), fallback
+                )
+        self.assertEqual(result, legacy_track)
+        self.assertEqual(set(result), {"title", "duration_min", "duration_sec", "thumb", "vidid", "link"})
+        fallback.assert_awaited_once_with()
+        logs = "\n".join(captured.output)
+        self.assertIn("Autoplay legacy recommendation used", logs)
+        self.assertNotIn("Autoplay ESSE recommendation selected", logs)
 
     async def test_candidate_resolution_failure_does_not_escape_or_skip_fallback(self):
         fallback = AsyncMock(return_value="legacy")
