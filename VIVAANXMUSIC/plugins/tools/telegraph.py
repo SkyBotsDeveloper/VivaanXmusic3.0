@@ -5,6 +5,7 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from VIVAANXMUSIC import app
 from VIVAANXMUSIC.utils.file_upload import upload_file_with_fallbacks
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 
 @app.on_message(filters.command(["tgm", "tgt", "telegraph"]))
@@ -33,7 +34,7 @@ async def telegraph_handler(_, message: Message):
         result = await upload_file_with_fallbacks(local_path)
 
         if result.ok:
-            await status.edit(
+            await rich_call(status.edit,
                 "**Uploaded successfully!**\n"
                 f"[Click to View]({result.url})",
                 reply_markup=InlineKeyboardMarkup(

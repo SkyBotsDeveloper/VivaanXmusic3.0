@@ -10,6 +10,7 @@ from VIVAANXMUSIC.utils.database import (
     remove_active_chat,
     remove_active_video_chat,
 )
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 @app.on_message(filters.command(["activevc", "activevoice", "vc"]) & SUDOERS)
 async def activevc(_, message: Message):
@@ -61,7 +62,7 @@ async def activevi_(_, message: Message):
 async def active_count(client: Client, message: Message):
     ac_audio = str(len(await get_active_chats()))
     ac_video = str(len(await get_active_video_chats()))
-    await message.reply_text(
+    await rich_call(message.reply_text,
         f"✫ <b><u>ᴀᴄᴛɪᴠᴇ ᴄʜᴀᴛs ɪɴғᴏ</u></b> :\n\nᴠᴏɪᴄᴇ : {ac_audio}\nᴠɪᴅᴇᴏ  : {ac_video}",
         reply_markup=InlineKeyboardMarkup(
             [[InlineKeyboardButton("✯ ᴄʟᴏsᴇ ✯", callback_data="close")]]

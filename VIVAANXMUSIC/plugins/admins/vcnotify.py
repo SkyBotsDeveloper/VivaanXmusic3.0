@@ -7,6 +7,7 @@ from VIVAANXMUSIC.core.call import JARVIS
 from VIVAANXMUSIC.utils.database import get_cmode, get_vcnotify, set_vcnotify
 from VIVAANXMUSIC.utils.decorators.admins import AdminActual
 from VIVAANXMUSIC.utils.inline import close_markup
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 
 @app.on_message(filters.command(["vcnotify"]) & filters.group & ~BANNED_USERS)
@@ -21,7 +22,7 @@ async def vcnotify_control(_, message: Message, strings):
 
     if len(message.command) == 1:
         status = "enabled" if await get_vcnotify(group_chat_id) else "disabled"
-        return await message.reply_text(
+        return await rich_call(message.reply_text,
             f"» VC join notifications are currently <code>{status}</code> in this chat.",
             reply_markup=close_markup(strings),
         )
@@ -34,7 +35,7 @@ async def vcnotify_control(_, message: Message, strings):
         await JARVIS.maybe_start_vc_join_notifier(group_chat_id, group_chat_id)
         if linked_chat_id:
             await JARVIS.maybe_start_vc_join_notifier(linked_chat_id, group_chat_id)
-        return await message.reply_text(
+        return await rich_call(message.reply_text,
             f"» VC join notifications have been <code>enabled</code> by : {message.from_user.mention}.",
             reply_markup=close_markup(strings),
         )
@@ -44,9 +45,9 @@ async def vcnotify_control(_, message: Message, strings):
         await JARVIS.stop_vc_join_notifier(group_chat_id)
         if linked_chat_id:
             await JARVIS.stop_vc_join_notifier(linked_chat_id)
-        return await message.reply_text(
+        return await rich_call(message.reply_text,
             f"» VC join notifications have been <code>disabled</code> by : {message.from_user.mention}.",
             reply_markup=close_markup(strings),
         )
 
-    return await message.reply_text(usage, reply_markup=close_markup(strings))
+    return await rich_call(message.reply_text, usage, reply_markup=close_markup(strings))

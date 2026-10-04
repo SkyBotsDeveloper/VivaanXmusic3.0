@@ -5,6 +5,7 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CallbackQ
 from VIVAANXMUSIC import app
 
 import base64
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 def figle(text: str):
     fonts = pyfiglet.FigletFont.getFonts()
@@ -27,7 +28,7 @@ async def figlet_command(client, message):
         return await message.reply_text("✏️ Example:\n`/figlet VIVAAN`", quote=True)
 
     figlet_result, keyboard = figle(text)
-    await message.reply_text(
+    await rich_call(message.reply_text,
         f"✨ ʜᴇʀᴇ ɪs ʏᴏᴜʀ ғɪɢʟᴇᴛ:\n<pre>{figlet_result}</pre>",
         quote=True,
         reply_markup=keyboard
@@ -39,7 +40,7 @@ async def figlet_callback(_, query: CallbackQuery):
         encoded_text = query.data.split("_", 1)[1]
         text = base64.b64decode(encoded_text).decode()
         figlet_result, keyboard = figle(text)
-        await query.message.edit_text(
+        await rich_call(query.message.edit_text,
             f"✨ ʜᴇʀᴇ ɪs ʏᴏᴜʀ ғɪɢʟᴇᴛ:\n<pre>{figlet_result}</pre>",
             reply_markup=keyboard
         )

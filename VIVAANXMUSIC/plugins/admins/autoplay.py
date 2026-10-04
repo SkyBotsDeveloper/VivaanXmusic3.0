@@ -12,6 +12,7 @@ from VIVAANXMUSIC.utils.decorators.admins import AdminActual
 from VIVAANXMUSIC.utils.inline import close_markup
 from VIVAANXMUSIC.utils.voiceplay import voiceplay_manager
 from config import BANNED_USERS
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 
 @app.on_message(
@@ -35,7 +36,7 @@ async def autoplay_control(_, message: Message, strings):
 
     if len(message.command) == 1:
         status = "enabled" if await get_autoplay(chat_id) else "disabled"
-        return await message.reply_text(
+        return await rich_call(message.reply_text,
             strings["admin_52"].format(status),
             reply_markup=close_markup(strings),
         )
@@ -50,16 +51,16 @@ async def autoplay_control(_, message: Message, strings):
             if voiceplay_was_enabled
             else ""
         )
-        return await message.reply_text(
+        return await rich_call(message.reply_text,
             strings["admin_50"].format(message.from_user.mention) + mode_notice,
             reply_markup=close_markup(strings),
         )
 
     if state in {"off", "disable", "disabled", "no"}:
         await set_autoplay(chat_id, False)
-        return await message.reply_text(
+        return await rich_call(message.reply_text,
             strings["admin_51"].format(message.from_user.mention),
             reply_markup=close_markup(strings),
         )
 
-    return await message.reply_text(usage, reply_markup=close_markup(strings))
+    return await rich_call(message.reply_text, usage, reply_markup=close_markup(strings))

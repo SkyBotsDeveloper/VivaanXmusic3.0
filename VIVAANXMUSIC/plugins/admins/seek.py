@@ -7,6 +7,7 @@ from VIVAANXMUSIC.misc import db
 from VIVAANXMUSIC.utils import AdminRightsCheck, seconds_to_min
 from VIVAANXMUSIC.utils.inline import close_markup
 from config import BANNED_USERS
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 
 @app.on_message(
@@ -33,14 +34,14 @@ async def seek_comm(cli, message: Message, _, chat_id):
     duration = playing[0]["dur"]
     if message.command[0][-2] == "c":
         if (duration_played - duration_to_skip) <= 10:
-            return await message.reply_text(
+            return await rich_call(message.reply_text,
                 text=_["admin_23"].format(seconds_to_min(duration_played), duration),
                 reply_markup=close_markup(_),
             )
         to_seek = duration_played - duration_to_skip + 1
     else:
         if (duration_seconds - (duration_played + duration_to_skip)) <= 10:
-            return await message.reply_text(
+            return await rich_call(message.reply_text,
                 text=_["admin_23"].format(seconds_to_min(duration_played), duration),
                 reply_markup=close_markup(_),
             )
@@ -64,12 +65,12 @@ async def seek_comm(cli, message: Message, _, chat_id):
             playing[0]["streamtype"],
         )
     except:
-        return await mystic.edit_text(_["admin_26"], reply_markup=close_markup(_))
+        return await rich_call(mystic.edit_text, _["admin_26"], reply_markup=close_markup(_))
     if message.command[0][-2] == "c":
         db[chat_id][0]["played"] -= duration_to_skip
     else:
         db[chat_id][0]["played"] += duration_to_skip
-    await mystic.edit_text(
+    await rich_call(mystic.edit_text,
         text=_["admin_25"].format(seconds_to_min(to_seek), message.from_user.mention),
         reply_markup=close_markup(_),
     )

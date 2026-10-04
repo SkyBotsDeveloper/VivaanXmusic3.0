@@ -29,6 +29,7 @@ from VIVAANXMUSIC.utils.logger import failure_logs, play_logs
 from VIVAANXMUSIC.utils.stream.source_status import get_youtube_source_status
 from VIVAANXMUSIC.utils.stream.stream import stream
 from VIVAANXMUSIC.utils.url_guard import is_safe_media_url
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 PLAYLIST_FETCH_LIMIT = int(
     getattr(
@@ -448,7 +449,7 @@ async def play_command(
     else:
         if len(message.command) < 2:
             buttons = botplaylist_markup(_)
-            return await mystic.edit_text(
+            return await rich_call(mystic.edit_text,
                 _["play_18"],
                 reply_markup=InlineKeyboardMarkup(buttons),
             )
@@ -496,7 +497,7 @@ async def play_command(
                     "c" if channel else "g",
                     "f" if fplay else "d",
                 )
-                return await mystic.edit_text(
+                return await rich_call(mystic.edit_text,
                     _["play_13"],
                     reply_markup=InlineKeyboardMarkup(buttons),
                 )
@@ -695,7 +696,7 @@ async def play_music(client, CallbackQuery, _):
                 "c" if cplay == "c" else "g",
                 "f" if fplay else "d",
             )
-            return await mystic.edit_text(
+            return await rich_call(mystic.edit_text,
                 _["play_13"], reply_markup=InlineKeyboardMarkup(buttons)
             )
 

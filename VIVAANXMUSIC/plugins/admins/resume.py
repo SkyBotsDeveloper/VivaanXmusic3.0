@@ -7,6 +7,7 @@ from VIVAANXMUSIC.utils.database import is_music_playing, music_on
 from VIVAANXMUSIC.utils.decorators import AdminRightsCheck
 from VIVAANXMUSIC.utils.inline import close_markup
 from config import BANNED_USERS
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 
 @app.on_message(filters.command(["resume", "cresume"]) & filters.group & ~BANNED_USERS)
@@ -16,6 +17,6 @@ async def resume_com(cli, message: Message, _, chat_id):
         return await message.reply_text(_["admin_3"])
     await music_on(chat_id)
     await JARVIS.resume_stream(chat_id)
-    await message.reply_text(
+    await rich_call(message.reply_text,
         _["admin_4"].format(message.from_user.mention), reply_markup=close_markup(_)
     )

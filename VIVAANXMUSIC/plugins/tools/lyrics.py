@@ -28,6 +28,7 @@ from VIVAANXMUSIC.utils.lyrics import (
     fetch_lyrics,
     search_lyrics_candidates,
 )
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 
 LYRICS_CACHE_TTL = 30 * 60
@@ -317,7 +318,7 @@ async def _edit_lyrics_message(
     ]
     for extra in attempts:
         try:
-            await callback_query.edit_message_text(
+            await rich_call(callback_query.edit_message_text,
                 text,
                 reply_markup=reply_markup,
                 disable_web_page_preview=True,
@@ -415,7 +416,7 @@ async def lyrics_command(client, message: Message):
         created_at=time.time(),
         candidates=filtered_candidates,
     )
-    await search_message.edit_text(
+    await rich_call(search_message.edit_text,
         _format_results_text(query, filtered_candidates),
         reply_markup=_build_results_markup(token, LYRICS_RESULTS_CACHE[token]),
         disable_web_page_preview=True,

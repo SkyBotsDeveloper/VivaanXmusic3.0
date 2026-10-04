@@ -24,6 +24,7 @@ from VIVAANXMUSIC.utils.database import (
     is_maintenance,
 )
 from VIVAANXMUSIC.utils.inline import botplaylist_markup
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 # Cache for invite links per chat
 links = {}
@@ -45,7 +46,7 @@ def PlayWrapper(command):
                     ]
                 ]
             )
-            return await message.reply_text(_["general_3"], reply_markup=upl)
+            return await rich_call(message.reply_text, _["general_3"], reply_markup=upl)
 
         if await is_maintenance() is False:
             if message.from_user.id not in SUDOERS:
@@ -131,7 +132,7 @@ def PlayWrapper(command):
                     ChatMemberStatus.BANNED,
                     ChatMemberStatus.RESTRICTED,
                 ):
-                    return await message.reply_text(
+                    return await rich_call(message.reply_text,
                         _["call_2"].format(
                             app.mention, userbot.id, userbot.name, userbot.username
                         ),

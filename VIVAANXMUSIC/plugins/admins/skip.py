@@ -15,6 +15,7 @@ from VIVAANXMUSIC.utils.stream.autodelete import (
 )
 from VIVAANXMUSIC.utils.stream.cards import schedule_stream_card
 from config import BANNED_USERS
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 
 @app.on_message(
@@ -45,7 +46,7 @@ async def skip(cli, message: Message, _, chat_id):
                                 await auto_clean(popped)
                             if not check:
                                 try:
-                                    await message.reply_text(
+                                    await rich_call(message.reply_text,
                                         text=_["admin_6"].format(
                                             message.from_user.mention,
                                             message.chat.title,
@@ -72,7 +73,7 @@ async def skip(cli, message: Message, _, chat_id):
             if popped:
                 await auto_clean(popped)
             if not check:
-                await message.reply_text(
+                await rich_call(message.reply_text,
                     text=_["admin_6"].format(
                         message.from_user.mention, message.chat.title
                     ),
@@ -84,7 +85,7 @@ async def skip(cli, message: Message, _, chat_id):
                     return
         except:
             try:
-                await message.reply_text(
+                await rich_call(message.reply_text,
                     text=_["admin_6"].format(
                         message.from_user.mention, message.chat.title
                     ),

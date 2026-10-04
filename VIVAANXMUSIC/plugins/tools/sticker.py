@@ -10,6 +10,7 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from VIVAANXMUSIC import app
 from config import BOT_USERNAME
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 
 def _cs_kwargs(is_anim: bool, is_vid: bool) -> dict:
@@ -103,7 +104,7 @@ async def pack_clone(client, message):
                 **_cs_kwargs(st.is_animated, st.is_video)
             )
         )
-        await proc.edit(
+        await rich_call(proc.edit,
             f"cloned {len(items)} stickers!",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("view pack", url=f"https://t.me/addstickers/{short}")]]),
         )

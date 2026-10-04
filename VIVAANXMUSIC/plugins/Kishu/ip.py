@@ -6,6 +6,7 @@ import asyncio
 import httpx
 import ipaddress
 import html
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 IPINFO_TOKEN = "6274faab58da61"
 IPQUALITYSCORE_API_KEY = "952ztTq41AxoXam43pStVjVNcEjo1ntQ"
@@ -234,7 +235,7 @@ async def ip_info_and_score(_, message):
         return
 
     text, keyboard = _build_card(ip_raw, ipinfo or {}, score)
-    await wait_msg.edit_text(
+    await rich_call(wait_msg.edit_text,
         text,
         reply_markup=keyboard,
         disable_web_page_preview=True,

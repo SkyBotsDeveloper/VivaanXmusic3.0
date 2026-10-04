@@ -11,6 +11,7 @@ from pyrogram.enums import ChatAction, ParseMode
 from pyrogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from VIVAANXMUSIC import app
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 # ---------------------------------------------------------------------------
 # Global caches & constants
@@ -144,7 +145,7 @@ async def cmd_voices(client: Client, message: Message):
     _voice_sessions[_session_key(message.chat.id, message.from_user.id)] = text
 
     kb = _build_keyboard(_languages, step="lang", extra={}, page=1)
-    await message.reply_text(
+    await rich_call(message.reply_text,
         "🌐 **Step 1:** Select a language",
         reply_markup=kb,
         parse_mode=ParseMode.MARKDOWN,
@@ -212,7 +213,7 @@ async def cb_tts(client: Client, callback: CallbackQuery):
     if step == "lang":
         if "v" not in parts:  # show languages
             kb = _build_keyboard(_languages, "lang", {}, page)
-            return await callback.message.edit_text(
+            return await rich_call(callback.message.edit_text,
                 "🌐 **Step 1:** Select a language",
                 reply_markup=kb,
                 parse_mode=ParseMode.MARKDOWN,
@@ -227,7 +228,7 @@ async def cb_tts(client: Client, callback: CallbackQuery):
             }
         )
         kb = _build_keyboard(regions, "region", {"l": lang}, 1)
-        return await callback.message.edit_text(
+        return await rich_call(callback.message.edit_text,
             "🌍 **Step 2:** Select a region",
             reply_markup=kb,
             parse_mode=ParseMode.MARKDOWN,
@@ -246,7 +247,7 @@ async def cb_tts(client: Client, callback: CallbackQuery):
                 }
             )
             kb = _build_keyboard(regions, "region", {"l": lang}, page)
-            return await callback.message.edit_text(
+            return await rich_call(callback.message.edit_text,
                 "🌍 **Step 2:** Select a region",
                 reply_markup=kb,
                 parse_mode=ParseMode.MARKDOWN,
@@ -257,7 +258,7 @@ async def cb_tts(client: Client, callback: CallbackQuery):
         locale = f"{lang}-{region}"
         models = sorted([v["short_name"] for v in _voices if v["locale"] == locale])
         kb = _build_keyboard(models, "model", {"l": lang, "r": region}, 1)
-        return await callback.message.edit_text(
+        return await rich_call(callback.message.edit_text,
             "🔊 **Step 3:** Choose a voice model",
             reply_markup=kb,
             parse_mode=ParseMode.MARKDOWN,
@@ -272,7 +273,7 @@ async def cb_tts(client: Client, callback: CallbackQuery):
             locale = f"{lang}-{region}"
             models = sorted([v["short_name"] for v in _voices if v["locale"] == locale])
             kb = _build_keyboard(models, "model", {"l": lang, "r": region}, page)
-            return await callback.message.edit_text(
+            return await rich_call(callback.message.edit_text,
                 "🔊 **Step 3:** Choose a voice model",
                 reply_markup=kb,
                 parse_mode=ParseMode.MARKDOWN,

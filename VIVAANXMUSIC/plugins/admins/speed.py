@@ -9,6 +9,7 @@ from VIVAANXMUSIC.utils import AdminRightsCheck
 from VIVAANXMUSIC.utils.database import is_active_chat, is_nonadmin_chat
 from VIVAANXMUSIC.utils.decorators.language import languageCB
 from VIVAANXMUSIC.utils.inline import close_markup, speed_markup
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 checker = []
 
@@ -30,7 +31,7 @@ async def playback(cli, message: Message, _, chat_id):
     if "downloads" not in file_path:
         return await message.reply_text(_["admin_27"])
     upl = speed_markup(_, chat_id)
-    return await message.reply_text(
+    return await rich_call(message.reply_text,
         text=_["admin_28"].format(app.mention),
         reply_markup=upl,
     )
@@ -103,10 +104,10 @@ async def manage_callback(client, CallbackQuery, _):
     except:
         if chat_id in checker:
             checker.remove(chat_id)
-        return await mystic.edit_text(_["admin_33"], reply_markup=close_markup(_))
+        return await rich_call(mystic.edit_text, _["admin_33"], reply_markup=close_markup(_))
     if chat_id in checker:
         checker.remove(chat_id)
-    await mystic.edit_text(
+    await rich_call(mystic.edit_text,
         text=_["admin_34"].format(speed, CallbackQuery.from_user.mention),
         reply_markup=close_markup(_),
     )

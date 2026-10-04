@@ -9,6 +9,7 @@ from pyrogram.types import (
 from pyrogram.enums import ParseMode
 from config import OWNER_ID
 from VIVAANXMUSIC import app
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 
 def extract_bug_content(msg: Message) -> str | None:
@@ -54,7 +55,7 @@ async def report_bug(_, msg: Message):
             "**ʏᴏᴜ ᴀʀᴇ ᴛʜᴇ ᴏᴡɴᴇʀ ᴏғ ᴛʜᴇ ʙᴏᴛ. ᴘʟᴇᴀsᴇ ᴀᴅᴅʀᴇss ᴛʜᴇ ʙᴜɢ ᴅɪʀᴇᴄᴛʟʏ.**"
         )
 
-    await msg.reply_text(
+    await rich_call(msg.reply_text,
         "**ʙᴜɢ ʀᴇᴘᴏʀᴛᴇᴅ sᴜᴄᴄᴇssғᴜʟʟʏ!**",
         reply_markup=InlineKeyboardMarkup(
             [[InlineKeyboardButton("ᴄʟᴏsᴇ", callback_data="close_data")]]
@@ -67,7 +68,7 @@ async def report_bug(_, msg: Message):
         link = f"https://t.me/{msg.chat.username}/{msg.id}"
         buttons.insert(0, [InlineKeyboardButton("ᴠɪᴇᴡ ʙᴜɢ", url=link)])
 
-    await app.send_message(
+    await rich_call(app.send_message,
         -1002077986660,
         bug_report,
         parse_mode=ParseMode.MARKDOWN,

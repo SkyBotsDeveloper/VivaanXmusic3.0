@@ -44,6 +44,7 @@ from VIVAANXMUSIC.utils.stream.autodelete import (
     remember_player_message,
 )
 from VIVAANXMUSIC.utils.stream.cards import schedule_stream_card
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 
 checker = {}
@@ -52,17 +53,17 @@ upvoters = {}
 
 async def _safe_edit_callback_message(callback: CallbackQuery, text: str, reply_markup=None):
     try:
-        await callback.edit_message_text(text, reply_markup=reply_markup)
+        await rich_call(callback.edit_message_text, text, reply_markup=reply_markup)
     except Exception:
         pass
 
 
 async def _safe_reply_callback_message(callback: CallbackQuery, text: str, reply_markup=None):
     try:
-        return await callback.message.reply_text(text, reply_markup=reply_markup)
+        return await rich_call(callback.message.reply_text, text, reply_markup=reply_markup)
     except Exception:
         try:
-            return await app.send_message(
+            return await rich_call(app.send_message,
                 callback.message.chat.id,
                 text,
                 reply_markup=reply_markup,
@@ -176,7 +177,7 @@ async def manage_callback(client, callback: CallbackQuery, _):
         await callback.answer()
         await music_off(chat_id)
         await JARVIS.pause_stream(chat_id)
-        await callback.message.reply_text(_["admin_2"].format(user_mention), reply_markup=close_markup(_))
+        await rich_call(callback.message.reply_text, _["admin_2"].format(user_mention), reply_markup=close_markup(_))
 
     elif command == "Resume":
         if await is_music_playing(chat_id):
@@ -184,7 +185,7 @@ async def manage_callback(client, callback: CallbackQuery, _):
         await callback.answer()
         await music_on(chat_id)
         await JARVIS.resume_stream(chat_id)
-        await callback.message.reply_text(_["admin_4"].format(user_mention), reply_markup=close_markup(_))
+        await rich_call(callback.message.reply_text, _["admin_4"].format(user_mention), reply_markup=close_markup(_))
 
     elif command in ["Stop", "End"]:
         await callback.answer()
@@ -304,7 +305,7 @@ async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: 
     if "live_" in queued:
         n, new_link = await YouTube.video(videoid, True)
         if n == 0:
-            return await callback.message.reply_text(
+            return await rich_call(callback.message.reply_text,
                 _["admin_7"].format(title),
                 reply_markup=close_markup(_)
             )

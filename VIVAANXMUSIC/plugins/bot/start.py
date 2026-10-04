@@ -3,16 +3,13 @@ import random
 import time
 from html import escape
 
-from pyrogram import filters, raw
-from pyrogram.enums import ButtonStyle, ChatType, MessageEntityType
-from pyrogram.parser import Parser
-from pyrogram.parser.utils import add_surrogates, remove_surrogates
+from pyrogram import filters
+from pyrogram.enums import ChatType
 from pyrogram.types import (
     InputRichMessage,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
-    MessageEntity,
     ReplyParameters,
 )
 from youtubesearchpython.future import VideosSearch
@@ -39,6 +36,7 @@ from VIVAANXMUSIC.utils.inline.start import private_panel, start_panel
 from VIVAANXMUSIC.utils.inline.help import first_page
 from config import BANNED_USERS, AYUV, HELP_IMG_URL, START_VIDS, STICKERS
 from strings import get_string
+from VIVAANXMUSIC.utils.rich_buttons import keyboard_html, text_html
 
 
 # Set False to restore the original /start media and inline keyboards.
@@ -46,7 +44,7 @@ START_RICH_BUTTONS = True
 
 
 async def _send_start_message(
-    message, media, caption, buttons, *, photo=False, reply=True, full_width=False
+    message, media, caption, buttons, *, photo=False, reply=True, full_width=True
 ):
     if not START_RICH_BUTTONS:
         markup = InlineKeyboardMarkup(buttons)
@@ -60,66 +58,16 @@ async def _send_start_message(
             )
         return await message.reply_video(media, caption=caption, reply_markup=markup)
 
-    # Preserve the old combined Markdown/HTML caption formatting, including mentions.
-    parsed = await Parser(None).parse(caption, app.parse_mode)
-    entities = []
-    for entity in parsed["entities"] or []:
-        if isinstance(entity, raw.types.InputMessageEntityMentionName):
-            entities.append(
-                MessageEntity(
-                    type=MessageEntityType.TEXT_LINK,
-                    offset=entity.offset,
-                    length=entity.length,
-                    url=f"tg://user?id={entity.user_id}",
-                )
-            )
-        else:
-            entities.append(MessageEntity._parse(None, entity, {}))
-    text = add_surrogates(parsed["message"])
-    if entities:
-        start = min(entity.offset for entity in entities)
-        end = max(entity.offset + entity.length for entity in entities)
-        for entity in entities:
-            entity.offset -= start
-        caption_html = (
-            escape(remove_surrogates(text[:start]))
-            + Parser.unparse(remove_surrogates(text[start:end]), entities, True)
-            + escape(remove_surrogates(text[end:]))
-        )
-    else:
-        caption_html = escape(parsed["message"])
-    caption_html = caption_html.replace("\n", "<br>")
-
-    # 2.2.24 exposes Rich HTML input, rather than the newer rich button/block types.
-    # https://core.telegram.org/bots/api#rich-message-formatting-options
-    rows = []
-    for row in buttons:
-        rich_buttons = []
-        for button in row:
-            style = button.style
-            style_attr = (
-                f' style="{style.name.lower()}"'
-                if style in (ButtonStyle.PRIMARY, ButtonStyle.SUCCESS, ButtonStyle.DANGER)
-                else ""
-            )
-            if button.callback_data is not None:
-                action = f'type="callback_data" data="{escape(button.callback_data, quote=True)}"'
-            else:
-                url = button.url if button.user_id is None else f"tg://user?id={button.user_id}"
-                action = f'type="url" url="{escape(url, quote=True)}"'
-            rich_buttons.append(
-                f'<tg-button {action}{style_attr}>{escape(button.text)}</tg-button>'
-            )
-        # Unset alignment uses Telegram's full-width, equal-column button layout.
-        # https://github.com/tdlib/td/blob/master/td/generate/scheme/td_api.tl
-        row_tag = '<tg-button-row>' if full_width else '<tg-button-row align="center">'
-        rows.append(row_tag + "".join(rich_buttons) + '</tg-button-row>')
+    caption_html = await text_html(caption, app.parse_mode)
+    rows = keyboard_html(
+        InlineKeyboardMarkup(buttons), align=None if full_width else "center"
+    )
 
     media_tag = "img" if photo else "video"
     media_html = f'<{media_tag} src="{escape(media, quote=True)}"/>'
     return await app.send_rich_message(
         chat_id=message.chat.id,
-        rich_message=InputRichMessage(html=media_html + f"<p>{caption_html}</p>" + "".join(rows)),
+        rich_message=InputRichMessage(html=media_html + caption_html + rows),
         reply_parameters=ReplyParameters(message_id=message.id) if reply else None,
         message_thread_id=message.message_thread_id if reply else None,
         direct_messages_topic_id=message.direct_messages_topic_id if reply else None,

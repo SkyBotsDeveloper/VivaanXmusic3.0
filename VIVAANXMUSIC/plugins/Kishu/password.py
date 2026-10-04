@@ -3,6 +3,7 @@ from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from VIVAANXMUSIC import app
 from config import BOT_USERNAME
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 
 @app.on_message(filters.command(["genpassword", "genpw"]))
@@ -34,4 +35,4 @@ async def password(bot, message):
         [InlineKeyboardButton("𝗔𝗗𝗗 𝗠𝗘", url=f"https://t.me/{BOT_USERNAME}?startgroup=true")]
     ])
 
-    await processing.edit_text(reply_text, reply_markup=buttons, parse_mode=enums.ParseMode.HTML)
+    await rich_call(processing.edit_text, reply_text, reply_markup=buttons, parse_mode=enums.ParseMode.HTML)

@@ -12,6 +12,7 @@ from VIVAANXMUSIC.utils.database import (
 from VIVAANXMUSIC.utils.decorators import AdminActual, language
 from VIVAANXMUSIC.utils.inline import close_markup
 from config import BANNED_USERS, adminlist
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 
 @app.on_message(filters.command("auth") & filters.group & ~BANNED_USERS)
@@ -86,5 +87,5 @@ async def authusers(client, message: Message, _):
                 continue
             text += f"{j}➤ {user}[<code>{user_id}</code>]\n"
             text += f"   {_['auth_8']} {admin_name}[<code>{admin_id}</code>]\n\n"
-        await mystic.edit_text(text, reply_markup=close_markup(_))
+        await rich_call(mystic.edit_text, text, reply_markup=close_markup(_))
     

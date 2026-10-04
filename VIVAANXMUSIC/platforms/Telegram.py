@@ -13,6 +13,7 @@ from VIVAANXMUSIC.utils.formatters import (
     get_readable_time,
     seconds_to_min,
 )
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 
 class TeleAPI:
@@ -117,7 +118,7 @@ class TeleAPI:
                     low, high, check = int(lower[counter]), int(higher[counter]), int(checker[counter])
                     if low < percentage_i <= high and high == check:
                         try:
-                            await mystic.edit_text(
+                            await rich_call(mystic.edit_text,
                                 text=_["tg_1"].format(
                                     app.mention, total_size, completed_size, str(percentage)[:5], speed_h, eta
                                 ),

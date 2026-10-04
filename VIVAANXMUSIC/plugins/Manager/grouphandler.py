@@ -3,6 +3,7 @@ from pyrogram.enums import ChatType
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from VIVAANXMUSIC import app
 from VIVAANXMUSIC.utils.admin_filters import admin_filter
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 # ------------------- Utility Functions ------------------- #
 
@@ -37,7 +38,7 @@ async def pin(_, message: Message):
 
     try:
         await message.reply_to_message.pin()
-        await message.reply_text(
+        await rich_call(message.reply_text,
             f"**sᴜᴄᴄᴇssғᴜʟʟʏ ᴘɪɴɴᴇᴅ ᴍᴇssᴀɢᴇ!**\n\n**ᴄʜᴀᴛ:** {message.chat.title}\n**ᴀᴅᴍɪɴ:** {message.from_user.mention}",
             reply_markup=_view_btn(message.reply_to_message)
         )
@@ -59,7 +60,7 @@ async def unpin(_, message: Message):
 
     try:
         await message.reply_to_message.unpin()
-        await message.reply_text(
+        await rich_call(message.reply_text,
             f"**sᴜᴄᴄᴇssғᴜʟʟʏ ᴜɴᴘɪɴɴᴇᴅ ᴍᴇssᴀɢᴇ!**\n\n**ᴄʜᴀᴛ:** {message.chat.title}\n**ᴀᴅᴍɪɴ:** {message.from_user.mention}",
             reply_markup=_view_btn(message.reply_to_message)
         )

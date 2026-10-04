@@ -14,6 +14,7 @@ from pyrogram.types import (
 
 from VIVAANXMUSIC import app
 from VIVAANXMUSIC.utils.admin_check import is_admin
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 chatQueue: set[int] = set()
 stopProcess: bool = False
@@ -101,7 +102,7 @@ async def prompt_zombie_cleanup(_: Client, message: Message):
         ]
     )
 
-    await message.reply_text(
+    await rich_call(message.reply_text,
         (
             f"⚠️ | <b>Found <code>{total}</code> deleted accounts.</b>\n"
             f"⏳ | <b>Estimated cleanup time:</b> <code>{est_time}s</code>\n\n"

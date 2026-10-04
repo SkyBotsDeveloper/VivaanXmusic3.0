@@ -15,6 +15,7 @@ from VIVAANXMUSIC.utils.database import (
 )
 from VIVAANXMUSIC.utils.decorators.admins import ActualAdminCB, AdminActual
 from VIVAANXMUSIC.utils.voiceplay import voiceplay_manager
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 
 def _language_keyboard(user_id: int) -> InlineKeyboardMarkup:
@@ -61,7 +62,7 @@ async def voiceplay_command(_, message: Message, strings):
         if current["enabled"]
         else "OFF"
     )
-    await message.reply_text(
+    await rich_call(message.reply_text,
         "🎙️ <b>Voice Play</b>\n\n"
         f"Current status: <b>{status}</b>\n\n"
         "Choose a language. While enabled, the assistant listens only during the "

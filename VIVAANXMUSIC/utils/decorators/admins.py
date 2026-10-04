@@ -17,6 +17,7 @@ from config import SUPPORT_CHAT, adminlist, confirmer
 from strings import get_string
 
 from ..formatters import int_to_alpha
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 
 def AdminRightsCheck(mystic):
@@ -49,7 +50,7 @@ def AdminRightsCheck(mystic):
                     ]
                 ]
             )
-            return await message.reply_text(_["general_3"], reply_markup=upl)
+            return await rich_call(message.reply_text, _["general_3"], reply_markup=upl)
         if message.command[0][0] == "c":
             chat_id = await get_cmode(message.chat.id)
             if chat_id is None:
@@ -101,7 +102,7 @@ def AdminRightsCheck(mystic):
                                 file = db[chat_id][0]["file"]
                             except:
                                 return await message.reply_text(_["admin_14"])
-                            senn = await message.reply_text(text, reply_markup=upl)
+                            senn = await rich_call(message.reply_text, text, reply_markup=upl)
                             confirmer[chat_id][senn.id] = {
                                 "vidid": vidid,
                                 "file": file,
@@ -145,7 +146,7 @@ def AdminActual(mystic):
                     ]
                 ]
             )
-            return await message.reply_text(_["general_3"], reply_markup=upl)
+            return await rich_call(message.reply_text, _["general_3"], reply_markup=upl)
         if message.from_user.id not in SUDOERS:
             try:
                 member = (

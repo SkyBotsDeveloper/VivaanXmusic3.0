@@ -22,6 +22,7 @@ from VIVAANXMUSIC import app
 from VIVAANXMUSIC.utils.files import resize_file_to_sticker_size
 from VIVAANXMUSIC.security import build_subprocess_env
 from config import BOT_USERNAME
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 BOT = BOT_USERNAME.lstrip("@").lower()
 
@@ -219,7 +220,7 @@ async def kang(client, message):
         count = len(sset.documents)
         kind_lbl = "ᴀɴɪᴍᴀᴛᴇᴅ" if is_anim else "ᴠɪᴅᴇᴏ" if is_vid else "sᴛᴀᴛɪᴄ"
 
-        await notify.edit(
+        await rich_call(notify.edit,
             f"➣ {'ᴄʀᴇᴀᴛᴇᴅ' if created else 'ᴀᴅᴅᴇᴅ ᴛᴏ'} ʏᴏᴜʀ {kind_lbl} ᴘᴀᴄᴋ!\n"
             f"ᴘᴀᴄᴋ: {title}\n"
             f"ᴄᴏᴜɴᴛ: {count}\n"

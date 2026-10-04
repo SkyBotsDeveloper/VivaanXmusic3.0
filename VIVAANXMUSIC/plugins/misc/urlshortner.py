@@ -10,6 +10,7 @@ from pyrogram.types import Message
 
 from VIVAANXMUSIC import app
 from VIVAANXMUSIC.security import SecurityError, validate_public_http_url
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 
 shortener = pyshorteners.Shortener()
@@ -59,7 +60,7 @@ async def short_urls(bot: Client, message: Message):
                 [ikb("Dagd", url=dagd), ikb("Clck.ru", url=clck)],
             ]
         )
-        await message.reply_text("Here are your shortened URLs:", reply_markup=markup)
+        await rich_call(message.reply_text, "Here are your shortened URLs:", reply_markup=markup)
     except SecurityError as exc:
         await message.reply_text(
             f"Blocked by security policy: `{exc}`",
@@ -82,7 +83,7 @@ async def unshort_url(bot: Client, message: Message):
     try:
         final_url = await resolve_public_redirects(message.command[1])
         markup = ikm([[ikb("View Final URL", url=final_url)]])
-        await message.reply_text(
+        await rich_call(message.reply_text,
             f"**Unshortened URL:**\n`{final_url}`",
             reply_markup=markup,
             parse_mode=ParseMode.MARKDOWN,

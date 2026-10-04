@@ -6,6 +6,7 @@ from VIVAANXMUSIC.utils.database import get_loop, set_loop
 from VIVAANXMUSIC.utils.decorators import AdminRightsCheck
 from VIVAANXMUSIC.utils.inline import close_markup
 from config import BANNED_USERS
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 
 @app.on_message(filters.command(["loop", "cloop"]) & filters.group & ~BANNED_USERS)
@@ -24,7 +25,7 @@ async def admins(cli, message: Message, _, chat_id):
             if int(state) > 10:
                 state = 10
             await set_loop(chat_id, state)
-            return await message.reply_text(
+            return await rich_call(message.reply_text,
                 text=_["admin_18"].format(state, message.from_user.mention),
                 reply_markup=close_markup(_),
             )
@@ -32,13 +33,13 @@ async def admins(cli, message: Message, _, chat_id):
             return await message.reply_text(_["admin_17"])
     elif state.lower() == "enable":
         await set_loop(chat_id, 10)
-        return await message.reply_text(
+        return await rich_call(message.reply_text,
             text=_["admin_18"].format(state, message.from_user.mention),
             reply_markup=close_markup(_),
         )
     elif state.lower() == "disable":
         await set_loop(chat_id, 0)
-        return await message.reply_text(
+        return await rich_call(message.reply_text,
             _["admin_19"].format(message.from_user.mention),
             reply_markup=close_markup(_),
         )

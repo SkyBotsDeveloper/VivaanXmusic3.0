@@ -27,6 +27,7 @@ from VIVAANXMUSIC.logging import LOGGER as _LOGGER_FACTORY
 from VIVAANXMUSIC.misc import SUDOERS
 from VIVAANXMUSIC.utils.database import get_assistant
 from VIVAANXMUSIC.utils.permissions import is_owner_or_sudoer, mention
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 log = _LOGGER_FACTORY(__name__)
 
@@ -76,7 +77,7 @@ async def deleteall_command(client, message: Message):
             "I need to be admin with delete_messages, invite_users & promote_members."
         )
 
-    await message.reply(
+    await rich_call(message.reply,
         f"{message.from_user.mention}, confirm delete all messages?",
         reply_markup=_confirm_kb("deleteall")
     )

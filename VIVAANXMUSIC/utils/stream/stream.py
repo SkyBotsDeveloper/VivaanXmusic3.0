@@ -19,6 +19,7 @@ from VIVAANXMUSIC.utils.stream.autodelete import (
 from VIVAANXMUSIC.utils.stream.cards import schedule_stream_card
 from VIVAANXMUSIC.utils.stream.queue import put_queue, put_queue_index
 from VIVAANXMUSIC.utils.errors import capture_internal_err
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 QUEUE_LIMIT = int(getattr(config, "QUEUE_LIMIT", os.getenv("QUEUE_LIMIT", "10")))
 PLAYLIST_FETCH_LIMIT = int(
@@ -237,7 +238,7 @@ async def stream(
             )
             position = len(db.get(chat_id)) - 1
             button = aq_markup(_, chat_id)
-            queue_notice = await app.send_message(
+            queue_notice = await rich_call(app.send_message,
                 chat_id=original_chat_id,
                 text=_["queue_4"].format(position, title[:27], duration_min, user_name),
                 reply_markup=InlineKeyboardMarkup(button),
@@ -320,7 +321,7 @@ async def stream(
             )
             position = len(db.get(chat_id)) - 1
             button = aq_markup(_, chat_id)
-            queue_notice = await app.send_message(
+            queue_notice = await rich_call(app.send_message,
                 chat_id=original_chat_id,
                 text=_["queue_4"].format(position, title[:27], duration_min, user_name),
                 reply_markup=InlineKeyboardMarkup(button),
@@ -377,7 +378,7 @@ async def stream(
             )
             position = len(db.get(chat_id)) - 1
             button = aq_markup(_, chat_id)
-            queue_notice = await app.send_message(
+            queue_notice = await rich_call(app.send_message,
                 chat_id=original_chat_id,
                 text=_["queue_4"].format(position, title[:27], duration_min, user_name),
                 reply_markup=InlineKeyboardMarkup(button),
@@ -433,7 +434,7 @@ async def stream(
             )
             position = len(db.get(chat_id)) - 1
             button = aq_markup(_, chat_id)
-            queue_notice = await app.send_message(
+            queue_notice = await rich_call(app.send_message,
                 chat_id=original_chat_id,
                 text=_["queue_4"].format(position, title[:27], duration_min, user_name),
                 reply_markup=InlineKeyboardMarkup(button),
@@ -501,7 +502,7 @@ async def stream(
             )
             position = len(db.get(chat_id)) - 1
             button = aq_markup(_, chat_id)
-            await mystic.edit_text(
+            await rich_call(mystic.edit_text,
                 text=_["queue_4"].format(position, title[:27], duration_min, user_name),
                 reply_markup=InlineKeyboardMarkup(button),
             )

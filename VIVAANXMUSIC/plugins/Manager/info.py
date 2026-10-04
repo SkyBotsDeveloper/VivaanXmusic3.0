@@ -4,6 +4,7 @@ from pyrogram.errors import PeerIdInvalid, RPCError, FloodWait
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 
 from VIVAANXMUSIC import app
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 
 def get_full_name(user):
@@ -75,7 +76,7 @@ async def whois_handler(_, message: Message):
         ]])
 
         # ✅ ONLY TEXT EDIT (NO DP / NO PHOTO)
-        await app.edit_message_text(
+        await rich_call(app.edit_message_text,
             chat_id=message.chat.id,
             message_id=loading.id,
             text=text,
