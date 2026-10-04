@@ -25,7 +25,7 @@ class TeleAPI:
         n = self.chars_limit
         out = [string[i : i + n] for i in range(0, len(string), n)]
         for j, x in enumerate(out[:3], 1):
-            await message.reply_text(x, disable_web_page_preview=True)
+            await rich_call(message.reply_text, x, disable_web_page_preview=True)
         return True
 
     async def get_link(self, message):
@@ -139,9 +139,9 @@ class TeleAPI:
                     elapsed = get_readable_time(int(time.time() - speed_counter[message.id]))
                 except Exception:
                     elapsed = "0 sᴇᴄᴏɴᴅs"
-                await mystic.edit_text(_["tg_2"].format(elapsed))
+                await rich_call(mystic.edit_text, _["tg_2"].format(elapsed))
             except Exception:
-                await mystic.edit_text(_["tg_3"])
+                await rich_call(mystic.edit_text, _["tg_3"])
 
         task = asyncio.create_task(down_load())
         config.lyrical[mystic.id] = task

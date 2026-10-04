@@ -1,3 +1,5 @@
+import random
+
 from pyrogram import filters
 from pyrogram.enums import ChatType
 from pyrogram.errors import MessageNotModified
@@ -29,7 +31,8 @@ from VIVAANXMUSIC.utils.inline.settings import (
     vote_mode_markup,
 )
 from VIVAANXMUSIC.utils.inline.start import private_panel
-from config import BANNED_USERS, OWNER_ID
+from config import BANNED_USERS, OWNER_ID, START_VIDS
+from VIVAANXMUSIC.utils.rich_buttons import rich_call, restore_welcome
 
 # ─── SETTINGS MESSAGE ──────────────────────────────────────────────
 
@@ -37,7 +40,7 @@ from config import BANNED_USERS, OWNER_ID
 @language
 async def settings_mar(client, message: Message, _):
     buttons = setting_markup(_)
-    await message.reply_text(
+    await rich_call(message.reply_text,
         _["setting_1"].format(app.mention, message.chat.id, message.chat.title),
         reply_markup=InlineKeyboardMarkup(buttons),
     )
@@ -52,7 +55,7 @@ async def settings_cb(client, callback: CallbackQuery, _):
     except Exception:
         pass
     buttons = setting_markup(_)
-    return await callback.edit_message_text(
+    return await rich_call(callback.edit_message_text,
         _["setting_1"].format(app.mention, callback.message.chat.id, callback.message.chat.title),
         reply_markup=InlineKeyboardMarkup(buttons),
     )
@@ -70,13 +73,13 @@ async def settings_back_markup(client, callback: CallbackQuery, _):
     if callback.message.chat.type == ChatType.PRIVATE:
         await app.resolve_peer(OWNER_ID)
         buttons = private_panel(_)
-        return await callback.edit_message_text(
+        return await restore_welcome(callback.message,
             _["start_2"].format(callback.from_user.mention, app.mention),
-            reply_markup=InlineKeyboardMarkup(buttons),
+            buttons, random.choice(START_VIDS),
         )
     else:
         buttons = setting_markup(_)
-        return await callback.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
+        return await rich_call(callback.edit_message_reply_markup, reply_markup=InlineKeyboardMarkup(buttons))
 
 # ─── CALLBACK WITHOUT ADMIN RIGHTS ──────────────────────────────────
 
@@ -143,7 +146,7 @@ async def without_admin_rights(client, callback: CallbackQuery, _):
         current = await get_upvote_count(callback.message.chat.id)
         buttons = vote_mode_markup(_, current, mode)
     try:
-        return await callback.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
+        return await rich_call(callback.edit_message_reply_markup, reply_markup=InlineKeyboardMarkup(buttons))
     except MessageNotModified:
         return
 
@@ -174,7 +177,7 @@ async def addition(client, callback: CallbackQuery, _):
         await set_upvotes(callback.message.chat.id, final)
     buttons = vote_mode_markup(_, final, True)
     try:
-        return await callback.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
+        return await rich_call(callback.edit_message_reply_markup, reply_markup=InlineKeyboardMarkup(buttons))
     except MessageNotModified:
         return
 
@@ -234,7 +237,7 @@ async def playmode_ans(client, callback: CallbackQuery, _):
         Group = True if not is_non_admin else None
         buttons = playmode_users_markup(_, Direct, Group, Playtype)
     try:
-        return await callback.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
+        return await rich_call(callback.edit_message_reply_markup, reply_markup=InlineKeyboardMarkup(buttons))
     except MessageNotModified:
         return
 
@@ -257,7 +260,7 @@ async def authusers_mar(client, callback: CallbackQuery, _):
             except Exception:
                 pass
             counter = 0
-            await callback.edit_message_text(_["auth_6"])
+            await rich_call(callback.edit_message_text, _["auth_6"])
             msg = _["auth_7"].format(callback.message.chat.title)
             for note in _authusers:
                 _note = await get_authuser(callback.message.chat.id, note)
@@ -279,7 +282,7 @@ async def authusers_mar(client, callback: CallbackQuery, _):
                 ]]
             )
             try:
-                return await callback.edit_message_text(msg, reply_markup=upl)
+                return await rich_call(callback.edit_message_text, msg, reply_markup=upl)
             except MessageNotModified:
                 return
     try:
@@ -295,7 +298,7 @@ async def authusers_mar(client, callback: CallbackQuery, _):
             await remove_nonadmin_chat(callback.message.chat.id)
             buttons = auth_users_markup(_, True)
     try:
-        return await callback.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
+        return await rich_call(callback.edit_message_reply_markup, reply_markup=InlineKeyboardMarkup(buttons))
     except MessageNotModified:
         return
 
@@ -318,6 +321,6 @@ async def vote_change(client, callback: CallbackQuery, _):
     current = await get_upvote_count(callback.message.chat.id)
     buttons = vote_mode_markup(_, current, mod)
     try:
-        return await callback.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
+        return await rich_call(callback.edit_message_reply_markup, reply_markup=InlineKeyboardMarkup(buttons))
     except MessageNotModified:
         return

@@ -24,7 +24,7 @@ def AdminRightsCheck(mystic):
     async def wrapper(client, message):
         if await is_maintenance() is False:
             if message.from_user.id not in SUDOERS:
-                return await message.reply_text(
+                return await rich_call(message.reply_text,
                     text=f"{app.mention} ɪs ᴜɴᴅᴇʀ ᴍᴀɪɴᴛᴇɴᴀɴᴄᴇ, ᴠɪsɪᴛ <a href={SUPPORT_CHAT}>sᴜᴘᴘᴏʀᴛ ᴄʜᴀᴛ</a> ғᴏʀ ᴋɴᴏᴡɪɴɢ ᴛʜᴇ ʀᴇᴀsᴏɴ.",
                     disable_web_page_preview=True,
                 )
@@ -120,7 +120,7 @@ def AdminActual(mystic):
     async def wrapper(client, message):
         if await is_maintenance() is False:
             if message.from_user.id not in SUDOERS:
-                return await message.reply_text(
+                return await rich_call(message.reply_text,
                     text=f"{app.mention} ɪs ᴜɴᴅᴇʀ ᴍᴀɪɴᴛᴇɴᴀɴᴄᴇ, ᴠɪsɪᴛ <a href={SUPPORT_CHAT}>sᴜᴘᴘᴏʀᴛ ᴄʜᴀᴛ</a> ғᴏʀ ᴋɴᴏᴡɪɴɢ ᴛʜᴇ ʀᴇᴀsᴏɴ.",
                     disable_web_page_preview=True,
                 )

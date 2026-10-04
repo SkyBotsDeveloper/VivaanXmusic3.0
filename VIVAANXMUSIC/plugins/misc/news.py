@@ -11,6 +11,7 @@ from pyrogram.enums import ParseMode
 from pyrogram.types import Message
 
 from VIVAANXMUSIC import app
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 
 NEWS_TIMEOUT = httpx.Timeout(20.0, connect=10.0)
@@ -420,7 +421,7 @@ async def news_command(client: Client, message: Message):
 
     try:
         items = await fetch_latest_news(topic)
-        await status.edit_text(
+        await rich_call(status.edit_text,
             build_news_message(topic, items),
             parse_mode=ParseMode.HTML,
             disable_web_page_preview=True,

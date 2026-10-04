@@ -7,6 +7,7 @@ from VIVAANXMUSIC.utils.decorators import language
 from VIVAANXMUSIC.utils.inline.settings import playmode_users_markup
 from config import BANNED_USERS
 from VIVAANXMUSIC.utils.errors import capture_err
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 
 @app.on_message(filters.command(["playmode" , "mode" ] ,prefixes=["/", "!", "%", ",", ".", "@", "#"]) & filters.group & ~BANNED_USERS)
@@ -29,7 +30,7 @@ async def playmode_(client, message: Message, _):
     else:
         Playtype = True
     buttons = playmode_users_markup(_, Direct, Group, Playtype)
-    response = await message.reply_text(
+    response = await rich_call(message.reply_text,
         _["play_22"].format(message.chat.title),
         reply_markup=InlineKeyboardMarkup(buttons),
     )

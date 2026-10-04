@@ -1,16 +1,13 @@
 import asyncio
 import random
 import time
-from html import escape
 
 from pyrogram import filters
 from pyrogram.enums import ChatType
 from pyrogram.types import (
-    InputRichMessage,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
-    ReplyParameters,
 )
 from youtubesearchpython.future import VideosSearch
 
@@ -36,42 +33,18 @@ from VIVAANXMUSIC.utils.inline.start import private_panel, start_panel
 from VIVAANXMUSIC.utils.inline.help import first_page
 from config import BANNED_USERS, AYUV, HELP_IMG_URL, START_VIDS, STICKERS
 from strings import get_string
-from VIVAANXMUSIC.utils.rich_buttons import keyboard_html, text_html
-
-
-# Set False to restore the original /start media and inline keyboards.
-START_RICH_BUTTONS = True
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 
 async def _send_start_message(
-    message, media, caption, buttons, *, photo=False, reply=True, full_width=True
+    message, media, caption, buttons, *, photo=False, reply=True
 ):
-    if not START_RICH_BUTTONS:
-        markup = InlineKeyboardMarkup(buttons)
-        if photo:
-            if reply:
-                return await message.reply_photo(
-                    photo=media, caption=caption, reply_markup=markup
-                )
-            return await app.send_photo(
-                chat_id=message.chat.id, photo=media, caption=caption, reply_markup=markup
-            )
-        return await message.reply_video(media, caption=caption, reply_markup=markup)
-
-    caption_html = await text_html(caption, app.parse_mode)
-    rows = keyboard_html(
-        InlineKeyboardMarkup(buttons), align=None if full_width else "center"
-    )
-
-    media_tag = "img" if photo else "video"
-    media_html = f'<{media_tag} src="{escape(media, quote=True)}"/>'
-    return await app.send_rich_message(
-        chat_id=message.chat.id,
-        rich_message=InputRichMessage(html=media_html + caption_html + rows),
-        reply_parameters=ReplyParameters(message_id=message.id) if reply else None,
-        message_thread_id=message.message_thread_id if reply else None,
-        direct_messages_topic_id=message.direct_messages_topic_id if reply else None,
-    )
+    markup = InlineKeyboardMarkup(buttons)
+    if photo:
+        if reply:
+            return await rich_call(message.reply_photo, photo=media, caption=caption, reply_markup=markup)
+        return await rich_call(app.send_photo, chat_id=message.chat.id, photo=media, caption=caption, reply_markup=markup)
+    return await rich_call(message.reply_video, media, caption=caption, reply_markup=markup)
 
 
 async def delete_sticker_after_delay(message: Message, delay: int) -> None:
@@ -126,7 +99,7 @@ async def start_pm(client, message: Message, _):
                 data = await results.next()
                 result = (data.get("result") or [None])[0]
                 if not result:
-                    await m.edit_text("No results found.")
+                    await rich_call(m.edit_text, "No results found.")
                     return
 
                 title = result.get("title") or "Unknown"
@@ -168,7 +141,7 @@ async def start_pm(client, message: Message, _):
                         ),
                     )
             except Exception as e:
-                await m.edit_text(f"Error: {e}")
+                await rich_call(m.edit_text, f"Error: {e}")
             return
 
     out = private_panel(_)
@@ -189,7 +162,6 @@ async def start_pm(client, message: Message, _):
             message.from_user.mention, app.mention, UP, DISK, CPU, RAM, len(served_users), len(served_chats)
         ),
         buttons=out,
-        full_width=True,
     )
 
     if await is_on_off(2):
@@ -240,7 +212,7 @@ async def welcome(client, message: Message):
                     return await app.leave_chat(message.chat.id)
 
                 if message.chat.id in await blacklisted_chats():
-                    await message.reply_text(
+                    await rich_call(message.reply_text,
                         _["start_5"].format(
                             app.mention,
                             f"https://t.me/{app.username}?start=sudolist",
@@ -251,7 +223,7 @@ async def welcome(client, message: Message):
                     return await app.leave_chat(message.chat.id)
 
                 out = start_panel(_)
-                await message.reply_video(
+                await rich_call(message.reply_video,
                     random.choice(START_VIDS),
                     caption=_["start_3"].format(
                         message.from_user.mention,

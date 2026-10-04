@@ -101,14 +101,14 @@ async def handle_upvote(callback: CallbackQuery, chat_id: int, counter, _):
             stored = confirmer[chat_id][message_id]
             current = db[chat_id][0]
         except Exception:
-            return await callback.edit_message_text("ғᴀɪʟᴇᴅ.")
+            return await rich_call(callback.edit_message_text, "ғᴀɪʟᴇᴅ.")
         try:
             if current["vidid"] != stored["vidid"] or current["file"] != stored["file"]:
-                return await callback.edit_message_text(_["admin_35"])
+                return await rich_call(callback.edit_message_text, _["admin_35"])
         except Exception:
-            return await callback.edit_message_text(_["admin_36"])
+            return await rich_call(callback.edit_message_text, _["admin_36"])
         try:
-            await callback.edit_message_text(_["admin_37"].format(required_upvotes))
+            await rich_call(callback.edit_message_text, _["admin_37"].format(required_upvotes))
         except Exception:
             pass
         return counter if counter is not None else "UpVote", "ᴜᴘᴠᴏᴛᴇs"
@@ -124,7 +124,7 @@ async def handle_upvote(callback: CallbackQuery, chat_id: int, counter, _):
             )]
         ])
         await callback.answer(_["admin_40"], show_alert=True)
-        await callback.edit_message_reply_markup(reply_markup=markup)
+        await rich_call(callback.edit_message_reply_markup, reply_markup=markup)
         return None, None
 
 
@@ -335,7 +335,7 @@ async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: 
         await _safe_edit_callback_message(callback, text_msg, reply_markup=close_markup(_))
 
     elif "vid_" in queued:
-        mystic = await callback.message.reply_text(_["call_7"], disable_web_page_preview=True)
+        mystic = await rich_call(callback.message.reply_text, _["call_7"], disable_web_page_preview=True)
         try:
             file_path, direct = await YouTube.download(
                 videoid,
@@ -346,7 +346,7 @@ async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: 
                 title=title,
             )
         except Exception:
-            return await mystic.edit_text(_["call_6"])
+            return await rich_call(mystic.edit_text, _["call_6"])
         try:
             image = await YouTube.thumbnail(videoid, True)
         except Exception:
@@ -355,7 +355,7 @@ async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: 
             await JARVIS.skip_stream(chat_id, file_path, video=status, image=image)
         except Exception:
             if direct:
-                return await mystic.edit_text(_["call_6"])
+                return await rich_call(mystic.edit_text, _["call_6"])
             try:
                 fallback_path, fallback_direct = await YouTube.download(
                     videoid,
@@ -365,14 +365,14 @@ async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: 
                     title=title,
                 )
             except Exception:
-                return await mystic.edit_text(_["call_6"])
+                return await rich_call(mystic.edit_text, _["call_6"])
             if not fallback_path:
-                return await mystic.edit_text(_["call_6"])
+                return await rich_call(mystic.edit_text, _["call_6"])
             file_path, direct = fallback_path, fallback_direct
             try:
                 await JARVIS.skip_stream(chat_id, file_path, video=status, image=image)
             except Exception:
-                return await mystic.edit_text(_["call_6"])
+                return await rich_call(mystic.edit_text, _["call_6"])
         buttons = stream_markup(_, chat_id)
         schedule_stream_card(
             chat_id=chat_id,
@@ -397,7 +397,7 @@ async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: 
         except Exception:
             return await callback.message.reply_text(_["call_6"])
         buttons = stream_markup(_, chat_id)
-        run = await callback.message.reply_photo(
+        run = await rich_call(callback.message.reply_photo,
             photo=STREAM_IMG_URL,
             caption=_["stream_2"].format(user),
             reply_markup=InlineKeyboardMarkup(buttons)
@@ -421,7 +421,7 @@ async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: 
             return await callback.message.reply_text(_["call_6"])
         if videoid == "telegram":
             buttons = stream_markup(_, chat_id)
-            run = await callback.message.reply_photo(
+            run = await rich_call(callback.message.reply_photo,
                 photo=(TELEGRAM_AUDIO_URL if str(streamtype) == "audio" else TELEGRAM_VIDEO_URL),
                 caption=_["stream_1"].format(SUPPORT_CHAT, title[:23], duration, user),
                 reply_markup=InlineKeyboardMarkup(buttons)
@@ -431,7 +431,7 @@ async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: 
             db[chat_id][0]["markup"] = "tg"
         elif videoid == "soundcloud":
             buttons = stream_markup(_, chat_id)
-            run = await callback.message.reply_photo(
+            run = await rich_call(callback.message.reply_photo,
                 photo=(SOUNCLOUD_IMG_URL if str(streamtype) == "audio" else TELEGRAM_VIDEO_URL),
                 caption=_["stream_1"].format(SUPPORT_CHAT, title[:23], duration, user),
                 reply_markup=InlineKeyboardMarkup(buttons)
@@ -495,7 +495,7 @@ async def handle_seek(callback: CallbackQuery, _, chat_id: int, command: str, us
     if "vid_" in file_path:
         n, file_path = await YouTube.video(playing[0]["vidid"], True)
         if n == 0:
-            return await mystic.edit_text(_["admin_22"])
+            return await rich_call(mystic.edit_text, _["admin_22"])
     try:
         await JARVIS.seek_stream(
             chat_id,
@@ -505,13 +505,13 @@ async def handle_seek(callback: CallbackQuery, _, chat_id: int, command: str, us
             playing[0]["streamtype"],
         )
     except Exception:
-        return await mystic.edit_text(_["admin_26"])
+        return await rich_call(mystic.edit_text, _["admin_26"])
     if int(command) in [1, 3]:
         db[chat_id][0]["played"] -= duration_to_skip
     else:
         db[chat_id][0]["played"] += duration_to_skip
     seek_message = _["admin_25"].format(seconds_to_min(to_seek))
-    await mystic.edit_text(f"{seek_message}\n\nᴄʜᴀɴɢᴇs ᴅᴏɴᴇ ʙʏ : {user_mention} !")
+    await rich_call(mystic.edit_text, f"{seek_message}\n\nᴄʜᴀɴɢᴇs ᴅᴏɴᴇ ʙʏ : {user_mention} !")
 
 
 async def markup_timer():
@@ -546,7 +546,7 @@ async def markup_timer():
                         seconds_to_min(playing[0]["played"]),
                         playing[0]["dur"],
                     )
-                    await mystic.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
+                    await rich_call(mystic.edit_reply_markup, reply_markup=InlineKeyboardMarkup(buttons))
                 except Exception:
                     continue
             except Exception:
@@ -583,6 +583,6 @@ async def stop_download(_, query: CallbackQuery, _lang):
         task.cancel()
         lyrical.pop(query.message.id, None)
         await query.answer(_lang["tg_6"], show_alert=True)
-        return await query.edit_message_text(_lang["tg_7"].format(query.from_user.mention))
+        return await rich_call(query.edit_message_text, _lang["tg_7"].format(query.from_user.mention))
     except:
         return await query.answer(_lang["tg_8"], show_alert=True)

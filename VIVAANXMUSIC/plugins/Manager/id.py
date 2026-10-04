@@ -3,6 +3,7 @@ from pyrogram.enums import ParseMode
 from pyrogram.types import Message
 
 from VIVAANXMUSIC import app
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 
 @app.on_message(filters.command("id"))
@@ -23,7 +24,7 @@ async def get_id(client, message: Message):
             tgt_user = await client.get_users(target)
             out.append(f"**[ᴜsᴇʀ ɪᴅ:](tg://user?id={tgt_user.id})** `{tgt_user.id}`")
         except Exception:
-            return await message.reply_text("**ᴛʜɪs ᴜsᴇʀ ᴅᴏᴇsɴ'ᴛ ᴇxɪsᴛ.**", quote=True)
+            return await rich_call(message.reply_text, "**ᴛʜɪs ᴜsᴇʀ ᴅᴏᴇsɴ'ᴛ ᴇxɪsᴛ.**", quote=True)
 
     if chat.username and chat.type != "private":
         out.append(f"**[ᴄʜᴀᴛ ɪᴅ:](https://t.me/{chat.username})** `{chat.id}`")
@@ -51,7 +52,7 @@ async def get_id(client, message: Message):
         if reply.sender_chat:
             out.append(f"ɪᴅ ᴏғ ᴛʜᴇ ʀᴇᴘʟɪᴇᴅ ᴄʜᴀᴛ/ᴄʜᴀɴɴᴇʟ: `{reply.sender_chat.id}`")
 
-    await message.reply_text(
+    await rich_call(message.reply_text,
         "\n".join(out),
         disable_web_page_preview=True,
         parse_mode=ParseMode.MARKDOWN,

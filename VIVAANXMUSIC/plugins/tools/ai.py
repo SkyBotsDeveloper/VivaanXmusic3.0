@@ -13,6 +13,7 @@ from VIVAANXMUSIC.utils.free_ai import (
     generate_chat_response,
     generate_vision_response,
 )
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 
 def get_prompt(message: Message) -> str | None:
@@ -40,7 +41,7 @@ def format_response(command_name: str, model_name: str, content: str) -> str:
 
 async def send_chunked_reply(message: Message, text: str):
     for start in range(0, len(text), 4096):
-        await message.reply_text(
+        await rich_call(message.reply_text,
             text[start : start + 4096],
             disable_web_page_preview=True,
         )

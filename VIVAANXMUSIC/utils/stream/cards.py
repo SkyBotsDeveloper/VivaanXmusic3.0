@@ -7,6 +7,7 @@ from VIVAANXMUSIC import app
 from VIVAANXMUSIC.misc import db
 from VIVAANXMUSIC.utils.stream.autodelete import remember_player_message
 from VIVAANXMUSIC.utils.thumbnails import get_thumb
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 
 async def _deliver_stream_card(
@@ -30,7 +31,7 @@ async def _deliver_stream_card(
             return
 
         try:
-            run = await app.send_photo(
+            run = await rich_call(app.send_photo,
                 original_chat_id,
                 photo=img,
                 caption=caption,
@@ -38,7 +39,7 @@ async def _deliver_stream_card(
             )
         except FloodWait as exc:
             await asyncio.sleep(exc.value)
-            run = await app.send_photo(
+            run = await rich_call(app.send_photo,
                 original_chat_id,
                 photo=img,
                 caption=caption,

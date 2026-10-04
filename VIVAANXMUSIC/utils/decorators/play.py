@@ -50,7 +50,7 @@ def PlayWrapper(command):
 
         if await is_maintenance() is False:
             if message.from_user.id not in SUDOERS:
-                return await message.reply_text(
+                return await rich_call(message.reply_text,
                     text=f"{app.mention} ɪs ᴜɴᴅᴇʀ ᴍᴀɪɴᴛᴇɴᴀɴᴄᴇ, ᴠɪsɪᴛ <a href={SUPPORT_CHAT}>sᴜᴘᴘᴏʀᴛ ᴄʜᴀᴛ</a> ғᴏʀ ᴋɴᴏᴡɪɴɢ ᴛʜᴇ ʀᴇᴀsᴏɴ.",
                     disable_web_page_preview=True,
                 )
@@ -77,7 +77,7 @@ def PlayWrapper(command):
                 if "stream" in message.command:
                     return await message.reply_text(_["str_1"])
                 buttons = botplaylist_markup(_)
-                return await message.reply_photo(
+                return await rich_call(message.reply_photo,
                     photo=PLAYLIST_IMG_URL,
                     caption=_["play_18"],
                     reply_markup=InlineKeyboardMarkup(buttons),
@@ -204,7 +204,7 @@ def PlayWrapper(command):
                             _["call_3"].format(app.mention, type(e).__name__)
                         )
                     await asyncio.sleep(3)
-                    await myu.edit(_["call_5"].format(app.mention))
+                    await rich_call(myu.edit, _["call_5"].format(app.mention))
                 except UserAlreadyParticipant:
                     pass
                 except Exception as e:

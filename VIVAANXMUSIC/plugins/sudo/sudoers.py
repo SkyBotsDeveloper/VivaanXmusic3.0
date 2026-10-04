@@ -7,6 +7,7 @@ from VIVAANXMUSIC.misc import SUDOERS
 from VIVAANXMUSIC.utils.database import add_sudo, remove_sudo
 from VIVAANXMUSIC.utils.decorators.language import language
 from VIVAANXMUSIC.utils.extraction import extract_user
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 # ─── Add Sudo ─────────────────────────────────────────────
 
@@ -53,7 +54,7 @@ async def sudoers_list(client, message: Message):
     keyboard = [[InlineKeyboardButton("๏ ᴠɪᴇᴡ sᴜᴅᴏʟɪsᴛ ๏", callback_data="sudo_list_view")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await message.reply_video(
+    await rich_call(message.reply_video,
         video="https://files.catbox.moe/nmtmde.mp4",
         caption="**» ᴄʜᴇᴄᴋ sᴜᴅᴏ ʟɪsᴛ ʙʏ ɢɪᴠᴇɴ ʙᴇʟᴏᴡ ʙᴜᴛᴛᴏɴ.**\n\n**» ɴᴏᴛᴇ:**  ᴏɴʟʏ sᴜᴅᴏ ᴜsᴇʀs ᴄᴀɴ ᴠɪᴇᴡ.",
         reply_markup=reply_markup
@@ -88,7 +89,7 @@ async def view_sudo_list_callback(client, callback_query: CallbackQuery):
         caption += "_No additional sudoers yet._"
 
     keyboard.append([InlineKeyboardButton("๏ ʙᴀᴄᴋ ๏", callback_data="sudo_list_back")])
-    await callback_query.message.edit_caption(caption=caption, reply_markup=InlineKeyboardMarkup(keyboard))
+    await rich_call(callback_query.message.edit_caption, caption=caption, reply_markup=InlineKeyboardMarkup(keyboard))
 
 # ─── Callback: Back to List Menu ────────────────────────────
 
@@ -96,7 +97,7 @@ async def view_sudo_list_callback(client, callback_query: CallbackQuery):
 async def back_to_sudo_list_menu(client, callback_query: CallbackQuery):
     keyboard = [[InlineKeyboardButton("๏ ᴠɪᴇᴡ sᴜᴅᴏʟɪsᴛ ๏", callback_data="sudo_list_view")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await callback_query.message.edit_caption(
+    await rich_call(callback_query.message.edit_caption,
         caption="**» ᴄʜᴇᴄᴋ sᴜᴅᴏ ʟɪsᴛ ʙʏ ɢɪᴠᴇɴ ʙᴇʟᴏᴡ ʙᴜᴛᴛᴏɴ.**\n\n**» ɴᴏᴛᴇ:**  ᴏɴʟʏ sᴜᴅᴏ ᴜsᴇʀs ᴄᴀɴ ᴠɪᴇᴡ.",
         reply_markup=reply_markup
     )

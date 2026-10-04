@@ -4,6 +4,7 @@ from pyrogram import filters
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from VIVAANXMUSIC import app
 from VIVAANXMUSIC.utils.admin_filters import admin_filter
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 async def collect_members(chat_id, processing_msg):
     members_list = []
@@ -14,7 +15,7 @@ async def collect_members(chat_id, processing_msg):
         })
         if len(members_list) % 100 == 0:
             try:
-                await processing_msg.edit_text(f"Collected {len(members_list)} members so far...")
+                await rich_call(processing_msg.edit_text, f"Collected {len(members_list)} members so far...")
             except Exception:
                 pass
     return members_list
@@ -29,7 +30,7 @@ async def user_command(_, message):
             InlineKeyboardButton("TXT", callback_data="members_txt")
         ]]
     )
-    await message.reply_text(
+    await rich_call(message.reply_text,
         "In which format do you want the members list?",
         reply_markup=keyboard
     )
@@ -43,7 +44,7 @@ async def members_format_callback(_, callback_query):
     await callback_query.answer()
     
     try:
-        await callback_query.message.edit_reply_markup(reply_markup=None)
+        await rich_call(callback_query.message.edit_reply_markup, reply_markup=None)
     except Exception:
         pass
 

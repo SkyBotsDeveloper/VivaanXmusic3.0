@@ -6,6 +6,7 @@ from pyrogram import filters, enums
 from pyrogram.types import Message
 
 from VIVAANXMUSIC import app
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 
 @app.on_message(~filters.private & filters.command(["groupdata"]), group=2)
@@ -101,7 +102,7 @@ async def groupdata_handler(client, message: Message):
         f"<b>⏱ Time taken</b>: <code>{took}s</code>"
     )
 
-    await status.edit(
+    await rich_call(status.edit,
         text=text,
         parse_mode=enums.ParseMode.HTML,
         disable_web_page_preview=True,

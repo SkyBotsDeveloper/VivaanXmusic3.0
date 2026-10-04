@@ -30,7 +30,7 @@ async def telegraph_handler(_, message: Message):
 
     try:
         local_path = await media.download()
-        await status.edit("**Uploading to Telegraph...**")
+        await rich_call(status.edit, "**Uploading to Telegraph...**")
         result = await upload_file_with_fallbacks(local_path)
 
         if result.ok:
@@ -42,10 +42,10 @@ async def telegraph_handler(_, message: Message):
                 ),
             )
         else:
-            await status.edit(f"**Upload failed:**\n`{result.error}`")
+            await rich_call(status.edit, f"**Upload failed:**\n`{result.error}`")
 
     except Exception as exc:
-        await status.edit(f"**Failed to process media:**\n`{exc}`")
+        await rich_call(status.edit, f"**Failed to process media:**\n`{exc}`")
 
     finally:
         if local_path and os.path.exists(local_path):

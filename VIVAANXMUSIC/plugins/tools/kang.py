@@ -78,7 +78,7 @@ async def _prepare_media(message, tmp_dir: str, notify) -> Tuple[str, str, bool,
     r = message.reply_to_message
 
     if r.sticker:
-        await notify.edit("➣ ᴘʀᴏᴄᴇssɪɴɢ sᴛɪᴄᴋᴇʀ…")
+        await rich_call(notify.edit, "➣ ᴘʀᴏᴄᴇssɪɴɢ sᴛɪᴄᴋᴇʀ…")
         s = r.sticker
         if s.is_animated:
             return "sticker", await r.download(os.path.join(tmp_dir, "sticker.tgs")), True, False
@@ -87,7 +87,7 @@ async def _prepare_media(message, tmp_dir: str, notify) -> Tuple[str, str, bool,
         return "sticker", await r.download(os.path.join(tmp_dir, "sticker.png")), False, False
 
     if r.photo or (r.document and r.document.mime_type and r.document.mime_type.startswith("image/")):
-        await notify.edit("➣ ᴄᴏɴᴠᴇʀᴛɪɴɢ ɪᴍᴀɢᴇ…")
+        await rich_call(notify.edit, "➣ ᴄᴏɴᴠᴇʀᴛɪɴɢ ɪᴍᴀɢᴇ…")
         p = await r.download(os.path.join(tmp_dir, "image"))
         p = await resize_file_to_sticker_size(p)
         return "image", p, False, False
@@ -99,7 +99,7 @@ async def _prepare_media(message, tmp_dir: str, notify) -> Tuple[str, str, bool,
             (r.document.file_name and r.document.file_name.endswith(".gif"))
         ))
     ):
-        await notify.edit("➣ ᴘʀᴏᴄᴇssɪɴɢ ɢɪꜰ/ᴠɪᴅᴇᴏ…")
+        await rich_call(notify.edit, "➣ ᴘʀᴏᴄᴇssɪɴɢ ɢɪꜰ/ᴠɪᴅᴇᴏ…")
         raw_v = await r.download(os.path.join(tmp_dir, "raw.mp4"))
         out_v = os.path.join(tmp_dir, "sticker.webm")
         cmd = [
@@ -231,10 +231,10 @@ async def kang(client, message):
         )
 
     except FloodWait as e:
-        await notify.edit(f"flood wait – retry in {e.x}s")
+        await rich_call(notify.edit, f"flood wait – retry in {e.x}s")
     except (StickerEmojiInvalid, PeerIdInvalid, FileReferenceExpired, RPCError) as err:
-        await notify.edit(f"error: {err}")
+        await rich_call(notify.edit, f"error: {err}")
     except Exception:
-        await notify.edit("unexpected error:\n" + traceback.format_exc())
+        await rich_call(notify.edit, "unexpected error:\n" + traceback.format_exc())
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)

@@ -1,5 +1,6 @@
 from pyrogram import filters
 from VIVAANXMUSIC import app
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 # Dice 🎲
 @app.on_message(filters.command("dice"))
@@ -7,7 +8,7 @@ async def roll_dice(bot, message):
     try:
         x = await bot.send_dice(message.chat.id, "🎲")
         m = x.dice.value
-        await message.reply_text(f"🎲 Hey {message.from_user.mention}, your score is: {m}", quote=True)
+        await rich_call(message.reply_text, f"🎲 Hey {message.from_user.mention}, your score is: {m}", quote=True)
     except Exception as e:
         await message.reply_text(f"❌ Error: {str(e)}")
 
@@ -17,7 +18,7 @@ async def throw_dart(bot, message):
     try:
         x = await bot.send_dice(message.chat.id, "🎯")
         m = x.dice.value
-        await message.reply_text(f"🎯 Hey {message.from_user.mention}, your score is: {m}", quote=True)
+        await rich_call(message.reply_text, f"🎯 Hey {message.from_user.mention}, your score is: {m}", quote=True)
     except Exception as e:
         await message.reply_text(f"❌ Error: {str(e)}")
 
@@ -27,7 +28,7 @@ async def shoot_basket(bot, message):
     try:
         x = await bot.send_dice(message.chat.id, "🏀")
         m = x.dice.value
-        await message.reply_text(f"🏀 Hey {message.from_user.mention}, your score is: {m}", quote=True)
+        await rich_call(message.reply_text, f"🏀 Hey {message.from_user.mention}, your score is: {m}", quote=True)
     except Exception as e:
         await message.reply_text(f"❌ Error: {str(e)}")
 
@@ -37,7 +38,7 @@ async def spin_jackpot(bot, message):
     try:
         x = await bot.send_dice(message.chat.id, "🎰")
         m = x.dice.value
-        await message.reply_text(f"🎰 Hey {message.from_user.mention}, your score is: {m}", quote=True)
+        await rich_call(message.reply_text, f"🎰 Hey {message.from_user.mention}, your score is: {m}", quote=True)
     except Exception as e:
         await message.reply_text(f"❌ Error: {str(e)}")
 
@@ -47,7 +48,7 @@ async def roll_ball(bot, message):
     try:
         x = await bot.send_dice(message.chat.id, "🎳")
         m = x.dice.value
-        await message.reply_text(f"🎳 Hey {message.from_user.mention}, your score is: {m}", quote=True)
+        await rich_call(message.reply_text, f"🎳 Hey {message.from_user.mention}, your score is: {m}", quote=True)
     except Exception as e:
         await message.reply_text(f"❌ Error: {str(e)}")
 
@@ -57,7 +58,7 @@ async def kick_football(bot, message):
     try:
         x = await bot.send_dice(message.chat.id, "⚽")
         m = x.dice.value
-        await message.reply_text(f"⚽ Hey {message.from_user.mention}, your score is: {m}", quote=True)
+        await rich_call(message.reply_text, f"⚽ Hey {message.from_user.mention}, your score is: {m}", quote=True)
     except Exception as e:
         await message.reply_text(f"❌ Error: {str(e)}")
 

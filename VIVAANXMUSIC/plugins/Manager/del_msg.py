@@ -43,7 +43,7 @@ def _confirm_kb(cmd: str) -> InlineKeyboardMarkup:
 
 async def _safe_edit(cb: CallbackQuery, text: str):
     try:
-        await cb.message.edit(text)
+        await rich_call(cb.message.edit, text)
         return True
     except (ChannelPrivate, MessageNotModified, MessageIdInvalid, ChatAdminRequired) as e:
         log.warning("Safe edit suppressed error: %s", e)

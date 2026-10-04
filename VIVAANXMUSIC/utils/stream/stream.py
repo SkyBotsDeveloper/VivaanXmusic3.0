@@ -210,7 +210,7 @@ async def stream(
         final_position = len(db.get(chat_id) or []) - 1
         if final_position < 0:
             final_position = 0
-        return await app.send_photo(
+        return await rich_call(app.send_photo,
             original_chat_id,
             photo=playlist_photo,
             caption=_["play_21"].format(final_position, link),
@@ -344,7 +344,7 @@ async def stream(
                 forceplay=forceplay,
             )
             button = stream_markup(_, chat_id)
-            run = await app.send_photo(
+            run = await rich_call(app.send_photo,
                 original_chat_id,
                 photo=config.SOUNCLOUD_IMG_URL,
                 caption=_["stream_1"].format(
@@ -403,7 +403,7 @@ async def stream(
             if is_video:
                 await add_active_video_chat(chat_id)
             button = stream_markup(_, chat_id)
-            run = await app.send_photo(
+            run = await rich_call(app.send_photo,
                 original_chat_id,
                 photo=config.TELEGRAM_VIDEO_URL if is_video else config.TELEGRAM_AUDIO_URL,
                 caption=_["stream_1"].format(link, title[:23], duration_min, user_name),
@@ -528,7 +528,7 @@ async def stream(
                 forceplay=forceplay,
             )
             button = stream_markup(_, chat_id)
-            run = await app.send_photo(
+            run = await rich_call(app.send_photo,
                 original_chat_id,
                 photo=config.STREAM_IMG_URL,
                 caption=_["stream_2"].format(user_name),

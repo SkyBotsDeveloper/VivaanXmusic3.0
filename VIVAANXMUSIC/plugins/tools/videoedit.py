@@ -9,6 +9,7 @@ from pyrogram.types import Message
 
 from VIVAANXMUSIC import app
 from VIVAANXMUSIC.security import build_subprocess_env
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 MAX_SIZE_MB = 50
 MAX_SIZE_BYTES = MAX_SIZE_MB * 1024 * 1024
@@ -21,7 +22,7 @@ async def remove_media(_, message: Message):
     if not (replied and replied.video):
         return await message.reply_text("Please reply to a video message.")
     if len(message.command) < 2:
-        return await message.reply_text(
+        return await rich_call(message.reply_text,
             "Use `/remove audio` or `/remove video`.",
             quote=True,
         )

@@ -398,11 +398,11 @@ async def lyrics_command(client, message: Message):
     try:
         candidates = await search_lyrics_candidates(query)
     except LyricsError as exc:
-        return await search_message.edit_text(str(exc))
+        return await rich_call(search_message.edit_text, str(exc))
 
     filtered_candidates = _filter_candidates(candidates)
     if not filtered_candidates:
-        return await search_message.edit_text(
+        return await rich_call(search_message.edit_text,
             "No reliable lyrics results were found for that query.\n"
             "Try a clearer song name or a more unique lyric line."
         )

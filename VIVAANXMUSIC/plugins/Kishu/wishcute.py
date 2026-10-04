@@ -4,6 +4,7 @@ import asyncio
 import random
 import requests
 from VIVAANXMUSIC import app
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 SUPPORT_CHAT = "VivaanSupport"
 SUPPORT_BTN = InlineKeyboardMarkup(
@@ -44,7 +45,7 @@ async def wish(_, m):
         f"📊 ᴘᴏꜱꜱɪʙɪʟɪᴛʏ: {wish_count}%"
     )
 
-    await app.send_animation(
+    await rich_call(app.send_animation,
         chat_id=m.chat.id,
         animation=url,
         caption=caption,
@@ -60,7 +61,7 @@ async def cute(_, message):
 
     caption = f"🍑 {mention} ɪꜱ {percent}% ᴄᴜᴛᴇ ʙᴀʙʏ 🥀"
 
-    await app.send_document(
+    await rich_call(app.send_document,
         chat_id=message.chat.id,
         document=CUTE_VIDEO,
         caption=caption,

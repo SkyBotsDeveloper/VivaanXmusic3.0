@@ -1,7 +1,6 @@
 from pyrogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    InlineQueryResultPhoto,
 )
 from youtubesearchpython.future import VideosSearch
 
@@ -9,6 +8,7 @@ from VIVAANXMUSIC.utils.inlinequery import answer
 from VIVAANXMUSIC.button_styles import primary_button
 from config import BANNED_USERS
 from VIVAANXMUSIC import app
+from VIVAANXMUSIC.utils.rich_buttons import rich_inline_photo
 
 
 @app.on_inline_query(~BANNED_USERS)
@@ -54,7 +54,8 @@ async def inline_query_handler(client, query):
 
 <u><b>➻ ɪɴʟɪɴᴇ sᴇᴀʀᴄʜ ᴍᴏᴅᴇ ʙʏ {app.name}</b></u>"""
             answers.append(
-                InlineQueryResultPhoto(
+                await rich_inline_photo(
+                    client=client,
                     photo_url=thumbnail,
                     title=title,
                     thumb_url=thumbnail,

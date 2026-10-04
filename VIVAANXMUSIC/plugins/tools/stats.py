@@ -19,13 +19,14 @@ from VIVAANXMUSIC.utils.database import get_served_chats, get_served_users, get_
 from VIVAANXMUSIC.utils.decorators.language import language, languageCB
 from VIVAANXMUSIC.utils.inline.stats import back_stats_buttons, stats_buttons
 from config import BANNED_USERS
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 
 @app.on_message(filters.command(["stats", "gstats"]) & ~BANNED_USERS)
 @language
 async def stats_global(client, message: Message, _):
     upl = stats_buttons(_, True if message.from_user.id in SUDOERS else False)
-    await message.reply_video(
+    await rich_call(message.reply_video,
         video=config.STATS_VID_URL,
         caption=_["gstats_2"].format(app.mention),
         reply_markup=upl,
@@ -36,7 +37,7 @@ async def stats_global(client, message: Message, _):
 @languageCB
 async def home_stats(client, CallbackQuery, _):
     upl = stats_buttons(_, True if CallbackQuery.from_user.id in SUDOERS else False)
-    await CallbackQuery.edit_message_text(
+    await rich_call(CallbackQuery.edit_message_text,
         text=_["gstats_2"].format(app.mention),
         reply_markup=upl,
     )
@@ -51,7 +52,7 @@ async def overall_stats(client, CallbackQuery, _):
         await CallbackQuery.answer()
     except:
         pass
-    await CallbackQuery.edit_message_text(_["gstats_1"].format(app.mention))
+    await rich_call(CallbackQuery.edit_message_text, _["gstats_1"].format(app.mention))
     served_chats = len(await get_served_chats())
     served_users = len(await get_served_users())
     text = _["gstats_3"].format(
@@ -67,9 +68,9 @@ async def overall_stats(client, CallbackQuery, _):
     )
     med = InputMediaVideo(media=config.STATS_VID_URL, caption=text)
     try:
-        await CallbackQuery.edit_message_media(media=med, reply_markup=upl)
+        await rich_call(CallbackQuery.edit_message_media, media=med, reply_markup=upl)
     except MessageIdInvalid:
-        await CallbackQuery.message.reply_video(
+        await rich_call(CallbackQuery.message.reply_video,
             video=config.STATS_VID_URL, caption=text, reply_markup=upl
         )
 
@@ -154,10 +155,10 @@ async def mongo_stats_dump(client, message: Message):
     try:
         report = await _mongo_stats_report()
     except Exception as exc:
-        return await status.edit_text(f"Failed to fetch Mongo stats:\n<code>{escape(str(exc))}</code>")
+        return await rich_call(status.edit_text, f"Failed to fetch Mongo stats:\n<code>{escape(str(exc))}</code>")
 
     if len(report) <= 3900:
-        return await status.edit_text(f"<pre>{report}</pre>")
+        return await rich_call(status.edit_text, f"<pre>{report}</pre>")
 
     bio = BytesIO(report.encode("utf-8"))
     bio.name = "mongo_stats.txt"
@@ -178,7 +179,7 @@ async def bot_stats(client, CallbackQuery, _):
         await CallbackQuery.answer()
     except:
         pass
-    await CallbackQuery.edit_message_text(_["gstats_1"].format(app.mention))
+    await rich_call(CallbackQuery.edit_message_text, _["gstats_1"].format(app.mention))
     p_core = psutil.cpu_count(logical=False)
     t_core = psutil.cpu_count(logical=True)
     ram = str(round(psutil.virtual_memory().total / (1024.0**3))) + " ɢʙ"
@@ -224,8 +225,8 @@ async def bot_stats(client, CallbackQuery, _):
     )
     med = InputMediaVideo(media=config.STATS_VID_URL, caption=text)
     try:
-        await CallbackQuery.edit_message_media(media=med, reply_markup=upl)
+        await rich_call(CallbackQuery.edit_message_media, media=med, reply_markup=upl)
     except MessageIdInvalid:
-        await CallbackQuery.message.reply_video(
+        await rich_call(CallbackQuery.message.reply_video,
             video=config.STATS_VID_URL, caption=text, reply_markup=upl
         )

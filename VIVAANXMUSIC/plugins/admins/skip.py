@@ -137,7 +137,7 @@ async def skip(cli, message: Message, _, chat_id):
             markup="tg",
         )
     elif "vid_" in queued:
-        mystic = await message.reply_text(_["call_7"], disable_web_page_preview=True)
+        mystic = await rich_call(message.reply_text, _["call_7"], disable_web_page_preview=True)
         try:
             file_path, direct = await YouTube.download(
                 videoid,
@@ -148,7 +148,7 @@ async def skip(cli, message: Message, _, chat_id):
                 title=title,
             )
         except:
-            return await mystic.edit_text(_["call_6"])
+            return await rich_call(mystic.edit_text, _["call_6"])
         try:
             image = await YouTube.thumbnail(videoid, True)
         except:
@@ -157,7 +157,7 @@ async def skip(cli, message: Message, _, chat_id):
             await JARVIS.skip_stream(chat_id, file_path, video=status, image=image)
         except:
             if direct:
-                return await mystic.edit_text(_["call_6"])
+                return await rich_call(mystic.edit_text, _["call_6"])
             try:
                 fallback_path, fallback_direct = await YouTube.download(
                     videoid,
@@ -167,14 +167,14 @@ async def skip(cli, message: Message, _, chat_id):
                     title=title,
                 )
             except:
-                return await mystic.edit_text(_["call_6"])
+                return await rich_call(mystic.edit_text, _["call_6"])
             if not fallback_path:
-                return await mystic.edit_text(_["call_6"])
+                return await rich_call(mystic.edit_text, _["call_6"])
             file_path, direct = fallback_path, fallback_direct
             try:
                 await JARVIS.skip_stream(chat_id, file_path, video=status, image=image)
             except:
-                return await mystic.edit_text(_["call_6"])
+                return await rich_call(mystic.edit_text, _["call_6"])
         button = stream_markup(_, chat_id)
         schedule_stream_card(
             chat_id=chat_id,
@@ -197,7 +197,7 @@ async def skip(cli, message: Message, _, chat_id):
         except:
             return await message.reply_text(_["call_6"])
         button = stream_markup(_, chat_id)
-        run = await message.reply_photo(
+        run = await rich_call(message.reply_photo,
             photo=config.STREAM_IMG_URL,
             caption=_["stream_2"].format(user),
             reply_markup=InlineKeyboardMarkup(button),
@@ -221,7 +221,7 @@ async def skip(cli, message: Message, _, chat_id):
             return await message.reply_text(_["call_6"])
         if videoid == "telegram":
             button = stream_markup(_, chat_id)
-            run = await message.reply_photo(
+            run = await rich_call(message.reply_photo,
                 photo=config.TELEGRAM_AUDIO_URL
                 if str(streamtype) == "audio"
                 else config.TELEGRAM_VIDEO_URL,
@@ -235,7 +235,7 @@ async def skip(cli, message: Message, _, chat_id):
             db[chat_id][0]["markup"] = "tg"
         elif videoid == "soundcloud":
             button = stream_markup(_, chat_id)
-            run = await message.reply_photo(
+            run = await rich_call(message.reply_photo,
                 photo=config.SOUNCLOUD_IMG_URL
                 if str(streamtype) == "audio"
                 else config.TELEGRAM_VIDEO_URL,

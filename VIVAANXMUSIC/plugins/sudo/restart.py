@@ -22,6 +22,7 @@ from VIVAANXMUSIC.utils.database import (
 from VIVAANXMUSIC.utils.decorators.language import language
 from VIVAANXMUSIC.utils.pastebin import VIVAANBIN
 from VIVAANXMUSIC.security import build_subprocess_env
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -114,7 +115,7 @@ async def update_(client, message, _):
             f"<u><b>ᴜᴩᴅᴀᴛᴇs :</b></u>\n\n<a href={url}>ᴄʜᴇᴄᴋ ᴜᴩᴅᴀᴛᴇs</a>"
         )
     else:
-        nrs = await response.edit(_final_updates_, disable_web_page_preview=True)
+        nrs = await rich_call(response.edit, _final_updates_, disable_web_page_preview=True)
 
     stash = subprocess.run(
         ["git", "stash"],

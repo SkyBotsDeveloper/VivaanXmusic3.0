@@ -50,11 +50,11 @@ async def scan_deleted_members(chat_id: int) -> List:
 
 async def safe_edit(msg: Message, text: str):
     try:
-        await msg.edit_text(text, parse_mode=enums.ParseMode.HTML)
+        await rich_call(msg.edit_text, text, parse_mode=enums.ParseMode.HTML)
     except FloodWait as e:
         await asyncio.sleep(e.value)
         try:
-            await msg.edit_text(text, parse_mode=enums.ParseMode.HTML)
+            await rich_call(msg.edit_text, text, parse_mode=enums.ParseMode.HTML)
         except Exception:
             pass
     except Exception:
@@ -127,7 +127,7 @@ async def execute_zombie_cleanup(_: Client, cq: CallbackQuery):
 
     if not await _bot_is_admin(chat_id):
         try:
-            return await cq.edit_message_text(
+            return await rich_call(cq.edit_message_text,
                 "➠ | <b>I need admin rights to remove deleted accounts.</b>",
                 parse_mode=enums.ParseMode.HTML,
             )
@@ -143,7 +143,7 @@ async def execute_zombie_cleanup(_: Client, cq: CallbackQuery):
     total = len(deleted_list)
 
     try:
-        status = await cq.edit_message_text(
+        status = await rich_call(cq.edit_message_text,
             f"🧭 | <b>Found <code>{total}</code> deleted accounts.</b>\n🥀 | <b>Starting cleanup...</b>",
             parse_mode=enums.ParseMode.HTML,
         )
@@ -189,7 +189,7 @@ async def execute_zombie_cleanup(_: Client, cq: CallbackQuery):
 @app.on_callback_query(filters.regex(r"^cancel_zombies$"))
 async def cancel_zombie_cleanup(_: Client, cq: CallbackQuery):
     try:
-        await cq.edit_message_text("❌ | <b>Cleanup cancelled.</b>", parse_mode=enums.ParseMode.HTML)
+        await rich_call(cq.edit_message_text, "❌ | <b>Cleanup cancelled.</b>", parse_mode=enums.ParseMode.HTML)
     except Exception:
         pass
 

@@ -5,6 +5,7 @@ from pyrogram.types import Message, ChatMemberUpdated, InlineKeyboardMarkup, Inl
 from pyrogram.errors import TopicClosed
 from VIVAANXMUSIC import app
 from VIVAANXMUSIC.mongo.welcomedb import is_on, set_state, bump, cool, auto_on
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 BG_PATH = "VIVAANXMUSIC/assets/vivaan/welcome.png"
 FALLBACK_PIC = "VIVAANXMUSIC/assets/upic.png"
@@ -125,7 +126,7 @@ async def welcome(client, update: ChatMemberUpdated):
             count=members
         )
         try:
-            sent = await client.send_photo(
+            sent = await rich_call(client.send_photo,
                 cid,
                 img,
                 caption=caption,

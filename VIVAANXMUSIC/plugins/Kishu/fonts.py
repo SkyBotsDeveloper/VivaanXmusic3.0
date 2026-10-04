@@ -3,6 +3,7 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from VIVAANXMUSIC import app
 from VIVAANXMUSIC.utils.font_styles import Fonts
+from VIVAANXMUSIC.utils.rich_buttons import rich_call, rich_markup, rich_text
 
 FONT_TEXT_CACHE: dict[tuple[int, int], str] = {}
 
@@ -105,24 +106,24 @@ def _extract_source_text(message) -> str:
     cached = FONT_TEXT_CACHE.get(_cache_key(message))
     if cached:
         return cached
-    return (message.text or "").replace("`", "").strip()
+    return rich_text(message).replace("`", "").strip()
 
 
 @app.on_message(filters.command(["font", "fonts"]))
 async def style_buttons(_, message, cb=False):
     if cb:
-        await message.message.edit_reply_markup(_build_buttons(0))
+        await rich_call(message.message.edit_reply_markup, _build_buttons(0))
         return
 
     if len(message.command) < 2:
-        return await message.reply_text(
+        return await rich_call(message.reply_text,
             "❌ Please provide text to style.\n\nExample: `/font Hello World!`",
             quote=True,
             reply_to_message_id=message.id,
         )
 
     text = message.text.split(" ", 1)[1].strip()
-    sent = await message.reply_text(
+    sent = await rich_call(message.reply_text,
         f"`{text}`",
         reply_markup=_build_buttons(0),
         quote=True,
@@ -135,9 +136,9 @@ async def style_buttons(_, message, cb=False):
 async def nxt(_, query):
     await query.answer()
     if query.data == "nxt":
-        await query.message.edit_reply_markup(_build_buttons(1))
+        await rich_call(query.message.edit_reply_markup, _build_buttons(1))
     else:
-        await query.message.edit_reply_markup(_build_buttons(0))
+        await rich_call(query.message.edit_reply_markup, _build_buttons(0))
 
 
 @app.on_callback_query(filters.regex("^style"))
@@ -157,7 +158,7 @@ async def style(_, query):
         )
 
     FONT_TEXT_CACHE[_cache_key(query.message)] = text
-    await query.message.edit_text(
+    await rich_call(query.message.edit_text,
         styler(text),
-        reply_markup=query.message.reply_markup,
+        reply_markup=rich_markup(query.message),
     )

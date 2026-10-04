@@ -13,6 +13,7 @@ from VIVAANXMUSIC.utils.database import get_lang, set_lang
 from VIVAANXMUSIC.utils.decorators import ActualAdminCB, language, languageCB
 from config import BANNED_USERS
 from strings import get_string, languages_present
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 
 def languages_keyboard(_):
@@ -47,10 +48,10 @@ def languages_keyboard(_):
 async def langs_command(client, message: Message, _):
     keyboard = languages_keyboard(_)
     try:
-        await message.reply_text(_["lang_1"], reply_markup=keyboard)
+        await rich_call(message.reply_text, _["lang_1"], reply_markup=keyboard)
     except FloodWait as e:
         await asyncio.sleep(e.value)
-        await message.reply_text(_["lang_1"], reply_markup=keyboard)
+        await rich_call(message.reply_text, _["lang_1"], reply_markup=keyboard)
 
 
 @app.on_callback_query(filters.regex("LG") & ~BANNED_USERS)
@@ -62,10 +63,10 @@ async def languagecb(client, CallbackQuery: CallbackQuery, _):
         pass
     keyboard = languages_keyboard(_)
     try:
-        await CallbackQuery.edit_message_reply_markup(reply_markup=keyboard)
+        await rich_call(CallbackQuery.edit_message_reply_markup, reply_markup=keyboard)
     except FloodWait as e:
         await asyncio.sleep(e.value)
-        await CallbackQuery.edit_message_reply_markup(reply_markup=keyboard)
+        await rich_call(CallbackQuery.edit_message_reply_markup, reply_markup=keyboard)
 
 
 @app.on_callback_query(filters.regex(r"languages:(.*?)") & ~BANNED_USERS)
@@ -86,7 +87,7 @@ async def language_markup(client, CallbackQuery: CallbackQuery, _):
     await set_lang(CallbackQuery.message.chat.id, lang_code)
     keyboard = languages_keyboard(_)
     try:
-        await CallbackQuery.edit_message_reply_markup(reply_markup=keyboard)
+        await rich_call(CallbackQuery.edit_message_reply_markup, reply_markup=keyboard)
     except FloodWait as e:
         await asyncio.sleep(e.value)
-        await CallbackQuery.edit_message_reply_markup(reply_markup=keyboard)
+        await rich_call(CallbackQuery.edit_message_reply_markup, reply_markup=keyboard)

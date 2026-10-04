@@ -91,7 +91,7 @@ async def manage_callback(client, CallbackQuery, _):
         )
     except:
         pass
-    mystic = await CallbackQuery.edit_message_text(
+    mystic = await rich_call(CallbackQuery.edit_message_text,
         text=_["admin_32"].format(CallbackQuery.from_user.mention),
     )
     try:

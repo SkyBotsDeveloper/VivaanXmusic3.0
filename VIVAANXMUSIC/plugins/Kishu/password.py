@@ -22,7 +22,7 @@ async def password(bot, message):
         if length < 1:
             raise ValueError("Length must be positive.")
     except ValueError:
-        return await processing.edit_text("Please enter a valid positive number for the password length.")
+        return await rich_call(processing.edit_text, "Please enter a valid positive number for the password length.")
 
     generated_password = "".join(random.choices(characters, k=length))
 

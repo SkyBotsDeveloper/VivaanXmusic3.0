@@ -9,6 +9,7 @@ from VIVAANXMUSIC.utils import bot_sys_stats
 from VIVAANXMUSIC.utils.decorators.language import language
 from VIVAANXMUSIC.utils.inline import supp_markup
 from config import BANNED_USERS, PING_VID_URL
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 
 @app.on_message(filters.command("ping", prefixes=["/"]) & ~BANNED_USERS)
@@ -22,7 +23,7 @@ async def ping_com(client, message: Message, _):
     pytgping = await JARVIS.ping()
     UP, CPU, RAM, DISK = await bot_sys_stats()
     resp = (datetime.now() - start).microseconds / 1000
-    await response.edit_text(
+    await rich_call(response.edit_text,
         _["ping_2"].format(resp, app.mention, UP, RAM, CPU, DISK, pytgping),
         reply_markup=supp_markup(_),
     )

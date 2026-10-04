@@ -4,6 +4,7 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from VIVAANXMUSIC import app
 from config import SUPPORT_CHAT
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 BUTTON = InlineKeyboardMarkup([[InlineKeyboardButton("ꜱᴜᴘᴘᴏʀᴛ", url=SUPPORT_CHAT)]])
 
@@ -53,7 +54,7 @@ async def handle_percentage_command(_, message: Message):
     text = TEMPLATES[command].format(mention=mention, percent=percent)
     media_url = MEDIA[command]
 
-    await app.send_document(
+    await rich_call(app.send_document,
         message.chat.id,
         media_url,
         caption=text,

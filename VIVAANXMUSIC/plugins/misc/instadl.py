@@ -15,6 +15,7 @@ from VIVAANXMUSIC.utils.socialdown import (
     download_bundle_files,
     get_social_bundle,
 )
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 URL_PATTERN = re.compile(r"https?://\S+", re.IGNORECASE)
 
@@ -84,7 +85,7 @@ async def _send_bundle_text(message: Message, bundle: SocialDownloadBundle, plat
         raise SocialDownloadError(f"No readable {platform} post text was found.")
 
     for chunk in _chunk_text(export_text):
-        await message.reply_text(chunk, disable_web_page_preview=True)
+        await rich_call(message.reply_text, chunk, disable_web_page_preview=True)
 
 
 def _prepare_media_caption(
@@ -232,7 +233,7 @@ async def social_download(_, message: Message):
 
         if overflow_text:
             for chunk in _chunk_text(overflow_text):
-                await message.reply_text(chunk, disable_web_page_preview=True)
+                await rich_call(message.reply_text, chunk, disable_web_page_preview=True)
 
         await status.delete()
     except SecurityError as exc:

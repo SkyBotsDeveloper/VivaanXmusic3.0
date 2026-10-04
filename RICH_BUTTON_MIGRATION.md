@@ -1,158 +1,249 @@
-# Rich button migration audit
+# Complete Rich button migration audit
 
-Baseline: `6906eb00e90872b31edc493942233dafe020922d` on `main`. The working tree was clean before editing.
+Baseline: `880def7` on `main`. The working tree was clean when this task began.
+This supersedes the previous guarded migration and its intentionally inline paths.
 
-## Delivery coverage
+## Runtime result
 
-Count delivery/update call sites, not unique runtime messages or button instances:
+| Interface | Native Rich delivery |
+| --- | --- |
+| Player cards, controls and timer updates | YES |
+| Help pages, categories and pagination | YES |
+| Help Back/Home navigation | YES |
+| Welcome restoration from Help and Settings | Always Rich |
+| Settings, auth, playmode and vote menus | YES |
+| Language selection and restored menu | YES |
+| Queue and Back to player | YES |
+| Song/download selections and Back | YES |
+| Stats and Back | YES |
+| Admin, VC and confirmation controls | YES |
+| Media cards and other tool keyboards | YES |
+| Inline search result button | YES |
 
-- **172 existing inline delivery/update sites**: 169 calls with `reply_markup=` plus three positional font markup updates.
-- **85 sites routed through native Rich delivery when compatible**: 78 direct calls and seven callers of the existing safe callback helpers.
-- **87 intentionally retained inline sites**: 84 incompatible media/inline-query/markup-only workflow sites and three inactive `/start` restoration branches.
-- The four already-Rich `/start` delivery paths now reuse the shared converter; these are outside the 172 inline-site count.
-- **94 original `InlineKeyboardMarkup` constructor locations** remain as layout/action descriptors for the shared converter or the documented inline workflows. Their continued presence is intentional, not a missed migration.
+**Remaining old InlineKeyboardMarkup runtime delivery locations: none.**
+No normal-chat flow is exempted for media, markup-only edits or navigation.
+`InlineKeyboardMarkup` and `InlineKeyboardButton` remain as local keyboard
+*descriptors*, preserving the existing builders and their conditional visibility.
+The descriptors are converted before delivery; the native send/edit requests
+contain Rich blocks and no normal reply markup.
 
-## Shared implementation
+## Architecture and compatibility
 
-`VIVAANXMUSIC/utils/rich_buttons.py` provides `keyboard_html`, `text_html` and `rich_call`.
+Kurigram is upgraded from **2.2.24 to stable 2.2.26**, verified against PyPI's
+release metadata and official wheel. No other dependency is added or upgraded.
+The tested environment also imports the pinned PyTgCalls 2.3.3 successfully.
 
-Kurigram is unchanged at **2.2.24**. That version exposes `InputRichMessage(html=...)`, `send_rich_message`, and native `edit_message_text(rich_message=...)`, but not the newer `InputRichBlockButtons`/`RichMessageButton` classes. No new dependencies, forks, HTTP Bot API calls, global client patches or UI state caches were added.
+`utils/rich_buttons.py` now constructs `InputRichMessage(blocks=...)`, one
+`InputRichBlockButtons` per original row, and native `RichMessageButton` actions.
+Existing styles are copied directly: blue `primary`, green `success`, red `danger`,
+and default where the original descriptor has no color. The 1-2-1 welcome,
+three-column Help/Fonts rows, and five-column player controls stay intact.
+`align=None` omits the left/center/right alignment flags so rows use full-width
+columns. Telegram clients control final pixel dimensions and shape; no label
+padding or unsupported width/height fields are used.
 
-Each original row becomes one `<tg-button-row>` with the same ordered buttons. Alignment is omitted for full-width equal columns, including single-button rows and the 1-2-1 `/start` keyboard. Rows are never regrouped. Existing primary/success/danger styles are copied; default stays default. Labels, callback data (including compatible UTF-8 bytes), URLs, profile/add-group links and conditions come from the unchanged builders.
+Native photo/video/animation/document/audio/voice-note blocks accept original
+URLs, uploads and file IDs. Parsed text/entities become native text blocks;
+media captions are rendered as text alongside the media. Native media upload
+and MTProto serialization are handled by Kurigram, with no custom HTTP layer.
 
-Rich HTML supports URL, callback, WebApp, same-bot login, copy-text and switch-inline actions. Payment/game/password-protected actions, alternate login bots, binary callback data, custom icon metadata or a row outside 1-8 buttons keep the entire keyboard inline. The current repository builders do not use the newer chosen-chat or disabled fields, but their supported Rich HTML actions are handled if present.
+Markup-only changes rebuild the received body/media with replacement button
+rows and edit the **same message ID** using `edit_message_text(rich_message=...)`.
+Text/caption edits preserve the current media. Media edits replace the media
+and caption. Updates with no new keyboard remove the buttons as before.
+Incoming Rich blocks are rehydrated to input blocks, so callbacks do not require
+a process-local cache. Sparse send responses are fetched once to pin uploaded
+media to Telegram file IDs before temporary thumbnails can be deleted. A
+per-message snapshot handles sparse edit/text responses; there is no UI database.
 
-Text is first parsed using the original Kurigram parse mode/entities, then emitted as escaped Rich HTML. Mentions, emoji UTF-16 offsets, nested emphasis, spoilers, inline code, preformatted blocks, blockquotes and line breaks are preserved. Entity objects are not mutated. `/start` retains its original restoration flag and media URLs.
+Help and private Settings Back/Home call `restore_welcome` with the existing
+welcome video selection, caption and `private_panel` buttons. The old reachable
+/start inline fallback is removed. Fonts reads Rich text/button descriptors;
+song video downloads read thumbnail dimensions from the Rich photo block.
+Those are presentation compatibility changes, not callback or state changes.
+The current `/song` command directly downloads audio and has no keyboard;
+its legacy format-selection/Back callbacks are retained and migrated without
+adding a new command entry point. Their tests start from an existing card.
 
-`rich_call` preserves reply/thread/topic/business/notification/protection parameters. It sends via native Kurigram or edits the same message ID. Media/caption edits, inline-message-ID callbacks, unsupported formatting/options and incompatible keyboards call the original method before any RPC. RPC failures propagate through existing handlers without a second send.
+2.2.26 removed deprecated Message shortcut arguments. The shared helper adapts
+existing `quote`, `reply_to_message_id` and `disable_web_page_preview` calls,
+including plain-text paths affected by the upgrade. Reply IDs, topics and preview
+settings are preserved. No handlers, permission checks, DB operations or
+playback operations were renamed or reordered. AST comparison after removing
+the new renderer wrappers proves the other changed call sites retain their
+original arguments, handlers and conditions.
 
-## Intentionally inline interactions
+There is **no silent inline fallback**. Unsupported actions or send options raise
+an explicit error. Telegram Rich rows have a hard limit of 1-8 buttons; current
+builders fit that limit. Payments, games and password-protected callbacks are not
+native Rich button actions and are rejected, but no current repository keyboard
+uses them. Stable Kurigram's Rich send omits scheduling/repeat/TTL/business send
+options; none of the current keyboard delivery sites requests these options.
+These are helper guards, not remaining runtime inline exceptions.
 
-- Standard uploads, file IDs, caption fields, animation/document delivery and media edits remain unchanged. Converting them would change the returned Message media/caption interface; 2.2.24 lacks Rich media bindings for those payloads.
-- Markup-only edits cannot replace embedded Rich button blocks. Fonts also reads message.reply_markup. Keeping each of these workflows inline avoids new UI state/caches or changes to callback logic.
-- Help, stats, ping, queue, song/download and player cards preserve their standard media and caption-edit lifecycle.
-- Settings, language, playmode, fonts and member export preserve their markup-only lifecycle.
-- Inline-query photo results keep their existing result type and keyboard.
-- `/start`'s three legacy send branches remain available behind `START_RICH_BUTTONS = False`; the flag stays enabled for Rich output.
+## Inline query audit
 
-Runtime limits also retain inline delivery for scheduled/repeated text sends or other options absent from `send_rich_message`, explicit enabled/custom link-preview options, URL-bearing bodies with automatic previews enabled, and media targets. Rich content cannot retain a classic automatic webpage card, so those bodies use the original method; button URLs still convert unchanged. Telegram clients control button height, padding, corners, colors and final RTL rendering; no unsupported sizing or whitespace tricks were introduced.
+`plugins/bot/inline.py` still returns the original photo result metadata, but
+its outgoing content is `InputRichMessageContent` with native Rich HTML media
+and button rows. The serialized result contains `InputBotInlineMessageRichMessage`
+and no normal reply markup. Telegram officially supports Rich input message
+content in inline results. The command-only articles in `utils/inlinequery.py`
+have no buttons and remain unchanged. No inline-query keyboard exception remains.
 
 ## Validation
 
-- Syntax compilation of all 200 repository Python sources and validation of every new helper import/symbol in 35 production files.
-- AST comparison against the baseline: unwrapping `rich_call` and removing its imports restores the original AST in all 34 wrapped files. Callback handlers, arguments, literals, URLs, data, permission checks and conditional row construction are identical. `/start` is checked separately for unchanged command/callback bodies.
-- Offline tests cover layout sizes 1/2/3/8 and 1-2-1, escaping, semantic styles, callback bytes, URLs, profile/add-group links, WebApp/login/copy/switch actions and unsupported-action fallbacks.
-- Builder/visibility checks and text round trips cover every supported language: `ar`, `en`, `hi`, `ru`, `tr`, including English fallback labels. Existing locale files remain unchanged.
-- Native Kurigram/MTProto send/edit serialization with a recording client verifies message IDs, reply/topic/business metadata, actions, flags, fallback behavior and no duplicate RPC on failure.
-- `python -X utf8 -m unittest discover -s tests -v`: **53 tests passed** (39 existing plus 14 migration tests).
-- No live Telegram clicks or pixel/rendering verification were performed; Telegram server/client acceptance remains a deployment smoke test.
+- Full repository unittest discovery: **68 tests passed** on Kurigram 2.2.26.
+- Full Python compilation: **201 files passed**, including both Rich test files.
+- Native Rich type/helper imports and PyTgCalls compatibility imports passed.
+- Native MTProto send/edit, media upload and received-block parsing exercised
+  offline; callbacks and URLs checked against original keyboard descriptors.
+- All five locales: Arabic, English, Hindi, Russian and Turkish, including every
+  locale text's entity round-trip and native text serialization.
+- Original 1-, 2-, 3-, 5- and 8-button rows and multi-row layouts preserved;
+  full-width flags and primary/success/danger style serialization checked.
+- Photo, video, animation, document, audio and voice-note construction/re-edit;
+  local thumbnail cleanup and received file-ID reuse checked.
+- Actual handler bodies tested through Start/Help/category/Back/next/previous/Home,
+  Settings/playmode change/Back/auth toggle, Language/select/Back, Song/formats/Back,
+  Player/card/pause/resume/timer/Queue/Back, Stats/details/Back and Fonts/page/style/Back.
+  Services and RPC responses are offline doubles; handler/render code is real.
+- Repo-wide AST audit finds zero direct old keyboard send/update calls. Named
+  safe callback delegates all call the shared renderer. Positional Fonts keyboard
+  updates are included. Existing builders are unchanged.
+- `git diff --check` and explicit changed-file review performed before commit.
 
-## Complete delivery-site classification
+These checks establish API serialization and navigation behavior, not Telegram
+client appearance or live playback. Run [the deployment smoke checklist](RICH_UI_SMOKE_TEST.md)
+on Telegram after deployment; no live smoke test is claimed here.
 
-Line numbers below refer to the baseline commit above. `Rich` includes guarded delivery and safe-helper callers; `Inline` includes documented compatibility and restoration paths. This accounts for every existing delivery/update site.
+## Native keyboard delivery/update inventory
 
-| File | Rich sites (baseline lines) | Inline sites (baseline lines) | Reason for inline sites |
-| --- | --- | --- | --- |
-| `VIVAANXMUSIC/core/call.py` | - | 1518, 1539, 1557 | Standard media/inline-query/markup-only interaction retained. |
-| `VIVAANXMUSIC/platforms/Telegram.py` | 120 | - | - |
-| `VIVAANXMUSIC/plugins/Kishu/figlet.py` | 30, 42 | - | - |
-| `VIVAANXMUSIC/plugins/Kishu/fonts.py` | - | 114, 125, 138, 140, 160 | Fonts reads message.reply_markup and paginates with markup-only edits. |
-| `VIVAANXMUSIC/plugins/Kishu/ip.py` | 237 | - | - |
-| `VIVAANXMUSIC/plugins/Kishu/password.py` | 37 | - | - |
-| `VIVAANXMUSIC/plugins/Kishu/wishcute.py` | - | 47, 63 | Standard media/inline-query/markup-only interaction retained. |
-| `VIVAANXMUSIC/plugins/Manager/del_msg.py` | 79 | - | - |
-| `VIVAANXMUSIC/plugins/Manager/grouphandler.py` | 40, 62 | - | - |
-| `VIVAANXMUSIC/plugins/Manager/info.py` | 78 | - | - |
-| `VIVAANXMUSIC/plugins/Manager/language.py` | - | 50, 53, 65, 68, 89, 92 | Language/settings share markup-only update callbacks. |
-| `VIVAANXMUSIC/plugins/Manager/welcome.py` | - | 128 | Standard media/inline-query/markup-only interaction retained. |
-| `VIVAANXMUSIC/plugins/Manager/zombie.py` | 104 | - | - |
-| `VIVAANXMUSIC/plugins/admins/auth.py` | 89 | - | - |
-| `VIVAANXMUSIC/plugins/admins/autodelete.py` | 23, 31, 39, 44 | - | - |
-| `VIVAANXMUSIC/plugins/admins/autoplay.py` | 38, 53, 60, 65 | - | - |
-| `VIVAANXMUSIC/plugins/admins/callback.py` | 55, 62, 65, 179, 187, 193, 261, 270, 307, 334, 390, 407, 457 | 126, 399, 423, 433, 548 | Standard media/inline-query/markup-only interaction retained. |
-| `VIVAANXMUSIC/plugins/admins/loop.py` | 27, 35, 41 | - | - |
-| `VIVAANXMUSIC/plugins/admins/pause.py` | 19 | - | - |
-| `VIVAANXMUSIC/plugins/admins/resume.py` | 19 | - | - |
-| `VIVAANXMUSIC/plugins/admins/seek.py` | 36, 43, 67, 72 | - | - |
-| `VIVAANXMUSIC/plugins/admins/shuffle.py` | 24, 28, 31 | - | - |
-| `VIVAANXMUSIC/plugins/admins/skip.py` | 48, 75, 87 | 199, 223, 237 | Standard media/inline-query/markup-only interaction retained. |
-| `VIVAANXMUSIC/plugins/admins/speed.py` | 33, 106, 109 | - | - |
-| `VIVAANXMUSIC/plugins/admins/stop.py` | 21 | - | - |
-| `VIVAANXMUSIC/plugins/admins/totalmembers.py` | - | 32, 46 | Export removes only the keyboard before collecting members. |
-| `VIVAANXMUSIC/plugins/admins/vcnotify.py` | 24, 37, 47, 52 | - | - |
-| `VIVAANXMUSIC/plugins/admins/voiceplay.py` | 64 | - | - |
-| `VIVAANXMUSIC/plugins/bot/help.py` | - | 39, 43, 54, 72, 83, 96, 109, 127, 137, 147, 158 | Help pages/back navigation retain standard media/caption behavior. |
-| `VIVAANXMUSIC/plugins/bot/inline.py` | - | 57 | Standard media/inline-query/markup-only interaction retained. |
-| `VIVAANXMUSIC/plugins/bot/settings.py` | - | 40, 55, 73, 79, 146, 177, 237, 282, 298, 321 | Settings changes buttons without replacing message content. |
-| `VIVAANXMUSIC/plugins/bot/start.py` | - | 55, 58, 61, 306 | Existing /start fallback retained; active /start already uses Rich HTML. Standard media/inline-query/markup-only interaction retained. |
-| `VIVAANXMUSIC/plugins/misc/tts.py` | 147, 215, 230, 249, 260, 275 | - | - |
-| `VIVAANXMUSIC/plugins/misc/urlshortner.py` | 62, 85 | - | - |
-| `VIVAANXMUSIC/plugins/play/play.py` | 451, 499, 698 | 559, 591, 610, 888 | Standard media/inline-query/markup-only interaction retained. |
-| `VIVAANXMUSIC/plugins/play/playmode.py` | - | 32 | Playmode shares settings markup-only update callbacks. |
-| `VIVAANXMUSIC/plugins/sudo/sudoers.py` | - | 56, 91, 99 | Standard media/inline-query/markup-only interaction retained. |
-| `VIVAANXMUSIC/plugins/tools/active.py` | 64 | - | - |
-| `VIVAANXMUSIC/plugins/tools/bugs.py` | 57, 70 | - | - |
-| `VIVAANXMUSIC/plugins/tools/chatlog.py` | - | 44, 107 | Standard media/inline-query/markup-only interaction retained. |
-| `VIVAANXMUSIC/plugins/tools/kang.py` | 222 | - | - |
-| `VIVAANXMUSIC/plugins/tools/lyrics.py` | 320, 418 | - | - |
-| `VIVAANXMUSIC/plugins/tools/masti.py` | - | 56 | Standard media/inline-query/markup-only interaction retained. |
-| `VIVAANXMUSIC/plugins/tools/ping.py` | - | 25 | Ping edits a standard video caption through edit_text. |
-| `VIVAANXMUSIC/plugins/tools/queue.py` | - | 100, 117, 176, 181, 184, 242, 259 | Queue cards preserve media and update timer markup only. |
-| `VIVAANXMUSIC/plugins/tools/song.py` | - | 487, 548 | Download choices use markup-only updates and standard media. |
-| `VIVAANXMUSIC/plugins/tools/stats.py` | - | 28, 39, 70, 72, 227, 229 | Stats switches standard videos/media and captions. |
-| `VIVAANXMUSIC/plugins/tools/sticker.py` | 106 | - | - |
-| `VIVAANXMUSIC/plugins/tools/telegraph.py` | 36 | - | - |
-| `VIVAANXMUSIC/utils/decorators/admins.py` | 52, 104, 148 | - | - |
-| `VIVAANXMUSIC/utils/decorators/play.py` | 48, 134 | 79 | Standard media/inline-query/markup-only interaction retained. |
-| `VIVAANXMUSIC/utils/stream/cards.py` | - | 33, 41 | Standard media/inline-query/markup-only interaction retained. |
-| `VIVAANXMUSIC/utils/stream/stream.py` | 240, 323, 380, 436, 504 | 212, 346, 405, 530 | Standard media/inline-query/markup-only interaction retained. |
+Line numbers below refer to this implementation. They include text/media sends,
+caption/media edits, markup-only rebuilds and positional keyboard updates. Existing
+safe callback helpers delegate to these native routes; `/start` helper and welcome
+restoration also build their native views through the shared renderer.
 
-## Changed files
+| File | Native delivery/update lines |
+| --- | --- |
+| `VIVAANXMUSIC/core/call.py` | 1519, 1540, 1558 |
+| `VIVAANXMUSIC/platforms/Telegram.py` | 121 |
+| `VIVAANXMUSIC/plugins/Kishu/figlet.py` | 31, 43 |
+| `VIVAANXMUSIC/plugins/Kishu/fonts.py` | 115, 126, 139, 141, 161 |
+| `VIVAANXMUSIC/plugins/Kishu/ip.py` | 238 |
+| `VIVAANXMUSIC/plugins/Kishu/password.py` | 38 |
+| `VIVAANXMUSIC/plugins/Kishu/wishcute.py` | 48, 64 |
+| `VIVAANXMUSIC/plugins/Manager/del_msg.py` | 80 |
+| `VIVAANXMUSIC/plugins/Manager/grouphandler.py` | 41, 63 |
+| `VIVAANXMUSIC/plugins/Manager/info.py` | 79 |
+| `VIVAANXMUSIC/plugins/Manager/language.py` | 51, 54, 66, 69, 90, 93 |
+| `VIVAANXMUSIC/plugins/Manager/welcome.py` | 129 |
+| `VIVAANXMUSIC/plugins/Manager/zombie.py` | 105 |
+| `VIVAANXMUSIC/plugins/admins/auth.py` | 90 |
+| `VIVAANXMUSIC/plugins/admins/autodelete.py` | 24, 32, 40, 45 |
+| `VIVAANXMUSIC/plugins/admins/autoplay.py` | 39, 54, 61, 66 |
+| `VIVAANXMUSIC/plugins/admins/callback.py` | 56, 63, 66, 127, 180, 188, 308, 400, 424, 434, 549 |
+| `VIVAANXMUSIC/plugins/admins/loop.py` | 28, 36, 42 |
+| `VIVAANXMUSIC/plugins/admins/pause.py` | 20 |
+| `VIVAANXMUSIC/plugins/admins/resume.py` | 20 |
+| `VIVAANXMUSIC/plugins/admins/seek.py` | 37, 44, 68, 73 |
+| `VIVAANXMUSIC/plugins/admins/shuffle.py` | 25, 29, 32 |
+| `VIVAANXMUSIC/plugins/admins/skip.py` | 49, 76, 88, 200, 224, 238 |
+| `VIVAANXMUSIC/plugins/admins/speed.py` | 34, 107, 110 |
+| `VIVAANXMUSIC/plugins/admins/stop.py` | 22 |
+| `VIVAANXMUSIC/plugins/admins/totalmembers.py` | 33, 47 |
+| `VIVAANXMUSIC/plugins/admins/vcnotify.py` | 25, 38, 48, 53 |
+| `VIVAANXMUSIC/plugins/admins/voiceplay.py` | 65 |
+| `VIVAANXMUSIC/plugins/bot/help.py` | 41, 45, 56, 74, 85, 98, 111, 129, 139, 149 |
+| `VIVAANXMUSIC/plugins/bot/settings.py` | 43, 58, 82, 149, 180, 240, 285, 301, 324 |
+| `VIVAANXMUSIC/plugins/bot/start.py` | 45, 46, 47, 226 |
+| `VIVAANXMUSIC/plugins/misc/tts.py` | 148, 216, 231, 250, 261, 276 |
+| `VIVAANXMUSIC/plugins/misc/urlshortner.py` | 63, 86 |
+| `VIVAANXMUSIC/plugins/play/play.py` | 452, 500, 560, 592, 611, 699, 889 |
+| `VIVAANXMUSIC/plugins/play/playmode.py` | 33 |
+| `VIVAANXMUSIC/plugins/sudo/sudoers.py` | 57, 92, 100 |
+| `VIVAANXMUSIC/plugins/tools/active.py` | 65 |
+| `VIVAANXMUSIC/plugins/tools/bugs.py` | 58, 71 |
+| `VIVAANXMUSIC/plugins/tools/chatlog.py` | 45 |
+| `VIVAANXMUSIC/plugins/tools/kang.py` | 223 |
+| `VIVAANXMUSIC/plugins/tools/lyrics.py` | 321, 419 |
+| `VIVAANXMUSIC/plugins/tools/masti.py` | 57 |
+| `VIVAANXMUSIC/plugins/tools/ping.py` | 26 |
+| `VIVAANXMUSIC/plugins/tools/queue.py` | 101, 118, 177, 182, 185, 243, 260 |
+| `VIVAANXMUSIC/plugins/tools/song.py` | 488, 549 |
+| `VIVAANXMUSIC/plugins/tools/stats.py` | 29, 40, 71, 73, 228, 230 |
+| `VIVAANXMUSIC/plugins/tools/sticker.py` | 107 |
+| `VIVAANXMUSIC/plugins/tools/telegraph.py` | 37 |
+| `VIVAANXMUSIC/utils/decorators/admins.py` | 53, 105, 149 |
+| `VIVAANXMUSIC/utils/decorators/play.py` | 49, 80, 135 |
+| `VIVAANXMUSIC/utils/stream/cards.py` | 34, 42 |
+| `VIVAANXMUSIC/utils/stream/stream.py` | 213, 241, 324, 347, 381, 406, 437, 505, 531 |
 
-Production UI changes (35 existing files), one new helper, one test module and this audit:
+## Changed-file manifest
+
+Every file below belongs to the Rich migration, native-version shortcut
+compatibility, its tests, or its audit/smoke documentation.
 
 - `RICH_BUTTON_MIGRATION.md`
+- `RICH_UI_SMOKE_TEST.md`
+- `VIVAANXMUSIC/core/call.py`
 - `VIVAANXMUSIC/platforms/Telegram.py`
+- `VIVAANXMUSIC/plugins/Kishu/dicegame.py`
 - `VIVAANXMUSIC/plugins/Kishu/figlet.py`
+- `VIVAANXMUSIC/plugins/Kishu/fonts.py`
+- `VIVAANXMUSIC/plugins/Kishu/groupdata.py`
 - `VIVAANXMUSIC/plugins/Kishu/ip.py`
 - `VIVAANXMUSIC/plugins/Kishu/password.py`
+- `VIVAANXMUSIC/plugins/Kishu/wishcute.py`
 - `VIVAANXMUSIC/plugins/Manager/del_msg.py`
-- `VIVAANXMUSIC/plugins/Manager/grouphandler.py`
-- `VIVAANXMUSIC/plugins/Manager/info.py`
+- `VIVAANXMUSIC/plugins/Manager/id.py`
+- `VIVAANXMUSIC/plugins/Manager/language.py`
+- `VIVAANXMUSIC/plugins/Manager/welcome.py`
 - `VIVAANXMUSIC/plugins/Manager/zombie.py`
-- `VIVAANXMUSIC/plugins/admins/auth.py`
-- `VIVAANXMUSIC/plugins/admins/autodelete.py`
-- `VIVAANXMUSIC/plugins/admins/autoplay.py`
 - `VIVAANXMUSIC/plugins/admins/callback.py`
-- `VIVAANXMUSIC/plugins/admins/loop.py`
-- `VIVAANXMUSIC/plugins/admins/pause.py`
-- `VIVAANXMUSIC/plugins/admins/resume.py`
-- `VIVAANXMUSIC/plugins/admins/seek.py`
-- `VIVAANXMUSIC/plugins/admins/shuffle.py`
 - `VIVAANXMUSIC/plugins/admins/skip.py`
 - `VIVAANXMUSIC/plugins/admins/speed.py`
-- `VIVAANXMUSIC/plugins/admins/stop.py`
-- `VIVAANXMUSIC/plugins/admins/vcnotify.py`
+- `VIVAANXMUSIC/plugins/admins/totalmembers.py`
 - `VIVAANXMUSIC/plugins/admins/voiceplay.py`
+- `VIVAANXMUSIC/plugins/bot/help.py`
+- `VIVAANXMUSIC/plugins/bot/inline.py`
+- `VIVAANXMUSIC/plugins/bot/settings.py`
 - `VIVAANXMUSIC/plugins/bot/start.py`
-- `VIVAANXMUSIC/plugins/misc/tts.py`
-- `VIVAANXMUSIC/plugins/misc/urlshortner.py`
+- `VIVAANXMUSIC/plugins/misc/instadl.py`
+- `VIVAANXMUSIC/plugins/misc/movie.py`
+- `VIVAANXMUSIC/plugins/misc/news.py`
 - `VIVAANXMUSIC/plugins/play/play.py`
+- `VIVAANXMUSIC/plugins/play/playmode.py`
+- `VIVAANXMUSIC/plugins/sudo/restart.py`
+- `VIVAANXMUSIC/plugins/sudo/sudoers.py`
 - `VIVAANXMUSIC/plugins/tools/active.py`
-- `VIVAANXMUSIC/plugins/tools/bugs.py`
+- `VIVAANXMUSIC/plugins/tools/ai.py`
+- `VIVAANXMUSIC/plugins/tools/chatlog.py`
+- `VIVAANXMUSIC/plugins/tools/gpt.py`
 - `VIVAANXMUSIC/plugins/tools/kang.py`
 - `VIVAANXMUSIC/plugins/tools/lyrics.py`
+- `VIVAANXMUSIC/plugins/tools/masti.py`
+- `VIVAANXMUSIC/plugins/tools/ping.py`
+- `VIVAANXMUSIC/plugins/tools/queue.py`
+- `VIVAANXMUSIC/plugins/tools/song.py`
+- `VIVAANXMUSIC/plugins/tools/stats.py`
 - `VIVAANXMUSIC/plugins/tools/sticker.py`
 - `VIVAANXMUSIC/plugins/tools/telegraph.py`
+- `VIVAANXMUSIC/plugins/tools/videoedit.py`
 - `VIVAANXMUSIC/utils/decorators/admins.py`
+- `VIVAANXMUSIC/utils/decorators/language.py`
 - `VIVAANXMUSIC/utils/decorators/play.py`
 - `VIVAANXMUSIC/utils/rich_buttons.py`
+- `VIVAANXMUSIC/utils/stream/cards.py`
 - `VIVAANXMUSIC/utils/stream/stream.py`
+- `requirements.txt`
 - `tests/test_rich_buttons.py`
+- `tests/test_rich_navigation.py`
 
-## Official API references
+## Sources inspected
 
-- [Telegram Rich HTML and button actions](https://core.telegram.org/bots/api#rich-message-formatting-options)
-- [Telegram Rich button row limit and alignment](https://core.telegram.org/bots/api#inputrichblockbuttons)
-- [TDLib full-width button row alignment semantics](https://github.com/tdlib/td/blob/master/td/generate/scheme/td_api.tl)
-- [Pinned Kurigram Rich HTML input](https://github.com/KurimuzonAkuma/kurigram/blob/v2.2.24/pyrogram/types/input_content/input_rich_message.py)
+- [Telegram Rich formatting and native button/media blocks](https://core.telegram.org/bots/api#rich-message-formatting-options)
+- [Telegram Rich button row limits/alignment](https://core.telegram.org/bots/api#inputrichblockbuttons)
+- [Official TDLib button row alignment schema](https://github.com/tdlib/td/blob/master/td/generate/scheme/td_api.tl)
+- [Stable Kurigram 2.2.26 release](https://pypi.org/project/Kurigram/2.2.26/)
+- Installed official 2.2.26 wheel: native Rich input/output types, action/style
+  serialization, upload helpers, send/edit/inline methods and Message shortcuts.

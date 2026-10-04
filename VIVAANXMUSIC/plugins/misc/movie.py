@@ -6,6 +6,7 @@ from pyrogram.enums import ParseMode
 from pyrogram.types import Message
 
 from VIVAANXMUSIC import app
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 
 TMDB_API_KEY = "23c3b139c6d59ebb608fe6d5b974d888"
@@ -86,6 +87,6 @@ async def movie_command(client: Client, message: Message):
 
     try:
         info = await get_movie_info(movie_name)
-        await status.edit_text(info, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+        await rich_call(status.edit_text, info, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
     except httpx.HTTPError:
         await status.edit_text("Failed to fetch movie information.")

@@ -184,7 +184,7 @@ async def fetch_proxycheck(client: httpx.AsyncClient, ip: str) -> tuple[dict | N
 @app.on_message(filters.command(["ip"]))
 async def ip_info_and_score(_, message):
     if len(message.command) != 2:
-        await message.reply_text(
+        await rich_call(message.reply_text,
             "Please provide an IP address.\n"
             "Example: <code>/ip 8.8.8.8</code>",
             disable_web_page_preview=True,
@@ -197,14 +197,14 @@ async def ip_info_and_score(_, message):
     try:
         ip_obj = ipaddress.ip_address(ip_raw)
         if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_reserved or ip_obj.is_multicast:
-            await message.reply_text(
+            await rich_call(message.reply_text,
                 "That looks like a <b>non-routable</b> or <b>private</b> address. "
                 "Please provide a public IP.",
                 disable_web_page_preview=True,
             )
             return
     except ValueError:
-        await message.reply_text(
+        await rich_call(message.reply_text,
             "Invalid IP format. Please provide a valid IPv4 or IPv6 address.\n"
             "Example: <code>/ip 1.1.1.1</code>",
             disable_web_page_preview=True,
@@ -229,7 +229,7 @@ async def ip_info_and_score(_, message):
         score = proxy_score
 
     if not ipinfo and score is None:
-        await wait_msg.edit_text(
+        await rich_call(wait_msg.edit_text,
             "Unable to fetch details for the provided IP at the moment. Please try again later."
         )
         return

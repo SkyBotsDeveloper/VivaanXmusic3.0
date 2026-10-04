@@ -112,7 +112,7 @@ async def play_command(
                 "File size limit exceeded",
                 stream_label="Telegram [Audio]",
             )
-            return await mystic.edit_text(_["play_5"])
+            return await rich_call(mystic.edit_text, _["play_5"])
 
         duration_min = seconds_to_min(audio_telegram.duration)
         if audio_telegram.duration > config.DURATION_LIMIT:
@@ -121,7 +121,7 @@ async def play_command(
                 "Duration limit exceeded",
                 stream_label="Telegram [Audio]",
             )
-            return await mystic.edit_text(
+            return await rich_call(mystic.edit_text,
                 _["play_6"].format(config.DURATION_LIMIT_MIN, app.mention)
             )
 
@@ -159,7 +159,7 @@ async def play_command(
                     else _["general_2"].format(type(e).__name__)
                 )
                 await log_play_failure("Telegram Audio", err, stream_label="Telegram [Audio]")
-                return await mystic.edit_text(err)
+                return await rich_call(mystic.edit_text, err)
 
             caption_query = message.reply_to_message.caption or "—"
             await play_logs(message, streamtype="Telegram [Audio]", query=caption_query)
@@ -182,7 +182,7 @@ async def play_command(
                         f"Unsupported file extension: {ext}",
                         stream_label="Telegram [Video]",
                     )
-                    return await mystic.edit_text(
+                    return await rich_call(mystic.edit_text,
                         _["play_7"].format(" | ".join(formats))
                     )
             except Exception:
@@ -191,7 +191,7 @@ async def play_command(
                     "Could not validate file extension",
                     stream_label="Telegram [Video]",
                 )
-                return await mystic.edit_text(_["play_7"].format(" | ".join(formats)))
+                return await rich_call(mystic.edit_text, _["play_7"].format(" | ".join(formats)))
 
         if video_telegram.file_size > config.TG_VIDEO_FILESIZE_LIMIT:
             await log_play_failure(
@@ -199,7 +199,7 @@ async def play_command(
                 "File size limit exceeded",
                 stream_label="Telegram [Video]",
             )
-            return await mystic.edit_text(_["play_8"])
+            return await rich_call(mystic.edit_text, _["play_8"])
 
         file_path = await Telegram.get_filepath(video=video_telegram)
         downloaded = await Telegram.download(_, message, mystic, file_path)
@@ -236,7 +236,7 @@ async def play_command(
                     else _["general_2"].format(type(e).__name__)
                 )
                 await log_play_failure("Telegram Video", err, stream_label="Telegram [Video]")
-                return await mystic.edit_text(err)
+                return await rich_call(mystic.edit_text, err)
 
             caption_query = message.reply_to_message.caption or "—"
             await play_logs(message, streamtype="Telegram [Video]", query=caption_query)
@@ -246,7 +246,7 @@ async def play_command(
     if url:
         if not is_safe_media_url(url):
             await log_play_failure("Play URL", "Unsafe or invalid link rejected", query_text=url)
-            return await mystic.edit_text(
+            return await rich_call(mystic.edit_text,
                 "» Unsafe or invalid link rejected."
             )
         if await YouTube.exists(url):
@@ -257,7 +257,7 @@ async def play_command(
                     )
                 except Exception as e:
                     await log_play_failure("YouTube Playlist", e, query_text=url, stream_label="Youtube playlist")
-                    return await mystic.edit_text(_["play_3"])
+                    return await rich_call(mystic.edit_text, _["play_3"])
 
                 plist_type = "yt"
                 plist_id = (
@@ -273,7 +273,7 @@ async def play_command(
                     details, track_id = await YouTube.track(url)
                 except Exception as e:
                     await log_play_failure("YouTube Track", e, query_text=url, stream_label="Youtube Track")
-                    return await mystic.edit_text(_["play_3"])
+                    return await rich_call(mystic.edit_text, _["play_3"])
 
                 img = details["thumb"]
                 cap = _["play_10"].format(details["title"], details["duration_min"])
@@ -289,7 +289,7 @@ async def play_command(
                     details, track_id = await Spotify.track(url)
                 except Exception as e:
                     await log_play_failure("Spotify Track", e, query_text=url, stream_label="Spotify Track")
-                    return await mystic.edit_text(_["play_3"])
+                    return await rich_call(mystic.edit_text, _["play_3"])
 
                 img = details["thumb"]
                 cap = _["play_10"].format(details["title"], details["duration_min"])
@@ -300,12 +300,12 @@ async def play_command(
                 spotify = True
                 if not config.SPOTIFY_CLIENT_ID or not config.SPOTIFY_CLIENT_SECRET:
                     await log_play_failure("Spotify Playlist", "Spotify credentials missing", query_text=url, stream_label="Spotify playlist")
-                    return await mystic.edit_text(_["play_3"])
+                    return await rich_call(mystic.edit_text, _["play_3"])
                 try:
                     details, plist_id = await Spotify.playlist(url)
                 except Exception as e:
                     await log_play_failure("Spotify Playlist", e, query_text=url, stream_label="Spotify playlist")
-                    return await mystic.edit_text(_["play_3"])
+                    return await rich_call(mystic.edit_text, _["play_3"])
 
                 plist_type = "spplay"
                 img = config.SPOTIFY_PLAYLIST_IMG_URL
@@ -317,12 +317,12 @@ async def play_command(
                 spotify = True
                 if not config.SPOTIFY_CLIENT_ID or not config.SPOTIFY_CLIENT_SECRET:
                     await log_play_failure("Spotify Album", "Spotify credentials missing", query_text=url, stream_label="Spotify album")
-                    return await mystic.edit_text(_["play_3"])
+                    return await rich_call(mystic.edit_text, _["play_3"])
                 try:
                     details, plist_id = await Spotify.album(url)
                 except Exception as e:
                     await log_play_failure("Spotify Album", e, query_text=url, stream_label="Spotify album")
-                    return await mystic.edit_text(_["play_3"])
+                    return await rich_call(mystic.edit_text, _["play_3"])
 
                 plist_type = "spalbum"
                 img = config.SPOTIFY_ALBUM_IMG_URL
@@ -334,12 +334,12 @@ async def play_command(
                 spotify = True
                 if not config.SPOTIFY_CLIENT_ID or not config.SPOTIFY_CLIENT_SECRET:
                     await log_play_failure("Spotify Artist", "Spotify credentials missing", query_text=url, stream_label="Spotify artist")
-                    return await mystic.edit_text(_["play_3"])
+                    return await rich_call(mystic.edit_text, _["play_3"])
                 try:
                     details, plist_id = await Spotify.artist(url)
                 except Exception as e:
                     await log_play_failure("Spotify Artist", e, query_text=url, stream_label="Spotify artist")
-                    return await mystic.edit_text(_["play_3"])
+                    return await rich_call(mystic.edit_text, _["play_3"])
 
                 plist_type = "spartist"
                 img = config.SPOTIFY_ARTIST_IMG_URL
@@ -349,7 +349,7 @@ async def play_command(
 
             else:
                 await log_play_failure("Spotify URL", "Unsupported Spotify URL", query_text=url)
-                return await mystic.edit_text(_["play_15"])
+                return await rich_call(mystic.edit_text, _["play_15"])
 
         elif await Apple.valid(url):
             if "playlist" not in url:
@@ -357,7 +357,7 @@ async def play_command(
                     details, track_id = await Apple.track(url)
                 except Exception as e:
                     await log_play_failure("Apple Music", e, query_text=url, stream_label="Apple Music")
-                    return await mystic.edit_text(_["play_3"])
+                    return await rich_call(mystic.edit_text, _["play_3"])
 
                 img = details["thumb"]
                 cap = _["play_10"].format(details["title"], details["duration_min"])
@@ -370,7 +370,7 @@ async def play_command(
                     details, plist_id = await Apple.playlist(url)
                 except Exception as e:
                     await log_play_failure("Apple Music Playlist", e, query_text=url, stream_label="Apple Music playlist")
-                    return await mystic.edit_text(_["play_3"])
+                    return await rich_call(mystic.edit_text, _["play_3"])
 
                 plist_type = "apple"
                 img = url
@@ -380,14 +380,14 @@ async def play_command(
 
             else:
                 await log_play_failure("Apple Music", "Unsupported Apple Music URL", query_text=url)
-                return await mystic.edit_text(_["play_3"])
+                return await rich_call(mystic.edit_text, _["play_3"])
 
         elif await Resso.valid(url):
             try:
                 details, track_id = await Resso.track(url)
             except Exception as e:
                 await log_play_failure("Resso", e, query_text=url, stream_label="Resso")
-                return await mystic.edit_text(_["play_3"])
+                return await rich_call(mystic.edit_text, _["play_3"])
 
             img = details["thumb"]
             cap = _["play_10"].format(details["title"], details["duration_min"])
@@ -399,7 +399,7 @@ async def play_command(
                 details, track_id = await SoundCloud.track(url)
             except Exception as e:
                 await log_play_failure("SoundCloud", e, query_text=url, stream_label="Soundcloud")
-                return await mystic.edit_text(_["play_3"])
+                return await rich_call(mystic.edit_text, _["play_3"])
 
             img = details["thumb"]
             cap = _["play_10"].format(details["title"], details["duration_min"])
@@ -411,16 +411,16 @@ async def play_command(
                 await JARVIS.stream_call(url)
             except NoActiveGroupCall:
                 await log_play_failure("M3U8 or Index Link", "No active voice chat", query_text=url, stream_label="M3U8 or Index Link")
-                await mystic.edit_text(_["black_9"])
+                await rich_call(mystic.edit_text, _["black_9"])
                 return await app.send_message(
                     chat_id=config.LOGGER_ID,
                     text=_["play_17"],
                 )
             except Exception as e:
                 await log_play_failure("M3U8 or Index Link", e, query_text=url, stream_label="M3U8 or Index Link")
-                return await mystic.edit_text(_["general_2"].format(type(e).__name__))
+                return await rich_call(mystic.edit_text, _["general_2"].format(type(e).__name__))
 
-            await mystic.edit_text(_["str_2"])
+            await rich_call(mystic.edit_text, _["str_2"])
             try:
                 internal_type = "index"
                 await stream(
@@ -442,7 +442,7 @@ async def play_command(
                     else _["general_2"].format(type(e).__name__)
                 )
                 await log_play_failure("M3U8 or Index Link", err, query_text=url, stream_label="M3U8 or Index Link")
-                return await mystic.edit_text(err)
+                return await rich_call(mystic.edit_text, err)
 
             return await play_logs(message, streamtype="M3U8 or Index Link")
 
@@ -463,7 +463,7 @@ async def play_command(
             details, track_id = await YouTube.track(query)
         except Exception as e:
             await log_play_failure("YouTube Search", e, query_text=query, stream_label="Youtube Track")
-            return await mystic.edit_text(_["play_3"])
+            return await rich_call(mystic.edit_text, _["play_3"])
 
         internal_type = "youtube"
         log_label = "Youtube Track"
@@ -479,7 +479,7 @@ async def play_command(
                         query_text=details.get("title") if isinstance(details, dict) else None,
                         stream_label=log_label,
                     )
-                    return await mystic.edit_text(
+                    return await rich_call(mystic.edit_text,
                         _["play_6"].format(config.DURATION_LIMIT_MIN, app.mention)
                     )
             else:
@@ -534,7 +534,7 @@ async def play_command(
                 streamtype=f"{log_label} Failed",
                 source=source,
             )
-            return await mystic.edit_text(err)
+            return await rich_call(mystic.edit_text, err)
 
         await mystic.delete()
         source = None
@@ -557,7 +557,7 @@ async def play_command(
                 "f" if fplay else "d",
             )
             await mystic.delete()
-            await message.reply_photo(
+            await rich_call(message.reply_photo,
                 photo=(
                     details["thumb"]
                     if plist_type == "yt"
@@ -589,7 +589,7 @@ async def play_command(
                     "f" if fplay else "d",
                 )
                 await mystic.delete()
-                await message.reply_photo(
+                await rich_call(message.reply_photo,
                     photo=details["thumb"],
                     caption=_["play_10"].format(
                         details["title"].title(),
@@ -608,7 +608,7 @@ async def play_command(
                     "f" if fplay else "d",
                 )
                 await mystic.delete()
-                await message.reply_photo(
+                await rich_call(message.reply_photo,
                     photo=details["thumb"],
                     caption=_["play_10"].format(
                         details["title"],
@@ -676,7 +676,7 @@ async def play_music(client, CallbackQuery, _):
                     streamtype="Youtube Track",
                     user=CallbackQuery.from_user,
                 )
-                return await mystic.edit_text(
+                return await rich_call(mystic.edit_text,
                     _["play_6"].format(config.DURATION_LIMIT_MIN, app.mention)
                 )
         else:
@@ -886,7 +886,7 @@ async def slider_queries(client, CallbackQuery, _):
             ),
         )
 
-        await CallbackQuery.edit_message_media(
+        await rich_call(CallbackQuery.edit_message_media,
             media=med, reply_markup=InlineKeyboardMarkup(buttons)
         )
         await CallbackQuery.answer(_["playcb_2"])

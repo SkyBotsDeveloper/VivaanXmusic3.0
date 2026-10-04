@@ -63,6 +63,7 @@ from VIVAANXMUSIC.utils.stream.cards import schedule_stream_card
 from VIVAANXMUSIC.utils.stream.precache import schedule_youtube_precache_for_chat
 from VIVAANXMUSIC.utils.errors import capture_internal_err, send_large_error
 from VIVAANXMUSIC.utils.voiceplay_policy import should_prompt_after_track
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 autoend = {}
 counter = {}
@@ -1432,7 +1433,7 @@ class Call:
 
                 if not file_path:
                     try:
-                        await mystic.edit_text(_["call_6"], disable_web_page_preview=True)
+                        await rich_call(mystic.edit_text, _["call_6"], disable_web_page_preview=True)
                     except Exception:
                         pass
                     if await self._discard_unplayable_queue_head(
@@ -1457,7 +1458,7 @@ class Call:
                     )
                     if not fallback_path:
                         try:
-                            await mystic.edit_text(_["call_6"], disable_web_page_preview=True)
+                            await rich_call(mystic.edit_text, _["call_6"], disable_web_page_preview=True)
                         except Exception:
                             pass
                         if await self._discard_unplayable_queue_head(
@@ -1515,7 +1516,7 @@ class Call:
                 self._schedule_playback_watchdog(client, chat_id)
 
                 button = stream_markup(_, chat_id)
-                run = await app.send_photo(
+                run = await rich_call(app.send_photo,
                     chat_id=original_chat_id,
                     photo=config.STREAM_IMG_URL,
                     caption=_["stream_2"].format(user),
@@ -1536,7 +1537,7 @@ class Call:
 
                 if videoid == "telegram":
                     button = stream_markup(_, chat_id)
-                    run = await app.send_photo(
+                    run = await rich_call(app.send_photo,
                         chat_id=original_chat_id,
                         photo=(
                             config.TELEGRAM_AUDIO_URL
@@ -1554,7 +1555,7 @@ class Call:
 
                 elif videoid == "soundcloud":
                     button = stream_markup(_, chat_id)
-                    run = await app.send_photo(
+                    run = await rich_call(app.send_photo,
                         chat_id=original_chat_id,
                         photo=config.SOUNCLOUD_IMG_URL,
                         caption=_["stream_1"].format(

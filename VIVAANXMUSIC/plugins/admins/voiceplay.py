@@ -94,7 +94,7 @@ async def voiceplay_callback(_, callback: CallbackQuery, strings):
         await voiceplay_manager.stop_session(chat_id)
         await voiceplay_manager.leave_if_idle(chat_id)
         await callback.answer("Voice Play disabled.")
-        return await callback.message.edit_text(
+        return await rich_call(callback.message.edit_text,
             "⏹ <b>Voice Play disabled.</b> Normal music commands remain unchanged."
         )
 
@@ -105,7 +105,7 @@ async def voiceplay_callback(_, callback: CallbackQuery, strings):
     autoplay_was_enabled = await enable_voiceplay_exclusive(chat_id, choice)
     language_name = "Hindi / Hinglish" if choice == "hi" else "English"
     await callback.answer(f"Voice Play enabled in {language_name}.")
-    await callback.message.edit_text(
+    await rich_call(callback.message.edit_text,
         "✅ <b>Voice Play enabled</b>\n\n"
         f"Language: <b>{language_name}</b>\n"
         + (

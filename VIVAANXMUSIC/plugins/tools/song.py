@@ -28,6 +28,7 @@ from VIVAANXMUSIC.utils.decorators.language import language, languageCB
 from VIVAANXMUSIC.utils.errors import capture_err, capture_callback_err
 from VIVAANXMUSIC.utils.formatters import convert_bytes, time_to_seconds
 from VIVAANXMUSIC.utils.inline.song import song_markup
+from VIVAANXMUSIC.utils.rich_buttons import rich_call, rich_media
 
 SONG_COMMAND = ["song"]
 APPLE_SPOTIFY_COMMANDS = ["apple", "spotify"]
@@ -275,7 +276,7 @@ async def _handle_song_audio_request(message: Message, lang):
 
     query, is_url = await _get_song_query(message)
     if not query:
-        return await mystic.edit_text(lang["song_2"])
+        return await rich_call(mystic.edit_text, lang["song_2"])
 
     resolved_query = query
     if is_url and not await YouTube.exists(query):
@@ -284,7 +285,7 @@ async def _handle_song_audio_request(message: Message, lang):
         except Exception:
             resolved_query = None
         if not resolved_query or resolved_query == query:
-            return await mystic.edit_text(lang["song_5"])
+            return await rich_call(mystic.edit_text, lang["song_5"])
     elif not is_url:
         try:
             resolved_query = await _resolve_link_query(query)
@@ -294,16 +295,16 @@ async def _handle_song_audio_request(message: Message, lang):
     try:
         title, dur_min, dur_sec, _thumb, vidid = await YouTube.details(resolved_query)
     except Exception:
-        return await mystic.edit_text(lang["play_3"])
+        return await rich_call(mystic.edit_text, lang["play_3"])
 
     if not dur_min:
-        return await mystic.edit_text(lang["song_3"])
+        return await rich_call(mystic.edit_text, lang["song_3"])
     if int(dur_sec) > SONG_DOWNLOAD_DURATION_LIMIT:
-        return await mystic.edit_text(lang["play_4"].format(SONG_DOWNLOAD_DURATION, dur_min))
+        return await rich_call(mystic.edit_text, lang["play_4"].format(SONG_DOWNLOAD_DURATION, dur_min))
 
     file_path = None
     try:
-        await mystic.edit_text(lang["song_8"])
+        await rich_call(mystic.edit_text, lang["song_8"])
         file_path, cleanup_dir = await _download_song_audio(vidid, title, mystic)
         if not file_path:
             raise RuntimeError("no audio file")
@@ -316,7 +317,7 @@ async def _handle_song_audio_request(message: Message, lang):
         )
         await mystic.delete()
     except Exception:
-        await mystic.edit_text(lang["song_10"])
+        await rich_call(mystic.edit_text, lang["song_10"])
     finally:
         if file_path and os.path.exists(file_path):
             try:
@@ -398,7 +399,7 @@ async def _handle_platform_song_request(message: Message, lang, platform_name: s
     mystic = await message.reply_text(lang["play_1"])
     query, _is_url = await _get_song_query(message)
     if not query:
-        return await mystic.edit_text(f"Usage: /{platform_name} [link]")
+        return await rich_call(mystic.edit_text, f"Usage: /{platform_name} [link]")
 
     try:
         resolved_query = await _resolve_link_query(query)
@@ -406,21 +407,21 @@ async def _handle_platform_song_request(message: Message, lang, platform_name: s
         resolved_query = None
 
     if not resolved_query:
-        return await mystic.edit_text(f"Could not read that {platform_name} link.")
+        return await rich_call(mystic.edit_text, f"Could not read that {platform_name} link.")
 
     try:
         title, dur_min, dur_sec, _thumb, vidid = await YouTube.details(resolved_query)
     except Exception:
-        return await mystic.edit_text(lang["play_3"])
+        return await rich_call(mystic.edit_text, lang["play_3"])
 
     if not dur_min:
-        return await mystic.edit_text(lang["song_3"])
+        return await rich_call(mystic.edit_text, lang["song_3"])
     if int(dur_sec) > SONG_DOWNLOAD_DURATION_LIMIT:
-        return await mystic.edit_text(lang["play_4"].format(SONG_DOWNLOAD_DURATION, dur_min))
+        return await rich_call(mystic.edit_text, lang["play_4"].format(SONG_DOWNLOAD_DURATION, dur_min))
 
     file_path = None
     try:
-        await mystic.edit_text(lang["song_8"])
+        await rich_call(mystic.edit_text, lang["song_8"])
         file_path, cleanup_dir = await _download_song_audio(vidid, title, mystic)
         if not file_path:
             raise RuntimeError("no audio file")
@@ -433,7 +434,7 @@ async def _handle_platform_song_request(message: Message, lang, platform_name: s
         )
         await mystic.delete()
     except Exception:
-        await mystic.edit_text(lang["song_10"])
+        await rich_call(mystic.edit_text, lang["song_10"])
     finally:
         if file_path and os.path.exists(file_path):
             try:
@@ -484,7 +485,7 @@ async def apple_spotify_song_command(client, message: Message, lang):
 async def songs_back_helper(client, cq, lang):
     _ignored, req = cq.data.split(None, 1)
     stype, vidid = req.split("|")
-    await cq.edit_message_reply_markup(
+    await rich_call(cq.edit_message_reply_markup,
         reply_markup=InlineKeyboardMarkup(song_markup(lang, vidid))
     )
 
@@ -504,7 +505,7 @@ async def song_helper_cb(client, cq, lang):
     try:
         formats, _ = await YouTube.formats(vidid)
     except Exception:
-        return await cq.edit_message_text(lang["song_7"])
+        return await rich_call(cq.edit_message_text, lang["song_7"])
 
     kb = InlineKeyboardBuilder()
     seen = set()
@@ -545,7 +546,7 @@ async def song_helper_cb(client, cq, lang):
         InlineKeyboardButton(lang["BACK_BUTTON"], callback_data=f"song_back {stype}|{vidid}"),
         InlineKeyboardButton(lang["CLOSE_BUTTON"], callback_data="close"),
     )
-    await cq.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(kb))
+    await rich_call(cq.edit_message_reply_markup, reply_markup=InlineKeyboardMarkup(kb))
 
 
 @app.on_callback_query(filters.regex(r"song_download") & ~BANNED_USERS)
@@ -561,7 +562,7 @@ async def song_download_cb(client, cq, lang):
     stype, fmt_id, vidid = req.split("|")
     yturl = f"https://www.youtube.com/watch?v={vidid}"
 
-    mystic = await cq.edit_message_text(lang["song_8"])
+    mystic = await rich_call(cq.edit_message_text, lang["song_8"])
 
     file_path = None
     try:
@@ -577,7 +578,7 @@ async def song_download_cb(client, cq, lang):
             if not file_path:
                 raise RuntimeError("no audio file")
             await app.send_chat_action(cq.message.chat.id, ChatAction.UPLOAD_AUDIO)
-            await cq.edit_message_media(
+            await rich_call(cq.edit_message_media,
                 InputMediaAudio(
                     media=file_path,
                     caption=title,
@@ -592,9 +593,9 @@ async def song_download_cb(client, cq, lang):
             if not file_path:
                 raise RuntimeError("no video file")
             await app.send_chat_action(cq.message.chat.id, ChatAction.UPLOAD_VIDEO)
-            w = getattr(getattr(cq.message, "photo", None), "width", None)
-            h = getattr(getattr(cq.message, "photo", None), "height", None)
-            await cq.edit_message_media(
+            w = getattr(rich_media(cq.message, "photo"), "width", None)
+            h = getattr(rich_media(cq.message, "photo"), "height", None)
+            await rich_call(cq.edit_message_media,
                 InputMediaVideo(
                     media=file_path,
                     duration=duration_sec,
@@ -606,7 +607,7 @@ async def song_download_cb(client, cq, lang):
             )
 
     except Exception:
-        await mystic.edit_text(lang["song_10"])
+        await rich_call(mystic.edit_text, lang["song_10"])
     finally:
         if file_path and os.path.exists(file_path):
             try:

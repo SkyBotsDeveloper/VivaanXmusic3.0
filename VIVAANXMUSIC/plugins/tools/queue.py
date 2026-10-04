@@ -13,6 +13,7 @@ from VIVAANXMUSIC.utils.database import get_cmode, is_active_chat, is_music_play
 from VIVAANXMUSIC.utils.decorators.language import language, languageCB
 from VIVAANXMUSIC.utils.inline import queue_back_markup, queue_markup
 from config import BANNED_USERS
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 basic = {}
 
@@ -97,7 +98,7 @@ async def get_queue(client, message: Message, _):
         )
     )
     basic[videoid] = True
-    mystic = await message.reply_photo(IMAGE, caption=cap, reply_markup=upl)
+    mystic = await rich_call(message.reply_photo, IMAGE, caption=cap, reply_markup=upl)
     if DUR != "Unknown":
         try:
             while db[chat_id][0]["vidid"] == videoid:
@@ -114,7 +115,7 @@ async def get_queue(client, message: Message, _):
                                     seconds_to_min(db[chat_id][0]["played"]),
                                     db[chat_id][0]["dur"],
                                 )
-                                await mystic.edit_reply_markup(reply_markup=buttons)
+                                await rich_call(mystic.edit_reply_markup, reply_markup=buttons)
                             except FloodWait:
                                 pass
                         else:
@@ -159,7 +160,7 @@ async def queued_tracks(client, CallbackQuery: CallbackQuery, _):
         media="https://telegra.ph//file/6f7d35131f69951c74ee5.jpg",
         caption=_["queue_1"],
     )
-    await CallbackQuery.edit_message_media(media=med)
+    await rich_call(CallbackQuery.edit_message_media, media=med)
     j = 0
     msg = ""
     for x in got:
@@ -173,15 +174,15 @@ async def queued_tracks(client, CallbackQuery: CallbackQuery, _):
     if "Queued" in msg:
         if len(msg) < 700:
             await asyncio.sleep(1)
-            return await CallbackQuery.edit_message_text(msg, reply_markup=buttons)
+            return await rich_call(CallbackQuery.edit_message_text, msg, reply_markup=buttons)
         if "✨" in msg:
             msg = msg.replace("✨", "")
         link = await VIVAANBIN(msg)
         med = InputMediaPhoto(media=link, caption=_["queue_3"].format(link))
-        await CallbackQuery.edit_message_media(media=med, reply_markup=buttons)
+        await rich_call(CallbackQuery.edit_message_media, media=med, reply_markup=buttons)
     else:
         await asyncio.sleep(1)
-        return await CallbackQuery.edit_message_text(msg, reply_markup=buttons)
+        return await rich_call(CallbackQuery.edit_message_text, msg, reply_markup=buttons)
 
 
 @app.on_callback_query(filters.regex("queue_back_timer") & ~BANNED_USERS)
@@ -239,7 +240,7 @@ async def queue_back(client, CallbackQuery: CallbackQuery, _):
     basic[videoid] = True
 
     med = InputMediaPhoto(media=IMAGE, caption=cap)
-    mystic = await CallbackQuery.edit_message_media(media=med, reply_markup=upl)
+    mystic = await rich_call(CallbackQuery.edit_message_media, media=med, reply_markup=upl)
     if DUR != "Unknown":
         try:
             while db[chat_id][0]["vidid"] == videoid:
@@ -256,7 +257,7 @@ async def queue_back(client, CallbackQuery: CallbackQuery, _):
                                     seconds_to_min(db[chat_id][0]["played"]),
                                     db[chat_id][0]["dur"],
                                 )
-                                await mystic.edit_reply_markup(reply_markup=buttons)
+                                await rich_call(mystic.edit_reply_markup, reply_markup=buttons)
                             except FloodWait:
                                 pass
                         else:

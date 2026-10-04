@@ -25,7 +25,7 @@ async def figlet_command(client, message):
     try:
         text = message.text.split(' ', 1)[1]
     except IndexError:
-        return await message.reply_text("✏️ Example:\n`/figlet VIVAAN`", quote=True)
+        return await rich_call(message.reply_text, "✏️ Example:\n`/figlet VIVAAN`", quote=True)
 
     figlet_result, keyboard = figle(text)
     await rich_call(message.reply_text,

@@ -8,6 +8,7 @@ from typing import Optional
 from config import LOGGER_ID
 from VIVAANXMUSIC import app
 from VIVAANXMUSIC.utils.database import remove_served_chat
+from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 BOT_INFO: Optional[types.User] = None
 BOT_ID: Optional[int] = None
@@ -41,7 +42,7 @@ async def _ensure_bot_info() -> None:
 async def safe_send_photo(chat_id, photo, caption, reply_markup=None, max_retries=3):
     for attempt in range(max_retries):
         try:
-            return await app.send_photo(
+            return await rich_call(app.send_photo,
                 chat_id=chat_id,
                 photo=photo,
                 caption=caption,

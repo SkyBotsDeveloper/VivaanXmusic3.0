@@ -1,16 +1,19 @@
-"""Native Rich HTML delivery for audited text keyboards on Kurigram 2.2.24.
+"""Native Rich button, media and full-view delivery on Kurigram 2.2.26.
 
 Keyboard builders remain the source of labels, actions, styles and row conditions.
-Unsupported interactions use the original bound method before any RPC is sent.
-See RICH_BUTTON_MIGRATION.md for the intentionally inline workflows.
+Normal chat keyboards never fall back to old inline delivery.
+See RICH_BUTTON_MIGRATION.md for the runtime audit and validation.
 """
 
 import inspect
+import copy
+from datetime import datetime, timezone
+from html.parser import HTMLParser
 import re
 from html import escape
 
-from pyrogram import Client, raw
-from pyrogram.enums import ChatType, MessageEntityType
+from pyrogram import Client, raw, types
+from pyrogram.enums import ChatType, MessageEntityType, ParseMode
 from pyrogram.parser import Parser
 from pyrogram.parser.utils import add_surrogates, remove_surrogates
 from pyrogram.types import CallbackQuery, InlineKeyboardMarkup, InputRichMessage, Message, MessageEntity, ReplyParameters
@@ -104,7 +107,7 @@ async def text_html(text, parse_mode=None, entities=None):
                 entity = MessageEntity(type=MessageEntityType.TEXT_LINK, offset=entity.offset,
                                        length=entity.length, url=f"tg://user?id={entity.user_id}")
             else:
-                entity = MessageEntity._parse(None, entity, {})
+                entity = await MessageEntity._parse(None, entity, {})
             entities.append(entity)
     text = add_surrogates(str(text or ""))
     blocks = {MessageEntityType.PRE, MessageEntityType.BLOCKQUOTE}
@@ -184,65 +187,331 @@ async def text_html(text, parse_mode=None, entities=None):
     return render(0, len(text), entities, top=True)
 
 
-async def rich_call(method, *args, **kwargs):
-    """Deliver an audited text UI natively, preserving the original call as fallback.
+def keyboard_blocks(markup):
+    """Keep each descriptor row intact, using native full-width button blocks."""
+    if markup is None:
+        return []
+    if not isinstance(markup, InlineKeyboardMarkup):
+        raise UnsupportedRichKeyboard("Expected an inline keyboard descriptor")
+    rows = []
+    action_names = inspect.signature(types.RichMessageButton).parameters.keys() - {"text", "style"}
+    for row in markup.inline_keyboard:
+        if not 1 <= len(row) <= 8:
+            raise UnsupportedRichKeyboard("Telegram Rich rows require 1-8 buttons")
+        buttons = []
+        for button in row:
+            if any(getattr(button, key, None) for key in ("pay", "callback_game", "requires_password")):
+                raise UnsupportedRichKeyboard("Telegram Rich buttons do not support payments/games/password callbacks")
+            values = {key: getattr(button, key) for key in action_names if getattr(button, key, None) is not None}
+            if button.user_id is not None:
+                values["url"] = f"tg://user?id={button.user_id}"
+            if isinstance(values.get("copy_text"), str):
+                values["copy_text"] = types.CopyTextButton(text=values["copy_text"])
+            text = button.text
+            if button.icon_custom_emoji_id:
+                text = [types.RichTextCustomEmoji(custom_emoji_id=button.icon_custom_emoji_id, alternative_text=""), text]
+            buttons.append(types.RichMessageButton(text=text, style=button.style, **values))
+        rows.append(types.InputRichBlockButtons(buttons=buttons))
+    return rows
 
-    Do not use for a workflow that later reads/edits only message.reply_markup.
-    RPC errors propagate to the caller's existing error handling; no duplicate sends.
+
+class _TextBlocks(HTMLParser):
+    """Translate our escaped entity HTML into native Rich text/block objects."""
+
+    def __init__(self, html):
+        super().__init__(convert_charrefs=True)
+        self.blocks = []
+        self.stack = []
+        self.feed(html)
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "br":
+            self.stack[-1][2].append("\n")
+        else:
+            self.stack.append((tag, dict(attrs), []))
+
+    def handle_data(self, data):
+        self.stack[-1][2].append(data)
+
+    def handle_endtag(self, tag):
+        name, attrs, parts = self.stack.pop()
+        if name != tag:
+            raise ValueError("Unbalanced Rich entity HTML")
+        if tag == "p":
+            self.blocks.append(types.InputRichBlockParagraph(text=parts))
+            return
+        if tag == "pre":
+            language = None
+            if len(parts) == 1 and isinstance(parts[0], types.RichTextCode):
+                language = getattr(parts[0], "_language", None)
+                parts = parts[0].text
+            self.blocks.append(types.InputRichBlockPreformatted(text=parts, language=language))
+            return
+        if tag == "blockquote":
+            self.blocks.append(
+                types.InputRichBlockExpandableBlockQuotation(text=parts)
+                if "expandable" in attrs else
+                types.InputRichBlockBlockQuotation(blocks=[types.InputRichBlockParagraph(text=parts)])
+            )
+            return
+        simple = {"b": types.RichTextBold, "i": types.RichTextItalic,
+                  "u": types.RichTextUnderline, "s": types.RichTextStrikethrough,
+                  "code": types.RichTextCode, "tg-spoiler": types.RichTextSpoiler}
+        if tag in simple:
+            value = simple[tag](text=parts)
+            if tag == "code" and attrs.get("class", "").startswith("language-"):
+                value._language = attrs["class"][9:]
+        elif tag == "a":
+            url = attrs["href"]
+            if url.startswith("tg://user?id="):
+                value = types.RichTextTextMention(text=parts, user=types.User(id=int(url.split("=")[-1])))
+            else:
+                value = types.RichTextUrl(text=parts, url=url)
+        elif tag == "tg-emoji":
+            value = types.RichTextCustomEmoji(custom_emoji_id=attrs["emoji-id"], alternative_text="".join(parts))
+        elif tag == "tg-time":
+            value = types.RichTextDateTime(text=parts, date=datetime.fromtimestamp(int(attrs["unix"]), timezone.utc), date_time_format=attrs.get("format"))
+        else:
+            raise UnsupportedRichKeyboard(f"Unsupported Rich text tag: {tag}")
+        self.stack[-1][2].append(value)
+
+
+async def text_blocks(text, parse_mode=None, entities=None):
+    return _TextBlocks(await text_html(text or "", parse_mode, entities)).blocks
+
+
+_MEDIA = {
+    "photo": (types.InputMediaPhoto, types.InputRichBlockPhoto),
+    "video": (types.InputMediaVideo, types.InputRichBlockVideo),
+    "animation": (types.InputMediaAnimation, types.InputRichBlockAnimation),
+    "document": (types.InputMediaDocument, types.InputRichBlockDocument),
+    "audio": (types.InputMediaAudio, types.InputRichBlockAudio),
+    "voice_note": (types.InputMediaVoiceNote, types.InputRichBlockVoiceNote),
+}
+
+
+def media_block(media):
+    for key, (media_type, block_type) in _MEDIA.items():
+        if isinstance(media, media_type):
+            return block_type(**{key: media})
+    raise UnsupportedRichKeyboard(f"Unsupported Rich media: {type(media).__name__}")
+
+
+def _input_block(block):
+    """Rehydrate Telegram's received blocks; no process-local menu cache required."""
+    if isinstance(block, types.InputRichBlock):
+        return copy.copy(block)
+    target = getattr(types, "Input" + type(block).__name__, None)
+    if target is None:
+        raise UnsupportedRichKeyboard(f"Cannot rehydrate {type(block).__name__}")
+    values = {}
+    for key in inspect.signature(target).parameters:
+        value = getattr(block, key, None)
+        if key in _MEDIA:
+            media_type = _MEDIA[key][0]
+            media_values = {"media": value.file_id}
+            if "has_spoiler" in inspect.signature(media_type).parameters:
+                media_values["has_spoiler"] = getattr(block, "has_spoiler", None)
+            # Preserve audio/video/document attributes, including their names.
+            for name in inspect.signature(media_type).parameters:
+                if name not in ("media", "caption", "parse_mode", "caption_entities", "thumb"):
+                    attr = getattr(value, name, None)
+                    if attr is not None:
+                        media_values[name] = attr
+            value = media_type(**media_values)
+        elif key == "blocks":
+            value = [_input_block(item) for item in value]
+        elif key == "align":
+            value = None  # Full-width columns, consistently, including legacy Rich pages.
+        values[key] = value
+    return target(**values)
+
+
+async def _message_blocks(message, client):
+    rich = getattr(message, "rich_message", None)
+    if rich:
+        return [_input_block(block) for block in rich.blocks]
+    snapshot = getattr(message, "_rich_ui_blocks", None)
+    if snapshot is not None:
+        return [copy.copy(block) for block in snapshot]
+    blocks = []
+    for key, (media_type, _) in _MEDIA.items():
+        original = getattr(message, "voice" if key == "voice_note" else key, None)
+        if original is not None:
+            blocks.append(media_block(media_type(media=original.file_id)))
+            break
+    text = message.caption if message.caption is not None else message.text
+    entities = message.caption_entities if message.caption is not None else message.entities
+    if text:
+        blocks.extend(await text_blocks(text, ParseMode.DISABLED, entities or []))
+    return blocks
+
+
+def _plain(text):
+    if isinstance(text, str):
+        return text
+    if isinstance(text, (list, tuple)):
+        return "".join(_plain(item) for item in text)
+    return _plain(getattr(text, "text", getattr(text, "alternative_text", "")))
+
+
+def rich_text(message):
+    if message.text or message.caption:
+        return message.text or message.caption
+    blocks = getattr(getattr(message, "rich_message", None), "blocks", None) or getattr(message, "_rich_ui_blocks", [])
+    return "\n".join(_plain(block.text) for block in blocks if hasattr(block, "text") and not isinstance(block, (types.RichBlockButtons, types.InputRichBlockButtons)))
+
+
+def rich_markup(message):
+    """Return descriptors for UI code that previously read message.reply_markup."""
+    blocks = getattr(getattr(message, "rich_message", None), "blocks", None) or getattr(message, "_rich_ui_blocks", [])
+    rows = []
+    for block in blocks:
+        if isinstance(block, (types.RichBlockButtons, types.InputRichBlockButtons)):
+            row = []
+            for button in block.buttons:
+                keys = inspect.signature(types.InlineKeyboardButton).parameters.keys() - {"text", "style"}
+                values = {key: getattr(button, key) for key in keys if getattr(button, key, None) is not None}
+                if isinstance(values.get("copy_text"), types.CopyTextButton):
+                    values["copy_text"] = values["copy_text"].text
+                row.append(types.InlineKeyboardButton(text=_plain(button.text), style=button.style, **values))
+            rows.append(row)
+    return InlineKeyboardMarkup(rows) if rows else message.reply_markup
+
+
+def rich_media(message, kind):
+    """Read media metadata from either a classic message or a Rich media block."""
+    original = getattr(message, kind, None)
+    if original is not None:
+        return original
+    blocks = getattr(getattr(message, "rich_message", None), "blocks", None) or getattr(message, "_rich_ui_blocks", [])
+    return next((getattr(block, kind) for block in blocks if hasattr(block, kind)), None)
+
+
+async def rich_inline_photo(*, client, photo_url, caption, reply_markup, **metadata):
+    """Keep inline result metadata, but send native Rich content instead of a caption keyboard."""
+    html = f'<img src="{escape(photo_url, quote=True)}"/>'
+    html += await text_html(caption, client.parse_mode)
+    html += keyboard_html(reply_markup)
+    return types.InlineQueryResultPhoto(
+        photo_url=photo_url, **metadata,
+        input_message_content=types.InputRichMessageContent(rich_message=InputRichMessage(html=html)),
+    )
+
+
+async def rich_call(method, *args, **kwargs):
+    """Send/edit complete native Rich views. Never deliver an old keyboard fallback.
+
+    Markup updates retain the received body/media, so callbacks work after restart.
+    Calls without buttons or an existing Rich view remain ordinary native calls.
     """
     owner = getattr(method, "__self__", None)
     function = getattr(method, "__func__", None)
-    sends = (Message.reply_text, Message.reply, Client.send_message)
-    edits = (Message.edit_text, Message.edit, CallbackQuery.edit_message_text, Client.edit_message_text)
-    if function not in sends + edits:
-        return await method(*args, **kwargs)
-    params = dict(inspect.signature(method).bind(*args, **kwargs).arguments)
+    name = getattr(function, "__name__", "")
+    is_message = isinstance(owner, Message)
+    is_callback = isinstance(owner, CallbackQuery)
+    message = owner.message if is_callback else owner if is_message else None
+    client = owner if isinstance(owner, Client) else getattr(owner, "_client", None)
+    if client is None:
+        raise TypeError("Rich delivery requires a bound Kurigram method")
+    # 2.2.26 removed deprecated arguments from Message shortcuts. Normalize them
+    # here rather than patching Kurigram or changing the commands' reply behavior.
+    signature = inspect.signature(method)
+    legacy = {key: value for key, value in kwargs.items() if key not in signature.parameters}
+    if legacy.keys() - {"quote", "reply_to_message_id", "disable_web_page_preview"}:
+        raise TypeError(f"Unsupported {name} arguments: {sorted(legacy)}")
+    accepted = {key: value for key, value in kwargs.items() if key in signature.parameters}
+    params = dict(signature.bind(*args, **accepted).arguments)
+    params.update(legacy)
+    sending = name.startswith(("send_", "reply"))
+    markup_only = "reply_markup" in name
+    media_edit = name in ("edit_media", "edit_message_media", "edit_inline_media")
+    if not sending and message is None and not (is_callback and owner.inline_message_id):
+        message = await client.get_messages(params["chat_id"], params["message_id"])
+    has_rich = message is not None and (getattr(message, "rich_message", None) or hasattr(message, "_rich_ui_blocks"))
     markup = params.get("reply_markup")
-    if not isinstance(markup, InlineKeyboardMarkup):
-        return await method(*args, **kwargs)
-    sending = function in sends
-    message = owner.message if isinstance(owner, CallbackQuery) else owner if isinstance(owner, Message) else None
-    if isinstance(owner, CallbackQuery) and (owner.inline_message_id or message is None):
-        return await method(*args, **kwargs)
-    if not sending and message is not None and (
-        message.caption is not None or message.media is not None
-    ):
-        return await method(*args, **kwargs)
-    client = owner if isinstance(owner, Client) else owner._client
-    rich_options = set(inspect.signature(Client.send_rich_message if sending else Client.edit_message_text).parameters)
-    handled = {"text", "parse_mode", "entities", "reply_markup", "quote", "disable_web_page_preview", "link_preview_options"}
-    if any(value is not None and key not in rich_options | handled for key, value in params.items()):
-        return await method(*args, **kwargs)
-    preview = params.get("link_preview_options") or client.link_preview_options
-    if params.get("disable_web_page_preview") is False or (preview and not preview.is_disabled):
-        return await method(*args, **kwargs)
-    previews_disabled = params.get("disable_web_page_preview") is True or (preview and preview.is_disabled)
-    # Rich content cannot retain a classic automatic webpage card. Keep URL-bearing
-    # bodies inline unless the caller already disables previews (button URLs are fine).
-    if not previews_disabled and re.search(
-        r"https?://|www\.|[\w-]+\.[a-zA-Z]{2,}(?:[/?:]|\b)", str(params.get("text") or "")
-    ):
-        return await method(*args, **kwargs)
-    try:
-        rows = keyboard_html(markup)
-        content = await text_html(params.get("text"), params.get("parse_mode") or client.parse_mode, params.get("entities"))
-    except UnsupportedRichKeyboard:
-        return await method(*args, **kwargs)
-    options = {key: value for key, value in params.items() if key in rich_options and key not in handled}
-    options["rich_message"] = InputRichMessage(html=content + rows)
-    if message is not None:
+    enabled = isinstance(markup, InlineKeyboardMarkup) or (has_rich and not sending)
+    options = dict(params)
+    if sending and is_message:
         options["chat_id"] = message.chat.id
-        if sending:
-            options["business_connection_id"] = message.business_connection_id
-            options["message_thread_id"] = params.get("message_thread_id") or message.message_thread_id
-            options["direct_messages_topic_id"] = params.get("direct_messages_topic_id") or message.direct_messages_topic_id
-            if params.get("reply_parameters") is None:
-                options["reply_parameters"] = ReplyParameters(message_id=message.id)
-            # Match the installed Message.reply's deprecated quote behavior.
-            if params.get("quote") is not None and message.chat.type == ChatType.PRIVATE:
-                options["reply_parameters"] = None
-        else:
-            options["message_id"] = message.id
-            if isinstance(owner, Message):
-                options["business_connection_id"] = message.business_connection_id
-    return await (client.send_rich_message if sending else client.edit_message_text)(**options)
+        options.setdefault("message_thread_id", message.message_thread_id)
+        options.setdefault("direct_messages_topic_id", message.direct_messages_topic_id)
+        reply = options.get("reply_parameters") or ReplyParameters(message_id=message.id)
+        if options.get("quote") is not None and message.chat.type == ChatType.PRIVATE:
+            reply = None  # Preserve 2.2.24's deprecated quote behavior.
+        if options.get("reply_to_message_id") is not None:
+            reply = ReplyParameters(message_id=options.pop("reply_to_message_id"))
+        options["reply_parameters"] = reply
+        options.pop("quote", None)
+    if sending and options.get("reply_to_message_id") is not None:
+        options["reply_parameters"] = ReplyParameters(message_id=options.pop("reply_to_message_id"))
+    if not enabled:
+        if legacy and sending and is_message:
+            if "disable_web_page_preview" in options:
+                options["link_preview_options"] = types.LinkPreviewOptions(is_disabled=options.pop("disable_web_page_preview"))
+            tail = "message" if name in ("reply", "reply_text") else name.removeprefix("reply_")
+            return await getattr(client, "send_" + tail)(**options)
+        if "disable_web_page_preview" in legacy:
+            kwargs["link_preview_options"] = types.LinkPreviewOptions(is_disabled=kwargs.pop("disable_web_page_preview"))
+        return await method(*args, **kwargs)
+
+    previous = await _message_blocks(message, client) if not sending and message is not None else []
+    media_blocks = [block for block in previous if isinstance(block, tuple(cls for _, cls in _MEDIA.values()))]
+    if markup_only:
+        blocks = [block for block in previous if not isinstance(block, types.InputRichBlockButtons)]
+    else:
+        parse_mode = options.get("parse_mode") or client.parse_mode
+        text = options.get("caption", options.get("text", ""))
+        entities = options.get("caption_entities", options.get("entities"))
+        if media_edit:
+            media = options["media"]
+            text, parse_mode, entities = media.caption, media.parse_mode or client.parse_mode, media.caption_entities
+            media_blocks = [media_block(media)]
+        elif sending:
+            for key, (media_type, _) in _MEDIA.items():
+                parameter = "voice" if key == "voice_note" else key
+                if parameter in options:
+                    media_args = {k: v for k, v in options.items() if k in inspect.signature(media_type).parameters and k not in ("caption", "parse_mode", "caption_entities")}
+                    media_args["media"] = options[parameter]
+                    media_blocks = [media_block(media_type(**media_args))]
+                    break
+        blocks = media_blocks + await text_blocks(text, parse_mode, entities)
+    blocks.extend(keyboard_blocks(markup))
+    rich_message = InputRichMessage(blocks=blocks)
+    if sending:
+        for key in ("schedule_date", "repeat_period", "paid_message_star_count", "ttl_seconds", "view_once", "business_connection_id"):
+            if options.get(key) is not None:
+                raise UnsupportedRichKeyboard(f"Kurigram send_rich_message cannot preserve {key}")
+        allowed = inspect.signature(Client.send_rich_message).parameters.keys() - {"self", "rich_message", "reply_markup"}
+        delivery = {key: value for key, value in options.items() if key in allowed}
+        result = await client.send_rich_message(**delivery, rich_message=rich_message)
+    elif is_callback and owner.inline_message_id:
+        result = await client.edit_inline_text(inline_message_id=owner.inline_message_id, rich_message=rich_message)
+    else:
+        delivery = {"chat_id": message.chat.id, "message_id": message.id}
+        for key in ("schedule_date", "business_connection_id"):
+            if options.get(key) is not None:
+                delivery[key] = options[key]
+        result = await client.edit_message_text(**delivery, rich_message=rich_message)
+    # Pin uploaded media to Telegram file IDs even when a sparse send response
+    # omits its blocks. Player thumbnails may be deleted locally after sending.
+    if sending and media_blocks and isinstance(result, Message) and not result.rich_message:
+        received = await client.get_messages(result.chat.id, result.id)
+        if received.rich_message:
+            result.rich_message = received.rich_message
+            blocks = await _message_blocks(received, client)
+    # Text-only sparse responses can retain an inexpensive rendering snapshot.
+    for target in (message if not sending else None, result if isinstance(result, Message) else None):
+        if target is not None:
+            target._rich_ui_blocks = blocks
+            if not sending:
+                target.rich_message = getattr(result, "rich_message", None)
+    return result
+
+
+async def restore_welcome(message, caption, buttons, media):
+    """All Home/Back paths use the same video and full-width welcome layout."""
+    return await rich_call(
+        message.edit_media, types.InputMediaVideo(media=media, caption=caption),
+        reply_markup=InlineKeyboardMarkup(buttons),
+    )
