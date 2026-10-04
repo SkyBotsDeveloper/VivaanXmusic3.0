@@ -45,7 +45,9 @@ from strings import get_string
 START_RICH_BUTTONS = True
 
 
-async def _send_start_message(message, media, caption, buttons, *, photo=False, reply=True):
+async def _send_start_message(
+    message, media, caption, buttons, *, photo=False, reply=True, full_width=False
+):
     if not START_RICH_BUTTONS:
         markup = InlineKeyboardMarkup(buttons)
         if photo:
@@ -108,9 +110,10 @@ async def _send_start_message(message, media, caption, buttons, *, photo=False, 
             rich_buttons.append(
                 f'<tg-button {action}{style_attr}>{escape(button.text)}</tg-button>'
             )
-        rows.append(
-            '<tg-button-row align="center">' + "".join(rich_buttons) + '</tg-button-row>'
-        )
+        # Unset alignment uses Telegram's full-width, equal-column button layout.
+        # https://github.com/tdlib/td/blob/master/td/generate/scheme/td_api.tl
+        row_tag = '<tg-button-row>' if full_width else '<tg-button-row align="center">'
+        rows.append(row_tag + "".join(rich_buttons) + '</tg-button-row>')
 
     media_tag = "img" if photo else "video"
     media_html = f'<{media_tag} src="{escape(media, quote=True)}"/>'
@@ -238,6 +241,7 @@ async def start_pm(client, message: Message, _):
             message.from_user.mention, app.mention, UP, DISK, CPU, RAM, len(served_users), len(served_chats)
         ),
         buttons=out,
+        full_width=True,
     )
 
     if await is_on_off(2):
