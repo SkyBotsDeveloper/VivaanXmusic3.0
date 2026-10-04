@@ -1,9 +1,20 @@
 import asyncio
 import random
 import time
-from pyrogram import filters
-from pyrogram.enums import ChatType
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
+from html import escape
+
+from pyrogram import filters, raw
+from pyrogram.enums import ButtonStyle, ChatType, MessageEntityType
+from pyrogram.parser import Parser
+from pyrogram.parser.utils import add_surrogates, remove_surrogates
+from pyrogram.types import (
+    InputRichMessage,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+    MessageEntity,
+    ReplyParameters,
+)
 from youtubesearchpython.future import VideosSearch
 
 import config
@@ -30,6 +41,88 @@ from config import BANNED_USERS, AYUV, HELP_IMG_URL, START_VIDS, STICKERS
 from strings import get_string
 
 
+# Set False to restore the original /start media and inline keyboards.
+START_RICH_BUTTONS = True
+
+
+async def _send_start_message(message, media, caption, buttons, *, photo=False, reply=True):
+    if not START_RICH_BUTTONS:
+        markup = InlineKeyboardMarkup(buttons)
+        if photo:
+            if reply:
+                return await message.reply_photo(
+                    photo=media, caption=caption, reply_markup=markup
+                )
+            return await app.send_photo(
+                chat_id=message.chat.id, photo=media, caption=caption, reply_markup=markup
+            )
+        return await message.reply_video(media, caption=caption, reply_markup=markup)
+
+    # Preserve the old combined Markdown/HTML caption formatting, including mentions.
+    parsed = await Parser(None).parse(caption, app.parse_mode)
+    entities = []
+    for entity in parsed["entities"] or []:
+        if isinstance(entity, raw.types.InputMessageEntityMentionName):
+            entities.append(
+                MessageEntity(
+                    type=MessageEntityType.TEXT_LINK,
+                    offset=entity.offset,
+                    length=entity.length,
+                    url=f"tg://user?id={entity.user_id}",
+                )
+            )
+        else:
+            entities.append(MessageEntity._parse(None, entity, {}))
+    text = add_surrogates(parsed["message"])
+    if entities:
+        start = min(entity.offset for entity in entities)
+        end = max(entity.offset + entity.length for entity in entities)
+        for entity in entities:
+            entity.offset -= start
+        caption_html = (
+            escape(remove_surrogates(text[:start]))
+            + Parser.unparse(remove_surrogates(text[start:end]), entities, True)
+            + escape(remove_surrogates(text[end:]))
+        )
+    else:
+        caption_html = escape(parsed["message"])
+    caption_html = caption_html.replace("\n", "<br>")
+
+    # 2.2.24 exposes Rich HTML input, rather than the newer rich button/block types.
+    # https://core.telegram.org/bots/api#rich-message-formatting-options
+    rows = []
+    for row in buttons:
+        rich_buttons = []
+        for button in row:
+            style = button.style
+            style_attr = (
+                f' style="{style.name.lower()}"'
+                if style in (ButtonStyle.PRIMARY, ButtonStyle.SUCCESS, ButtonStyle.DANGER)
+                else ""
+            )
+            if button.callback_data is not None:
+                action = f'type="callback_data" data="{escape(button.callback_data, quote=True)}"'
+            else:
+                url = button.url if button.user_id is None else f"tg://user?id={button.user_id}"
+                action = f'type="url" url="{escape(url, quote=True)}"'
+            rich_buttons.append(
+                f'<tg-button {action}{style_attr}>{escape(button.text)}</tg-button>'
+            )
+        rows.append(
+            '<tg-button-row align="center">' + "".join(rich_buttons) + '</tg-button-row>'
+        )
+
+    media_tag = "img" if photo else "video"
+    media_html = f'<{media_tag} src="{escape(media, quote=True)}"/>'
+    return await app.send_rich_message(
+        chat_id=message.chat.id,
+        rich_message=InputRichMessage(html=media_html + f"<p>{caption_html}</p>" + "".join(rows)),
+        reply_parameters=ReplyParameters(message_id=message.id) if reply else None,
+        message_thread_id=message.message_thread_id if reply else None,
+        direct_messages_topic_id=message.direct_messages_topic_id if reply else None,
+    )
+
+
 async def delete_sticker_after_delay(message: Message, delay: int) -> None:
     await asyncio.sleep(delay)
     try:
@@ -51,10 +144,12 @@ async def start_pm(client, message: Message, _):
 
         if name.startswith("help"):
             keyboard = first_page(_)
-            return await message.reply_photo(
-                photo=HELP_IMG_URL,
+            return await _send_start_message(
+                message,
+                HELP_IMG_URL,
                 caption=_["help_1"].format(config.SUPPORT_CHAT),
-                reply_markup=keyboard,
+                buttons=keyboard.inline_keyboard,
+                photo=True,
             )
 
         if name.startswith("sud"):
@@ -102,11 +197,13 @@ async def start_pm(client, message: Message, _):
 
                 await m.delete()
 
-                await app.send_photo(
-                    chat_id=message.chat.id,
-                    photo=thumbnail or HELP_IMG_URL,
+                await _send_start_message(
+                    message,
+                    thumbnail or HELP_IMG_URL,
                     caption=searched_text,
-                    reply_markup=key,
+                    buttons=key.inline_keyboard,
+                    photo=True,
+                    reply=False,
                 )
 
                 if await is_on_off(2):
@@ -134,12 +231,13 @@ async def start_pm(client, message: Message, _):
         served_chats_coro, served_users_coro, stats_coro
     )
 
-    await message.reply_video(
+    await _send_start_message(
+        message,
         random.choice(START_VIDS),
         caption=random.choice(AYUV).format(
             message.from_user.mention, app.mention, UP, DISK, CPU, RAM, len(served_users), len(served_chats)
         ),
-        reply_markup=InlineKeyboardMarkup(out),
+        buttons=out,
     )
 
     if await is_on_off(2):
@@ -160,10 +258,11 @@ async def start_gp(client, message: Message, _):
     out = start_panel(_)
     uptime = int(time.time() - _boot_)
     try:
-        await message.reply_video(
+        await _send_start_message(
+            message,
             random.choice(START_VIDS),
             caption=_["start_1"].format(app.mention, get_readable_time(uptime)),
-            reply_markup=InlineKeyboardMarkup(out),
+            buttons=out,
         )
     except:
         pass
