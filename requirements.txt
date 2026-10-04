@@ -31,6 +31,7 @@ git+https://github.com/SkyBotsDeveloper/youtube-search-python.git
 pyyaml
 qrcode
 requests
+rlottie-python==1.3.8
 speedtest-cli
 SpeechRecognition
 spotipy

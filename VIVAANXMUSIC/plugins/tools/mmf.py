@@ -1,180 +1,70 @@
-import os
-import textwrap
-from PIL import Image, ImageDraw, ImageFont
+import asyncio
+import tempfile
+from pathlib import Path
+
 from pyrogram import filters
 from pyrogram.types import Message
-from VIVAANXMUSIC import app
+
+from VIVAANXMUSIC import LOGGER, app
+from VIVAANXMUSIC.utils.mmf import MemeError, media_kind, memify_media
+
+
+logger = LOGGER(__name__)
+_MMF_JOBS = asyncio.Semaphore(2)
+
+
+async def _process(source, text, kind, work_dir):
+    job = asyncio.create_task(asyncio.to_thread(memify_media, source, text, kind, work_dir))
+    try:
+        return await asyncio.shield(job)
+    except asyncio.CancelledError:
+        # Cancelling an await doesn't stop its thread. Wait before cleaning files.
+        try:
+            await job
+        except Exception:
+            logger.exception("Cancelled /mmf processing failed")
+        raise
+
 
 @app.on_message(filters.command("mmf"))
 async def mmf(_, message: Message):
-    chat_id = message.chat.id
-    reply_message = message.reply_to_message
+    if len((message.text or "").split()) < 2:
+        return await message.reply_text("**Give me text after /mmf to memify.**")
+    replied = message.reply_to_message
+    kind = media_kind(replied)
+    if kind is None:
+        return await message.reply_text("**Reply to an image or sticker to memify.**")
 
-    if len(message.text.split()) < 2:
-        await message.reply_text("**Give me text after /mmf to memify.**")
-        return
-    if not reply_message or not (
-        reply_message.photo
-        or reply_message.sticker
-        or (
-            reply_message.document
-            and (reply_message.document.mime_type or "").startswith("image/")
-        )
-    ):
-        await message.reply_text("**Reply to an image or sticker to memify.**")
-        return
-
-    msg = await message.reply_text("❄️")
-    text = message.text.split(None, 1)[1]
+    status = await message.reply_text("❄️")
+    stage = "download"
     try:
-        file = await app.download_media(reply_message)
-    except Exception as e:
-        await msg.edit(f"❌ Failed to download media.\nError: {e}")
-        return
-
-    meme = None
-    sent = False
-    try:
-        meme = await drawText(file, text)
-        await app.send_document(chat_id, document=meme)
-        sent = True
-    except Exception as e:
-        await msg.edit(f"Failed to create meme.\nError: {e}")
-        return
-    finally:
-        if sent:
-            await msg.delete()
-        if meme and os.path.exists(meme):
-            os.remove(meme)
-
-
-async def drawText(image_path, text):
-    img = Image.open(image_path)
-
-    os.remove(image_path)
-
-    i_width, i_height = img.size
-
-    if os.name == "nt":
-        fnt = "arial.ttf"
-    else:
-        fnt = "./VIVAANXMUSIC/assets/default.ttf"
-
-    m_font = ImageFont.truetype(fnt, int((70 / 640) * i_width))
-
-    if ";" in text:
-        upper_text, lower_text = text.split(";", 1)
-    else:
-        upper_text = text
-        lower_text = ""
-
-    draw = ImageDraw.Draw(img)
-
-    current_h, pad = 10, 5
-
-    if upper_text:
-        for u_text in textwrap.wrap(upper_text, width=15):
-            uwl, uht, uwr, uhb = m_font.getbbox(u_text)
-            u_width, u_height = uwr - uwl, uhb - uht
-
-            draw.text(
-                xy=(((i_width - u_width) / 2) - 2, int((current_h / 640) * i_width)),
-                text=u_text,
-                font=m_font,
-                fill=(0, 0, 0),
-            )
-
-            draw.text(
-                xy=(((i_width - u_width) / 2) + 2, int((current_h / 640) * i_width)),
-                text=u_text,
-                font=m_font,
-                fill=(0, 0, 0),
-            )
-
-            draw.text(
-                xy=((i_width - u_width) / 2, int(((current_h / 640) * i_width)) - 2),
-                text=u_text,
-                font=m_font,
-                fill=(0, 0, 0),
-            )
-
-            draw.text(
-                xy=(((i_width - u_width) / 2), int(((current_h / 640) * i_width)) + 2),
-                text=u_text,
-                font=m_font,
-                fill=(0, 0, 0),
-            )
-
-            draw.text(
-                xy=((i_width - u_width) / 2, int((current_h / 640) * i_width)),
-                text=u_text,
-                font=m_font,
-                fill=(255, 255, 255),
-            )
-
-            current_h += u_height + pad
-
-    if lower_text:
-        for l_text in textwrap.wrap(lower_text, width=15):
-            uwl, uht, uwr, uhb = m_font.getbbox(l_text)
-            u_width, u_height = uwr - uwl, uhb - uht
-
-            draw.text(
-                xy=(
-                    ((i_width - u_width) / 2) - 2,
-                    i_height - u_height - int((20 / 640) * i_width),
-                ),
-                text=l_text,
-                font=m_font,
-                fill=(0, 0, 0),
-            )
-
-            draw.text(
-                xy=(
-                    ((i_width - u_width) / 2) + 2,
-                    i_height - u_height - int((20 / 640) * i_width),
-                ),
-                text=l_text,
-                font=m_font,
-                fill=(0, 0, 0),
-            )
-
-            draw.text(
-                xy=(
-                    (i_width - u_width) / 2,
-                    (i_height - u_height - int((20 / 640) * i_width)) - 2,
-                ),
-                text=l_text,
-                font=m_font,
-                fill=(0, 0, 0),
-            )
-
-            draw.text(
-                xy=(
-                    (i_width - u_width) / 2,
-                    (i_height - u_height - int((20 / 640) * i_width)) + 2,
-                ),
-                text=l_text,
-                font=m_font,
-                fill=(0, 0, 0),
-            )
-
-            draw.text(
-                xy=(
-                    (i_width - u_width) / 2,
-                    i_height - u_height - int((20 / 640) * i_width),
-                ),
-                text=l_text,
-                font=m_font,
-                fill=(255, 255, 255),
-            )
-
-            current_h += u_height + pad
-
-    image_name = "memify.webp"
-
-    webp_file = os.path.join(image_name)
-
-    img.save(webp_file, "webp")
-
-    return webp_file
+        async with _MMF_JOBS:
+            with tempfile.TemporaryDirectory(prefix="vivaan_mmf_") as directory:
+                extension = {"static": ".image", "tgs": ".tgs", "video": ".webm"}[kind]
+                source = await app.download_media(replied, file_name=str(Path(directory) / ("source" + extension)))
+                if not source:
+                    raise MemeError("Failed to download media.")
+                stage = "process"
+                output = await _process(source, message.text.split(None, 1)[1], kind, directory)
+                stage = "send"
+                if kind == "static":
+                    await app.send_document(message.chat.id, document=str(output))
+                else:
+                    await app.send_sticker(message.chat.id, sticker=str(output))
+        try:
+            await status.delete()
+        except Exception:
+            logger.warning("Could not remove /mmf progress message", exc_info=True)
+    except Exception as exc:
+        logger.exception("/mmf failed during %s (%s)", stage, kind)
+        if isinstance(exc, MemeError):
+            error = str(exc)
+        elif stage == "download":
+            error = "Failed to download media. Please try again."
+        elif stage == "send":
+            error = "Failed to send the meme. Please try again."
+        else:
+            error = {"static": "Failed to decode the image.",
+                     "tgs": "Failed to render the animated sticker.",
+                     "video": "Failed to process the video sticker."}[kind]
+        await status.edit_text(error)
