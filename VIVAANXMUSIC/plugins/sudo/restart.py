@@ -29,6 +29,20 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 async def is_heroku():
     return "heroku" in socket.getfqdn()
 
+
+async def _update_git(repo, *args):
+    """Run optional network updates without blocking playback or prompting."""
+    try:
+        result = await asyncio.to_thread(
+            subprocess.run, ["git", *args], cwd=repo.working_tree_dir,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30,
+            env={**build_subprocess_env(), "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "Never"},
+        )
+        return result.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 def cleanup_storage():
     folders_to_remove = ["downloads", "raw_files", "cache"]
     for folder in folders_to_remove:
@@ -65,27 +79,31 @@ async def update_(client, message, _):
             return await message.reply_text(_["server_2"])
 
     response = await message.reply_text(_["server_3"])
+    unavailable = (
+        "Updates unavailable. The bot will keep running its current version. "
+        "Try again when repository access is restored."
+    )
     try:
         repo = Repo()
+        origin = repo.remote("origin")
+        if not repo.head.is_valid():
+            return await response.edit(unavailable)
     except GitCommandError:
         return await response.edit(_["server_4"])
     except InvalidGitRepositoryError:
         return await response.edit(_["server_5"])
+    except (OSError, ValueError):
+        return await response.edit(unavailable)
 
-    subprocess.run(
-        ["git", "fetch", "origin", str(config.UPSTREAM_BRANCH)],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        env=build_subprocess_env(),
-    )
-    await asyncio.sleep(7)
+    if not await _update_git(repo, "fetch", "origin", str(config.UPSTREAM_BRANCH)):
+        return await response.edit(unavailable)
+    try:
+        REPO_ = origin.url.split(".git")[0]
+        commits = list(repo.iter_commits(f"HEAD..origin/{config.UPSTREAM_BRANCH}"))
+    except (GitCommandError, ValueError, OSError):
+        return await response.edit(unavailable)
 
-    verification = ""
-    REPO_ = repo.remotes.origin.url.split(".git")[0]
-    for checks in repo.iter_commits(f"HEAD..origin/{config.UPSTREAM_BRANCH}"):
-        verification = str(checks.count())
-
-    if verification == "":
+    if not commits:
         return await response.edit(_["server_6"])
 
     updates = ""
@@ -93,7 +111,7 @@ async def update_(client, message, _):
         format,
         "tsnrhtdd"[(format // 10 % 10 != 1) * (format % 10 < 4) * format % 10 :: 4],
     )
-    for info in repo.iter_commits(f"HEAD..origin/{config.UPSTREAM_BRANCH}"):
+    for info in commits:
         updates += (
             f"<b>\u2793 #{info.count()}: <a href={REPO_}/commit/{info}>{info.summary}</a> ʙʏ -> {info.author}</b>\n"
             f"\t\t\t\t<b>\u279e ᴄᴏᴍᴍɪᴛᴇᴅ ᴏɴ :</b> {ordinal(int(datetime.fromtimestamp(info.committed_date).strftime('%d')))} "
@@ -117,19 +135,8 @@ async def update_(client, message, _):
     else:
         nrs = await rich_call(response.edit, _final_updates_, disable_web_page_preview=True)
 
-    stash = subprocess.run(
-        ["git", "stash"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        env=build_subprocess_env(),
-    )
-    if stash.returncode == 0:
-        subprocess.run(
-            ["git", "pull"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            env=build_subprocess_env(),
-        )
+    if not await _update_git(repo, "pull", "--ff-only", "origin", str(config.UPSTREAM_BRANCH)):
+        return await response.edit(unavailable)
 
     try:
         served_chats = await get_active_chats()
