@@ -8,13 +8,14 @@ import aiofiles
 import aiohttp
 import numpy as np
 import yt_dlp
-from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps
 from unidecode import unidecode
 from urllib.request import Request, urlopen
 from youtubesearchpython.future import VideosSearch
 from VIVAANXMUSIC import app
 from config import BOT_NAME, YOUTUBE_IMG_URL
 from VIVAANXMUSIC.core.dir import CACHE_DIR
+from VIVAANXMUSIC.utils.thumbnail_renderer import render_and_save_thumbnail
 
 
 # Font paths
@@ -33,6 +34,11 @@ THUMBNAIL_FETCH_HEADERS = {
     "Referer": "https://www.youtube.com/",
 }
 MAX_THUMBNAIL_BYTES = 8 * 1024 * 1024
+USE_NEON_THUMBNAILS = True  # False restores the previous renderer.
+PLAYER_THUMB_CACHE_VERSION = "vivaan_cinematic_v1"
+_player_thumbnail_tasks = {}
+_player_artwork_tasks = {}
+_player_render_semaphore = asyncio.Semaphore(2)
 MIN_THUMBNAIL_WIDTH = 240
 MIN_THUMBNAIL_HEIGHT = 180
 YOUTUBE_THUMBNAIL_NAMES = (
@@ -889,7 +895,132 @@ def accent_palette(image):
     return accent, soft
 
 
+def _forget_player_thumbnail_task(mapping, key):
+    def done(task):
+        if mapping.get(key) is task:
+            mapping.pop(key, None)
+        if not task.cancelled():
+            task.exception()
+    return done
+
+
+async def _player_artwork(videoid, result, user_id, title, channel):
+    async with aiohttp.ClientSession(timeout=THUMBNAIL_FETCH_TIMEOUT) as session:
+        try:
+            return await asyncio.wait_for(
+                resolve_artwork_image(session, videoid, result,
+                    fallback_card_path(videoid, user_id), title=title, channel=channel),
+                timeout=30,
+            )
+        except Exception:
+            return None, "missing"
+
+
+async def _player_profile(user_id, artwork):
+    ids = list(dict.fromkeys(value for value in (user_id, getattr(app, "id", None)) if value is not None))
+    for profile_id in ids:
+        downloaded = None
+        temporary_path = os.path.join(CACHE_DIR, f"player_avatar_{uuid4().hex}.jpg")
+        try:
+            async for photo in app.get_chat_photos(profile_id, limit=1):
+                downloaded = await app.download_media(photo.file_id,
+                    file_name=temporary_path)
+                if downloaded:
+                    with Image.open(downloaded) as image:
+                        image.load()
+                        return ImageOps.exif_transpose(image).convert("RGB")
+        except Exception:
+            continue
+        finally:
+            for path in {temporary_path, downloaded} - {None}:
+                try:
+                    if os.path.isfile(path):
+                        os.remove(path)
+                except OSError:
+                    pass
+    return artwork.copy()
+
+
+def _player_metadata(value, fallback):
+    if isinstance(value, dict):
+        value = value.get("short") or value.get("text")
+    return str(value or fallback)
+
+
+async def _build_player_thumbnail(videoid, user_id, output_path):
+    artwork = profile = None
+    try:
+        result = {}
+        try:
+            search = VideosSearch(f"https://www.youtube.com/watch?v={videoid}", limit=1)
+            response = await asyncio.wait_for(search.next(), timeout=15)
+            results = response.get("result") or []
+            if results and isinstance(results[0], dict):
+                result = results[0]
+        except Exception:
+            pass
+        title = trim_text(_player_metadata(result.get("title"), "Unknown Title"), 140)
+        duration = _player_metadata(result.get("duration"), "Unknown")
+        views = trim_text(_player_metadata(result.get("viewCount"), "Unknown Views"), 64)
+        channel_data = result.get("channel")
+        channel = trim_text(_player_metadata(
+            channel_data.get("name") if isinstance(channel_data, dict) else channel_data,
+            "Unknown Channel"), 140)
+
+        # Different requesters share artwork fetching without racing its .tmp file.
+        artwork_key = str(videoid)
+        artwork_task = _player_artwork_tasks.get(artwork_key)
+        if artwork_task is None:
+            artwork_task = asyncio.create_task(_player_artwork(videoid, result, user_id, title, channel))
+            _player_artwork_tasks[artwork_key] = artwork_task
+            artwork_task.add_done_callback(_forget_player_thumbnail_task(_player_artwork_tasks, artwork_key))
+        path, source = await asyncio.shield(artwork_task)
+        if not path or source != "official":
+            path = os.path.join(os.path.dirname(__file__), "..", "assets", "vivaan", "welcome.png")
+        with Image.open(path) as image:
+            image.load()
+            artwork = ImageOps.exif_transpose(image).convert("RGB")
+        try:
+            profile = await asyncio.wait_for(_player_profile(user_id, artwork), timeout=10)
+        except asyncio.TimeoutError:
+            profile = artwork.copy()
+
+        # Bound Pillow memory use when several groups start tracks together.
+        async with _player_render_semaphore:
+            render_task = asyncio.create_task(asyncio.to_thread(render_and_save_thumbnail,
+                output_path, artwork, profile, title, duration, views, channel, resolve_brand_name()))
+            try:
+                return await asyncio.shield(render_task)
+            except asyncio.CancelledError:
+                # Pillow still owns these images until its worker finishes.
+                await render_task
+                raise
+    except Exception:
+        return await _get_legacy_thumb(videoid, user_id)
+    finally:
+        for image in (artwork, profile):
+            if image is not None:
+                image.close()
+
+
 async def get_thumb(videoid, user_id=None):
+    """Render Vivaan's neon player card with existing artwork fallbacks."""
+    if not USE_NEON_THUMBNAILS:
+        return await _get_legacy_thumb(videoid, user_id)
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    output_path = os.path.join(CACHE_DIR,
+        f"{safe_cache_token(videoid)}_{safe_cache_token(user_id)}_{PLAYER_THUMB_CACHE_VERSION}.png")
+    if is_valid_image(output_path):
+        return output_path
+    task = _player_thumbnail_tasks.get(output_path)
+    if task is None:
+        task = asyncio.create_task(_build_player_thumbnail(videoid, user_id, output_path))
+        _player_thumbnail_tasks[output_path] = task
+        task.add_done_callback(_forget_player_thumbnail_task(_player_thumbnail_tasks, output_path))
+    return await asyncio.shield(task)
+
+
+async def _get_legacy_thumb(videoid, user_id=None):
     """Generate an enhanced glassmorphic playback thumbnail."""
     cache_user_id = user_id if user_id is not None else "blank"
     cache_path = card_cache_path(videoid, cache_user_id)
