@@ -6,12 +6,15 @@ import shutil
 import tempfile
 import time
 import mimetypes
-from dataclasses import dataclass
+import asyncio
+import logging
+from dataclasses import dataclass, field
 from html import unescape
 from pathlib import Path
 from urllib.parse import unquote, urljoin, urlparse
 
 import httpx
+import yt_dlp
 
 from VIVAANXMUSIC.security import validate_public_http_url
 
@@ -135,6 +138,7 @@ class SocialMediaItem:
     kind: str
     filename_hint: str = ""
     content: str = ""
+    headers: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -1027,6 +1031,41 @@ async def _fetch_tiktok_via_tikwm(
     )
 
 
+async def _fetch_social_via_yt_dlp(source_url: str) -> SocialDownloadBundle:
+    def extract():
+        with yt_dlp.YoutubeDL({
+            "quiet": True, "no_warnings": True, "skip_download": True,
+            "socket_timeout": 10, "retries": 1, "extractor_retries": 1,
+            "noplaylist": True, "playlistend": MAX_MEDIA_FILES,
+            "format": "best[protocol=https][ext=mp4]/best[protocol=https]/best",
+            "logger": logging.getLogger(__name__),
+        }) as downloader:
+            return downloader.extract_info(source_url, download=False)
+
+    data = await asyncio.wait_for(asyncio.to_thread(extract), timeout=35)
+    if not isinstance(data, dict):
+        raise SocialDownloadError("No public downloadable media was returned.")
+    entries = list(data.get("entries") or [data])[:MAX_MEDIA_FILES]
+    items = []
+    for entry in entries:
+        if not entry or not entry.get("url"):
+            continue
+        protocol = entry.get("protocol", "https")
+        extension = entry.get("ext", "mp4")
+        if protocol not in {"http", "https"} or extension in {"m3u8", "mpd"}:
+            continue
+        url = validate_public_http_url(entry["url"], allow_subdomains=True)
+        headers = {key: value for key, value in (entry.get("http_headers") or {}).items()
+                   if key in {"User-Agent", "Referer"}}
+        items.append(SocialMediaItem(url=url, kind="photo" if f".{extension}" in PHOTO_EXTENSIONS else "video",
+                                    filename_hint=f"{_safe_filename(entry.get('title'), 'media')}.{extension}",
+                                    headers=headers))
+    if not items:
+        raise SocialDownloadError("No public downloadable media was returned.")
+    return SocialDownloadBundle(title=_safe_filename(data.get("title"), "Social Media"),
+                                source="yt-dlp", items=items)
+
+
 async def get_social_bundle(platform: str, url: str) -> SocialDownloadBundle:
     safe_url = _validate_source_url(url, platform)
     failures: list[str] = []
@@ -1040,6 +1079,8 @@ async def get_social_bundle(platform: str, url: str) -> SocialDownloadBundle:
         limits=HTTP_LIMITS,
     ) as client:
         strategies = []
+        if platform in {"instagram", "facebook", "snapchat"}:
+            strategies.append(("yt-dlp", f"yt-dlp:{platform}", lambda: _fetch_social_via_yt_dlp(safe_url)))
         if platform == "x":
             if screen_name:
                 strategies.append(
@@ -1097,16 +1138,6 @@ async def get_social_bundle(platform: str, url: str) -> SocialDownloadBundle:
                         safe_url,
                         endpoint=LEGACY_COBALT_API_URL,
                         source_name="Legacy API",
-                    ),
-                ),
-                (
-                    "Public Cobalt Tracker",
-                    "cobalt:tracker_pool",
-                    lambda: _fetch_via_tracker_instances(
-                        client,
-                        safe_url,
-                        platform=platform,
-                        excluded_endpoints={PYBALT_API_URL, LEGACY_COBALT_API_URL},
                     ),
                 ),
             ]
@@ -1178,8 +1209,10 @@ async def download_bundle_files(bundle: SocialDownloadBundle) -> tuple[str, list
                     continue
 
                 safe_remote = validate_public_http_url(item.url, allow_subdomains=True)
-                async with client.stream("GET", safe_remote) as response:
+                async with client.stream("GET", safe_remote, headers=item.headers) as response:
                     response.raise_for_status()
+                    if "text/html" in response.headers.get("content-type", "").lower():
+                        raise SocialDownloadError("Media link returned a web page instead of a file.")
                     total_size = int(response.headers.get("content-length") or 0)
                     if total_size and total_size > MAX_DOWNLOAD_BYTES:
                         raise SocialDownloadError("Remote media is too large to send.")

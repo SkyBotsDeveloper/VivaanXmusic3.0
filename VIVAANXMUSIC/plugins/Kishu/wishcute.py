@@ -3,6 +3,7 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 import asyncio
 import random
 import requests
+from pathlib import Path
 from VIVAANXMUSIC import app
 from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
@@ -11,7 +12,7 @@ SUPPORT_BTN = InlineKeyboardMarkup(
     [[InlineKeyboardButton("ꜱᴜᴘᴘᴏʀᴛ", url=f"https://t.me/{SUPPORT_CHAT}")]]
 )
 
-CUTE_VIDEO = "https://telegra.ph/file/528d0563175669e123a75.mp4"
+CUTE_VIDEO = str(Path(__file__).resolve().parents[2] / "assets" / "vivaan" / "cute.mp4")
 NEKOS_BEST_HEADERS = {
     "Accept": "application/json",
     "User-Agent": "VivaanXMusicBot (https://github.com/VivaanXMusic)",

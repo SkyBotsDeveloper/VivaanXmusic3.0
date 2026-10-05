@@ -2,8 +2,11 @@ import json
 import os
 from dataclasses import dataclass
 from typing import Callable
+from urllib.parse import urljoin
 
 import aiohttp
+
+from VIVAANXMUSIC.security import validate_public_http_url
 
 
 UPLOAD_TIMEOUT = aiohttp.ClientTimeout(total=300, connect=30, sock_read=180)
@@ -144,14 +147,42 @@ async def _upload_tempfile(session: aiohttp.ClientSession, file_path: str) -> st
 
 UPLOAD_PROVIDERS: tuple[tuple[str, Callable], ...] = (
     ("Catbox", _upload_catbox),
-    ("Litterbox", _upload_litterbox),
-    ("Uguu", _upload_uguu),
-    ("tmpfiles", _upload_tmpfiles),
     ("TempFile", _upload_tempfile),
 )
 
 
+async def _verify_upload(session, url, file_path):
+    with open(file_path, "rb") as source:
+        expected = source.read(4096)
+    for _ in range(5):
+        safe_url = validate_public_http_url(url, allow_subdomains=True)
+        async with session.get(
+            safe_url, headers={"Range": f"bytes=0-{len(expected) - 1}", "Accept-Encoding": "identity"},
+            allow_redirects=False, timeout=aiohttp.ClientTimeout(total=25),
+        ) as response:
+            if response.status in {301, 302, 303, 307, 308}:
+                location = response.headers.get("Location")
+                if not location:
+                    raise RuntimeError("Upload download redirect has no target.")
+                url = urljoin(safe_url, location)
+                continue
+            if response.status not in {200, 206}:
+                raise RuntimeError(f"Upload download returned HTTP {response.status}.")
+            total = response.headers.get("Content-Range", "").rsplit("/", 1)[-1]
+            if response.status == 200:
+                total = response.headers.get("Content-Length", "")
+            if total.isdigit() and int(total) != os.path.getsize(file_path):
+                raise RuntimeError("Upload link has a different file size.")
+            actual = await response.content.readexactly(len(expected))
+            if actual != expected:
+                raise RuntimeError("Upload link does not return the uploaded file.")
+            return
+    raise RuntimeError("Upload download has too many redirects.")
+
+
 async def upload_file_with_fallbacks(file_path: str) -> UploadResult:
+    if not os.path.isfile(file_path) or os.path.getsize(file_path) == 0:
+        return UploadResult(ok=False, error="The file is missing or empty.")
     errors = []
     async with aiohttp.ClientSession(
         timeout=UPLOAD_TIMEOUT,
@@ -160,12 +191,13 @@ async def upload_file_with_fallbacks(file_path: str) -> UploadResult:
         for provider, uploader in UPLOAD_PROVIDERS:
             try:
                 url = await uploader(session, file_path)
+                if not _is_url(url):
+                    raise RuntimeError("invalid URL response")
+                await _verify_upload(session, url, file_path)
             except Exception as exc:
                 errors.append(f"{provider}: {type(exc).__name__}: {exc}")
                 continue
 
-            if _is_url(url):
-                return UploadResult(ok=True, url=url, provider=provider)
-            errors.append(f"{provider}: invalid URL response")
+            return UploadResult(ok=True, url=url, provider=provider)
 
     return UploadResult(ok=False, error="\n".join(errors[-4:]))

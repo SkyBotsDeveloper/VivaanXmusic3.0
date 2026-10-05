@@ -8,6 +8,7 @@ import json
 import mimetypes
 import os
 import re
+import shutil
 import tempfile
 import threading
 import time
@@ -46,10 +47,6 @@ HTTP_HEADERS = {"User-Agent": "VivaanX/FreeAI/1.0"}
 CHAT_API_URL = "https://api-xqwa.onrender.com/chat/"
 ELITE_CHAT_COMPLETIONS_URL = f"{ELITE_LLM_API_BASE}/chat/completions"
 AIRFORCE_CHAT_COMPLETIONS_URL = "https://api.airforce/v1/chat/completions"
-IMAGE_GEN_URL = "https://death-image.ashlynn.workers.dev/generate"
-POLLINATIONS_IMAGE_URL = "https://image.pollinations.ai/prompt/{prompt}"
-IMAGE_ENHANCE_URL = "https://arimagex.netlify.app/api/enhance"
-IMAGE_REMOVEBG_URL = "https://arimagex.netlify.app/api/removebg"
 OCR_SPACE_API_URL = "https://api.ocr.space/parse/image"
 REPLICATE_API_URL = "https://api.replicate.com/v1"
 TEXT_VIDEO_MJ_URL = "https://text-to-video-mj.vercel.app/generate"
@@ -87,6 +84,12 @@ HF_IMAGE_EDIT_ALT_SPACE = "lenML/Qwen-Image-Edit-2511-Fast"
 HF_IMAGE_OBJECT_SPACE = "prithivMLmods/Qwen-Image-Edit-Object-Manipulator"
 HF_FACE_SWAP_SPACE = "V0pr0S/ComfyUI-Reactor-Fast-Face-Swap-CPU"
 HF_IMAGE_STYLE_SPACE = "prithivMLmods/Qwen-Image-Edit-2511-LoRAs-Fast"
+HF_CHAT_SPACE = "Harley-ml/SmolLM2_Chat"
+HF_IMAGE_GEN_SPACE = "black-forest-labs/FLUX.1-schnell"
+HF_CPU_IMAGE_SPACE = "Manjushri/SDXL-Turbo-CPU"
+HF_CPU_EDIT_SPACE = "Manjushri/SDXL-Turbo-Img2Img-CPU"
+HF_REMOVEBG_SPACES = ("schroneko/transparent-background", "amirgame197/Remove-background")
+_public_chat_semaphore = asyncio.Semaphore(2)
 DEFAULT_VISION_PROMPT = "Describe this image."
 DETAILED_VISION_PROMPT = (
     "Describe this image clearly and helpfully. Mention the main subject, setting, "
@@ -1178,7 +1181,9 @@ def _extract_image_path(payload) -> str | None:
 
 async def _ensure_local_video(path_or_url: str) -> str:
     if os.path.exists(path_or_url):
-        return path_or_url
+        with open(path_or_url, "rb") as source, tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as output:
+            shutil.copyfileobj(source, output)
+            return output.name
     if not re.match(r"^https?://", path_or_url, flags=re.IGNORECASE):
         raise FreeAIError("Generated video file was not available locally.")
 
@@ -1197,8 +1202,21 @@ async def _ensure_local_video(path_or_url: str) -> str:
 
 
 async def _ensure_local_image(path_or_url: str) -> str:
+    if path_or_url.startswith("data:image/"):
+        try:
+            header, encoded = path_or_url.split(",", 1)
+            if ";base64" not in header:
+                raise ValueError("Expected a base64 image.")
+            data = base64.b64decode(encoded, validate=True)
+            with Image.open(BytesIO(data)) as image:
+                image.verify()
+            return _write_temp_image(data, header[5:].split(";", 1)[0])
+        except Exception as exc:
+            raise FreeAIError("Provider returned an invalid encoded image.") from exc
     if os.path.exists(path_or_url):
-        return path_or_url
+        # Callers delete their output; never delete a shared Gradio cache file.
+        with open(path_or_url, "rb") as handle:
+            return _write_temp_image(handle.read(), mimetypes.guess_type(path_or_url)[0] or "image/png")
     if not re.match(r"^https?://", path_or_url, flags=re.IGNORECASE):
         raise FreeAIError("Edited image file was not available locally.")
 
@@ -1271,7 +1289,7 @@ async def _run_local_backup_video(
     try:
         if reference_image_path:
             image_path = reference_image_path
-            provider_name = "Local backup animation"
+            provider_name = "Local backup clip"
             used_reference = True
         else:
             image_bytes = await generate_image(prompt)
@@ -2125,7 +2143,8 @@ def _run_wan22_preview_i2v_space(
             "UniPCMultistep",
             3.0,
             16,
-            True,
+            *(("2xNomosUni_compact_otf_medium", 1.0, True, True, True)
+              if space_id == HF_WAN22_PREVIEW2_SPACE else (True,)),
             api_name="/generate_video",
         ),
         allow_anonymous=True,
@@ -2639,99 +2658,61 @@ async def _legacy_chat_request(
     return ChatResult(model=str(payload.get("model") or model), content=cleaned)
 
 
+def _run_public_chat(prompt: str, model_label: str, timeout_seconds: int) -> str:
+    result = _run_with_hf_client(
+        HF_CHAT_SPACE,
+        lambda client: _run_gradio_job(
+            client, timeout_seconds, prompt, [], model_label, "CPU", 256,
+            api_name="/respond",
+        ),
+        allow_anonymous=True,
+    )
+    history = result[0] if isinstance(result, (tuple, list)) and result else []
+    for message in reversed(history if isinstance(history, list) else []):
+        if not isinstance(message, dict) or message.get("role") != "assistant":
+            continue
+        content = message.get("content", "")
+        if isinstance(content, list):
+            content = "\n".join(block.get("text", "") for block in content
+                                if isinstance(block, dict) and block.get("type") == "text")
+        cleaned = _clean_vision_text(content)
+        _raise_if_vision_upstream_error(cleaned)
+        if cleaned:
+            return cleaned
+    raise FreeAIError("Public chat provider returned no assistant answer.")
+
+
 async def generate_chat_response(
     prompt: str,
     *,
     alias: str = "gpt",
     system_prompt: str | None = None,
 ) -> ChatResult:
-    profile = CHAT_ALIAS_PROFILES.get(alias.lower(), {})
-    display_name = str(profile.get("display_name") or alias.upper())
-    identity_response = str(profile.get("identity_response") or "").strip()
-    if identity_response and _is_identity_query(prompt):
-        return ChatResult(model=display_name, content=identity_response)
-    alias_prompt = str(profile.get("system_prompt") or "").strip()
-    combined_system_prompt = "\n\n".join(
-        part for part in (alias_prompt, system_prompt) if part
-    ) or None
-
-    failures: list[str] = []
-    async with httpx.AsyncClient(
-        timeout=HTTP_TIMEOUT,
-        headers=HTTP_HEADERS,
-        follow_redirects=True,
-        trust_env=False,
-    ) as client:
-        for model in _chat_models_for_alias(alias):
-            provider_key = f"chat:elite:{model}"
-            if _provider_cooldown_remaining(provider_key) > 0:
-                failures.append(f"Elite {model}: cooling down")
+    display_name = CHAT_ALIAS_PROFILES.get(alias.lower(), {}).get("display_name", alias.upper())
+    if _is_identity_query(prompt):
+        return ChatResult(model="SmolLM2 1.7B Instruct",
+                          content=f"I am the {display_name} command assistant, powered by the open SmolLM2 model.")
+    if not (prompt or "").strip():
+        raise FreeAIError("Please provide a question.")
+    text = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
+    failures = []
+    async with _public_chat_semaphore:
+        for label, timeout in (("SmolLM2 1.7B Instruct", 30), ("SmolLM2 360M Instruct", 15)):
+            provider_key = f"chat:public:{label}"
+            if _provider_cooldown_remaining(provider_key):
                 continue
             try:
-                result = await _elite_chat_request(
-                    client,
-                    prompt,
-                    model,
-                    combined_system_prompt,
+                content = await asyncio.wait_for(
+                    asyncio.to_thread(_run_public_chat, text, label, timeout),
+                    timeout=timeout + 5,
                 )
                 _clear_provider_cooldown(provider_key)
-                return ChatResult(
-                    model=display_name,
-                    content=result.content,
-                )
-            except (httpx.HTTPError, FreeAIError) as exc:
-                message = str(exc)
+                return ChatResult(model=label, content=content)
+            except Exception as exc:
+                message = str(exc).strip() or "Provider timed out."
                 _set_provider_cooldown(provider_key, message)
-                failures.append(f"Elite {model}: {message}")
-
-        for model in _airforce_models_for_alias(alias):
-            provider_key = f"chat:airforce:{model}"
-            if _provider_cooldown_remaining(provider_key) > 0:
-                failures.append(f"Airforce {model}: cooling down")
-                continue
-            try:
-                result = await _airforce_chat_request(
-                    client,
-                    prompt,
-                    model,
-                    combined_system_prompt,
-                )
-                _clear_provider_cooldown(provider_key)
-                return ChatResult(
-                    model=display_name,
-                    content=result.content,
-                )
-            except (httpx.HTTPError, FreeAIError) as exc:
-                message = str(exc)
-                _set_provider_cooldown(provider_key, message)
-                failures.append(f"Airforce {model}: {message}")
-
-        for model in CHAT_MODEL_CANDIDATES:
-            for attempt in range(2):
-                provider_key = f"chat:legacy:{model}"
-                if _provider_cooldown_remaining(provider_key) > 0:
-                    failures.append(f"Legacy {model}: cooling down")
-                    break
-                try:
-                    result = await _legacy_chat_request(
-                        client,
-                        prompt,
-                        model,
-                        combined_system_prompt,
-                    )
-                    _clear_provider_cooldown(provider_key)
-                    return ChatResult(
-                        model=display_name,
-                        content=result.content,
-                    )
-                except (httpx.HTTPError, FreeAIError) as exc:
-                    message = str(exc)
-                    _set_provider_cooldown(provider_key, message)
-                    failures.append(f"Legacy {model} attempt {attempt + 1}: {message}")
-                    if _provider_cooldown_remaining(provider_key) > 0:
-                        break
-    details = "\n".join(failures[:8])
-    raise FreeAIError(f"Chat service is temporarily unavailable.\n{details}")
+                failures.append(message)
+    raise FreeAIError("Public no-key chat service is temporarily unavailable.\n" + "\n".join(failures[:2]))
 
 
 def _get_gradio_client(space_id: str, *, token: str | None = None) -> GradioClient:
@@ -3468,14 +3449,14 @@ def _run_object_manipulator_edit(
         lambda client: _run_gradio_job(
             client,
             timeout_seconds,
-            _gallery_inputs(image_paths),
+            json.dumps([_image_path_to_base64(path) for path in image_paths]),
             prompt,
             _choose_object_lora(prompt),
             0,
             True,
             1.0,
             4,
-            api_name="/infer",
+            api_name="/edit_image",
         ),
         allow_anonymous=True,
     )
@@ -3500,14 +3481,14 @@ def _run_style_lora_edit(
         lambda client: _run_gradio_job(
             client,
             timeout_seconds,
-            _gallery_inputs(image_paths),
+            json.dumps([_image_path_to_base64(path) for path in image_paths]),
             prompt,
             lora,
             0,
             True,
             1.0,
             4,
-            api_name="/infer",
+            api_name="/edit_image",
         ),
         allow_anonymous=True,
     )
@@ -3548,6 +3529,8 @@ def _run_reactor_face_swap(
 
 def _choose_image_edit_routes(prompt: str, image_count: int) -> tuple[str, ...]:
     routes: list[str] = []
+    if image_count == 1 and (_pick_style_lora(prompt) or re.search(r"\bwatercolou?r\b", prompt, re.I)):
+        routes.append("cpu_style")
     if image_count >= 2 and _prompt_is_face_swap(prompt):
         routes.append("reactor_face_swap")
     routes.extend(["qwen_official", "qwen_fast"])
@@ -3556,13 +3539,11 @@ def _choose_image_edit_routes(prompt: str, image_count: int) -> tuple[str, ...]:
             routes.append("object_manipulator")
         if _pick_style_lora(prompt):
             routes.append("style_lora")
-        routes.append("qwen_lenml")
     else:
         if _needs_object_manipulator(prompt):
             routes.append("object_manipulator")
         if _pick_style_lora(prompt):
             routes.append("style_lora")
-        routes.append("qwen_lenml")
 
     seen: set[str] = set()
     ordered: list[str] = []
@@ -3593,12 +3574,22 @@ async def edit_image_bytes(
         for image_bytes, mime_type in images[:3]:
             image_paths.append(_write_temp_image(image_bytes, mime_type))
 
+        if len(image_paths) == 1:
+            try:
+                return await asyncio.to_thread(_edit_image_locally, text_prompt, image_paths[0])
+            except FreeAIError:
+                pass
+
         for route in routes:
             route_key = f"image_edit:{route}"
             if _provider_cooldown_remaining(route_key) > 0:
                 continue
             try:
-                if route == "reactor_face_swap":
+                if route == "cpu_style":
+                    candidate = await asyncio.wait_for(
+                        asyncio.to_thread(_run_cpu_image_edit, text_prompt, image_paths[0]), timeout=130,
+                    )
+                elif route == "reactor_face_swap":
                     candidate = await asyncio.wait_for(
                         asyncio.to_thread(
                             _run_reactor_face_swap,
@@ -3665,7 +3656,7 @@ async def edit_image_bytes(
                 output_path = await _ensure_local_image(candidate)
                 _clear_provider_cooldown(route_key)
                 with open(output_path, "rb") as handle:
-                    return handle.read()
+                    return _image_as_png(handle.read())
             except asyncio.TimeoutError:
                 _set_image_edit_route_cooldown(route_key, "Provider timed out.")
                 continue
@@ -3673,6 +3664,17 @@ async def edit_image_bytes(
                 message = str(exc).strip() or "unknown error"
                 _set_image_edit_route_cooldown(route_key, message)
                 continue
+
+        if len(image_paths) == 1 and "cpu_style" not in routes and not _prompt_is_face_swap(text_prompt):
+            try:
+                candidate = await asyncio.wait_for(
+                    asyncio.to_thread(_run_cpu_image_edit, text_prompt, image_paths[0]), timeout=130,
+                )
+                output_path = await _ensure_local_image(candidate)
+                with open(output_path, "rb") as handle:
+                    return _image_as_png(handle.read())
+            except Exception:
+                pass
 
         try:
             return await asyncio.to_thread(_edit_image_locally, text_prompt, image_paths[0])
@@ -3693,80 +3695,83 @@ async def edit_image_bytes(
             _remove_file(output_path)
 
 
+def _run_cpu_image_edit(prompt: str, image_path: str) -> str:
+    result = _run_with_hf_client(
+        HF_CPU_EDIT_SPACE,
+        lambda client: _run_gradio_job(
+            client, 120, handle_file(image_path), prompt, 2, int.from_bytes(os.urandom(4)), 0.5,
+            api_name="/predict",
+        ),
+        allow_anonymous=True,
+    )
+    path = _extract_image_path(result)
+    if not path:
+        raise FreeAIError("CPU image editor returned no image.")
+    return path
+
+
+def _image_as_png(data: bytes) -> bytes:
+    with Image.open(BytesIO(data)) as image:
+        image.load()
+        output = BytesIO()
+        image.save(output, format="PNG")
+        return output.getvalue()
+
+
+def _run_public_image_generation(prompt: str, *, use_cpu: bool = True) -> str:
+    space = HF_CPU_IMAGE_SPACE if use_cpu else HF_IMAGE_GEN_SPACE
+    arguments = (prompt, 1, int.from_bytes(os.urandom(4))) if use_cpu else (prompt, 0, True, 768, 768, 4)
+    result = _run_with_hf_client(
+        space,
+        lambda client: _run_gradio_job(
+            client, 65 if use_cpu else 45, *arguments, api_name="/genie" if use_cpu else "/infer",
+        ),
+        allow_anonymous=True,
+    )
+    path = _extract_image_path(result)
+    if not path:
+        raise FreeAIError("Public image provider returned no image.")
+    return path
+
+
 async def generate_image(prompt: str) -> bytes:
     _ensure_safe_generation_prompt(prompt)
-    params = {
-        "prompt": prompt,
-        "image": 1,
-        "dimensions": "1:1",
-        "safety": "true",
-        "steps": 4,
-    }
-    async with httpx.AsyncClient(
-        timeout=HTTP_TIMEOUT,
-        headers=HTTP_HEADERS,
-        follow_redirects=True,
-        trust_env=False,
-    ) as client:
-        failures: list[str] = []
+    failures = []
+    for use_cpu in (True, False):
+        provider_key = "image:sdxl-cpu" if use_cpu else "image:flux-schnell"
+        if _provider_cooldown_remaining(provider_key):
+            continue
+        output_path = None
+        try:
+            candidate = await asyncio.wait_for(
+                asyncio.to_thread(_run_public_image_generation, prompt, use_cpu=use_cpu),
+                timeout=75 if use_cpu else 55,
+            )
+            output_path = await _ensure_local_image(candidate)
+            with open(output_path, "rb") as handle:
+                data = handle.read()
+            data = _image_as_png(data)
+            _clear_provider_cooldown(provider_key)
+            return data
+        except Exception as exc:
+            message = str(exc).strip() or "Provider timed out."
+            _set_provider_cooldown(provider_key, message)
+            failures.append(message)
+        finally:
+            _remove_file(output_path)
+    raise FreeAIError("Public image generation is temporarily unavailable.\n" + "\n".join(failures[:2]))
 
-        async def download_image(url: str, *, params: dict | None = None) -> bytes:
-            image_response = await client.get(url, params=params)
-            content_type = (image_response.headers.get("content-type") or "").lower()
-            if image_response.status_code != 200:
-                raise FreeAIError("Generated image could not be downloaded.")
-            if not content_type.startswith("image/"):
-                raise FreeAIError("Generated image download returned a non-image payload.")
-            return image_response.content
 
-        for attempt in range(3):
-            try:
-                response = await client.get(IMAGE_GEN_URL, params=params)
-                try:
-                    payload = response.json()
-                except Exception as exc:
-                    raise FreeAIError(
-                        "Image generation service returned an invalid response."
-                    ) from exc
-
-                images = payload.get("images") or [] if isinstance(payload, dict) else []
-                if response.status_code != 200 or not images:
-                    detail = (
-                        _extract_json_error(payload)
-                        if isinstance(payload, dict)
-                        else "Image generation service did not return an image."
-                    )
-                    if not detail or detail == "Unknown upstream error.":
-                        detail = "Image generation service did not return an image."
-                    raise FreeAIError(detail)
-
-                return await download_image(images[0])
-            except (httpx.HTTPError, FreeAIError) as exc:
-                failures.append(str(exc))
-                if attempt < 2:
-                    await asyncio.sleep(1 + attempt)
-
-        pollinations_params = {
-            "width": 1024,
-            "height": 1024,
-            "nologo": "true",
-            "safe": "true",
-            "model": "flux",
-        }
-        pollinations_url = POLLINATIONS_IMAGE_URL.format(prompt=quote(prompt, safe=""))
-        for attempt in range(2):
-            try:
-                return await download_image(
-                    pollinations_url,
-                    params=pollinations_params,
-                )
-            except (httpx.HTTPError, FreeAIError) as exc:
-                failures.append(f"Pollinations: {exc}")
-                if attempt < 1:
-                    await asyncio.sleep(1)
-
-    details = "\n".join(failures[-3:])
-    raise FreeAIError(f"Image generation service is temporarily unavailable.\n{details}")
+def _run_public_removebg(space: str, image_path: str) -> str:
+    result = _run_with_hf_client(
+        space,
+        lambda client: _run_gradio_job(client, 35, handle_file(image_path), api_name="/predict"),
+        allow_anonymous=True,
+    )
+    path = _extract_image_path(result)
+    if not path:
+        raise FreeAIError("Background removal provider returned no image.")
+    return path
 
 
 async def process_image_bytes(
@@ -3776,54 +3781,37 @@ async def process_image_bytes(
     mode: str,
 ) -> bytes:
     if mode == "enhance":
-        endpoint = IMAGE_ENHANCE_URL
-    elif mode == "removebg":
-        endpoint = IMAGE_REMOVEBG_URL
-    else:
+        # The former remote enhancer is gone; this verified local path has no quota.
+        return await asyncio.to_thread(_enhance_image_locally, image_bytes)
+    if mode != "removebg":
         raise FreeAIError(f"Unsupported image mode: {mode}")
-
-    payload = {"imageUrl": _build_data_uri(mime_type, image_bytes)}
+    input_path = _write_temp_image(image_bytes, mime_type)
     try:
-        async with httpx.AsyncClient(
-            timeout=HTTP_TIMEOUT,
-            headers=HTTP_HEADERS,
-            follow_redirects=True,
-            trust_env=False,
-        ) as client:
-            response = await client.post(endpoint, json=payload)
-            content_type = (response.headers.get("content-type") or "").lower()
-            if response.status_code != 200:
-                if "application/json" in content_type:
-                    raise FreeAIError(_extract_json_error(response.json()))
-                raise FreeAIError("Image processing service returned a non-200 response.")
-            if "application/json" in content_type:
-                payload = response.json()
-                image_url = payload.get("imageUrl")
-                if not image_url:
-                    raise FreeAIError(_extract_json_error(payload))
-                image_response = await client.get(image_url)
-                if image_response.status_code != 200:
-                    raise FreeAIError("Processed image could not be downloaded.")
-                return image_response.content
-            if not content_type.startswith("image/"):
-                raise FreeAIError(
-                    "Image processing service returned an unexpected payload."
+        for space in HF_REMOVEBG_SPACES:
+            provider_key = f"removebg:{space}"
+            if _provider_cooldown_remaining(provider_key):
+                continue
+            output_path = None
+            try:
+                candidate = await asyncio.wait_for(
+                    asyncio.to_thread(_run_public_removebg, space, input_path), timeout=45,
                 )
-            return response.content
-    except Exception as exc:
-        if mode == "enhance":
-            try:
-                return await asyncio.to_thread(_enhance_image_locally, image_bytes)
-            except Exception:
-                pass
-        if mode == "removebg":
-            try:
-                return await asyncio.to_thread(_remove_background_locally, image_bytes)
-            except Exception:
-                pass
-        if isinstance(exc, FreeAIError):
-            raise
-        raise FreeAIError(f"Image processing service failed: {exc}") from exc
+                output_path = await _ensure_local_image(candidate)
+                with open(output_path, "rb") as handle:
+                    data = handle.read()
+                with Image.open(BytesIO(data)) as image:
+                    image.load()
+                    if image.mode != "RGBA" or image.getchannel("A").getextrema() == (255, 255):
+                        raise FreeAIError("Provider returned no transparent background.")
+                _clear_provider_cooldown(provider_key)
+                return _image_as_png(data)
+            except Exception as exc:
+                _set_provider_cooldown(provider_key, str(exc) or "Provider timed out.")
+            finally:
+                _remove_file(output_path)
+        return await asyncio.to_thread(_remove_background_locally, image_bytes)
+    finally:
+        _remove_file(input_path)
 
 
 async def generate_video(
@@ -3858,30 +3846,6 @@ async def generate_video(
         provider_batches: list[list[VideoProvider]] = []
 
         if reference_image_path:
-            provider_batches.append(
-                [
-                    VideoProvider(
-                        "Fixart / Free I2V",
-                        180,
-                        True,
-                        True,
-                        _run_fixart_image_to_video,
-                    ),
-                ]
-            )
-
-            provider_batches.append(
-                [
-                    VideoProvider(
-                        "Vheer / Free I2V",
-                        300,
-                        True,
-                        True,
-                        _run_vheer_image_to_video,
-                    ),
-                ]
-            )
-
             if REPLICATE_TOKEN_POOL:
                 provider_batches.extend(
                     [
@@ -3951,13 +3915,6 @@ async def generate_video(
                                 False,
                                 _run_hysts_zeroscope_video,
                             ),
-                            VideoProvider(
-                                "Alava01 / Wan Demo",
-                                50,
-                                False,
-                                False,
-                                _run_alava_wan_demo,
-                            ),
                         ],
                         [
                             VideoProvider(
@@ -3970,27 +3927,9 @@ async def generate_video(
                         ],
                     ]
                 )
-
-            provider_batches.append(
-                [
-                    VideoProvider(
-                        "VidForge / MJ T2V",
-                        70,
-                        False,
-                        False,
-                        _run_vidforge_text_video,
-                    ),
-                    VideoProvider(
-                        "VidForge Proxy / MJ T2V",
-                        80,
-                        False,
-                        False,
-                        _run_vidforge_proxy_text_video,
-                    ),
-                ]
-            )
-
         for batch in provider_batches:
+            if not HF_TOKEN_POOL and any("zerogpu" in failure.lower() for failure in failures):
+                break
             result = await _run_video_provider_batch(
                 batch,
                 prompt=text_prompt,
@@ -4024,7 +3963,7 @@ async def generate_video(
         else:
             headline = (
                 "Public no-key video providers are temporarily unavailable.\n"
-                "Tip: set HF_TOKEN/HF_TOKENS or REPLICATE_API_TOKEN/REPLICATE_API_TOKENS for more reliable /genvid output."
+                "Please try again later; the local backup could not render this request."
             )
         raise FreeAIError(
             f"{headline}\n{details}"

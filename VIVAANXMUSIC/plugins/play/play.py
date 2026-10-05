@@ -384,7 +384,11 @@ async def play_command(
 
         elif await Resso.valid(url):
             try:
-                details, track_id = await Resso.track(url)
+                resso_track = await Resso.track(url)
+                if not resso_track:
+                    return await rich_call(mystic.edit_text,
+                        "Resso links are no longer available. Please use a song name, YouTube, Spotify or Apple Music link.")
+                details, track_id = resso_track
             except Exception as e:
                 await log_play_failure("Resso", e, query_text=url, stream_label="Resso")
                 return await rich_call(mystic.edit_text, _["play_3"])

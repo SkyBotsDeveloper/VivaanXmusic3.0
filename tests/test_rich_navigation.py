@@ -6,6 +6,7 @@ import __future__
 import random
 import re
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -203,6 +204,7 @@ class NavigationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(rich.rich_markup(self.client.views[-1]).inline_keyboard[1]), 5)
         self.assertEqual(rich.rich_text(self.client.views[-1]), "Same player caption")
         queue = handlers("plugins/tools/queue.py", app=self.client, db=playlist, basic={},
+                         Path=Path, __file__=str(ROOT / "VIVAANXMUSIC/plugins/tools/queue.py"),
                          queue_markup=queue_ui["queue_markup"], queue_back_markup=queue_ui["queue_back_markup"],
                          is_active_chat=AsyncMock(return_value=True), get_channeplayCB=AsyncMock(return_value=(-123, False)),
                          config=SimpleNamespace(YOUTUBE_IMG_URL="https://example.com/player.jpg"),

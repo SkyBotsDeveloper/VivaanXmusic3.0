@@ -24,11 +24,9 @@ fetch = AsyncClient(
 )
 QUOTE_JSON_ENDPOINTS = (
     "https://quote.yuri.ly/generate",
-    "https://bot.lyo.su/quote/generate",
 )
 QUOTE_BINARY_ENDPOINTS = (
     "https://quote.yuri.ly/generate.webp",
-    "https://bot.lyo.su/quote/generate.png",
 )
 QUOTE_NAME_LIMIT = 48
 DECORATIVE_NAME_RE = re.compile(

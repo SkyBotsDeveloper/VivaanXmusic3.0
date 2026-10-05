@@ -169,9 +169,12 @@ async def genvid_handler(client: Client, message: Message):
         if len(display_prompt) > 850:
             display_prompt = f"{display_prompt[:847]}..."
 
+        caption = f"Prompt: {display_prompt}"
+        if result.provider.startswith("Local backup"):
+            caption += "\nBackup clip: still image with fades; AI motion was unavailable."
         await message.reply_video(
             video=output_path,
-            caption=f"Prompt: {display_prompt}",
+            caption=caption,
             supports_streaming=True,
         )
         await status.delete()

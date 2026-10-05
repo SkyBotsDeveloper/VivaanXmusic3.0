@@ -1,5 +1,6 @@
 import asyncio
 import os
+from pathlib import Path
 
 from pyrogram import filters
 from pyrogram.errors import FloodWait
@@ -157,7 +158,7 @@ async def queued_tracks(client, CallbackQuery: CallbackQuery, _):
     basic[videoid] = False
     buttons = queue_back_markup(_, what)
     med = InputMediaPhoto(
-        media="https://telegra.ph//file/6f7d35131f69951c74ee5.jpg",
+        media=str(Path(__file__).resolve().parents[2] / "assets" / "vivaan" / "welcome.png"),
         caption=_["queue_1"],
     )
     await rich_call(CallbackQuery.edit_message_media, media=med)
