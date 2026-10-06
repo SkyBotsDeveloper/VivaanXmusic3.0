@@ -258,12 +258,21 @@ def _paste_slot(canvas, source, mask, preserve_full_image=False):
     if preserve_full_image:
         slot = _cover(source, size).filter(ImageFilter.GaussianBlur(14))
         slot = ImageEnhance.Brightness(slot).enhance(0.55)
-        artwork = ImageOps.contain(source.convert("RGB"), size, method=RESAMPLE)
-        slot.paste(artwork, ((size[0] - artwork.width) // 2,
-                            (size[1] - artwork.height) // 2))
+        slot.paste(_cover(source, size))
     else:
         slot = _cover(source, size)
     canvas.paste(slot, box[:2], mask.crop(box))
+
+
+def _fallback_profile(size=(480, 480)):
+    avatar = Image.new("RGB", size, (4, 6, 10))
+    draw = ImageDraw.Draw(avatar)
+    font = _font(FONT_BOLD, max(40, size[0] // 7))
+    bounds = draw.textbbox((0, 0), "NO DP", font=font)
+    position = ((size[0] - (bounds[2] - bounds[0])) // 2 - bounds[0],
+                (size[1] - (bounds[3] - bounds[1])) // 2 - bounds[1])
+    draw.text(position, "NO DP", font=font, fill=(238, 242, 248))
+    return avatar
 
 
 def render_thumbnail(youtube, profile, title, duration, views, channel, app_name):
@@ -275,7 +284,13 @@ def render_thumbnail(youtube, profile, title, duration, views, channel, app_name
     canvas = ImageChops.screen(light_plate, background)
     _, (album_mask, avatar_mask) = _load_template()
     _paste_slot(canvas, youtube, album_mask, preserve_full_image=True)
-    _paste_slot(canvas, profile, avatar_mask)
+    close_profile = profile is None
+    profile = _fallback_profile() if close_profile else profile
+    try:
+        _paste_slot(canvas, profile, avatar_mask)
+    finally:
+        if close_profile:
+            profile.close()
 
     details = Image.new("RGBA", CANVAS_SIZE, (0, 0, 0, 0))
     draw = ImageDraw.Draw(details)

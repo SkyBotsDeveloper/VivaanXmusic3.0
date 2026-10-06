@@ -56,6 +56,29 @@ class RendererTest(unittest.TestCase):
             x1, y1, x2, y2 = mask.getbbox()
             self.assertEqual(result.getpixel(((x1 + x2) // 2, (y1 + y2) // 2)), color)
 
+    def test_fallback_profile_is_black_with_centered_no_dp_label(self):
+        avatar = renderer._fallback_profile()
+        self.assertEqual(avatar.getpixel((4, 4)), (4, 6, 10))
+        pixels = avatar.convert("L").get_flattened_data()
+        self.assertGreater(sum(value < 30 for value in pixels), len(pixels) * 0.8)
+        self.assertGreater(sum(value > 210 for value in pixels), 1000)
+        bounds = ImageDraw.Draw(avatar).textbbox((0, 0), "NO DP", font=renderer._font(renderer.FONT_BOLD, 480 // 7))
+        self.assertLess(bounds[2] - bounds[0], avatar.width)
+        avatar.close()
+
+    def test_album_art_fills_box_without_cutting_top_or_bottom(self):
+        mask = renderer._load_template()[1][0]
+        box = mask.getbbox()
+        source = Image.new("RGB", (960, 540), "green")
+        draw = ImageDraw.Draw(source)
+        draw.rectangle((0, 0, 959, 119), fill="red")
+        draw.rectangle((0, 420, 959, 539), fill="blue")
+        canvas = Image.new("RGB", renderer.CANVAS_SIZE, "black")
+        renderer._paste_slot(canvas, source, mask, preserve_full_image=True)
+        center_x = (box[0] + box[2]) // 2
+        self.assertEqual(canvas.getpixel((center_x, box[1] + 20)), (255, 0, 0))
+        self.assertEqual(canvas.getpixel((center_x, box[3] - 31)), (0, 0, 255))
+
     def test_long_multilingual_titles_and_portrait_artwork_render(self):
         image = renderer.render_thumbnail(art((300, 900)), Image.new("RGB", (1, 1), "blue"),
             "अरिजीत सिंह - " + "A very long song name " * 15 + "[Official Audio]", "LIVE",
@@ -151,11 +174,11 @@ class ThumbnailFlowTest(unittest.IsolatedAsyncioTestCase):
             result = await thumbs.get_thumb("offline", None)
         with Image.open(result) as image:
             self.assertEqual(image.size, (1280, 720))
-        self.assertIn("vivaan_cinematic_v1", result)
+        self.assertIn("vivaan_cinematic_v2", result)
         legacy.assert_not_awaited()
 
     async def test_corrupt_cached_card_is_regenerated(self):
-        cached = self.cache / "video_7_vivaan_cinematic_v1.png"
+        cached = self.cache / "video_7_vivaan_cinematic_v2.png"
         cached.write_bytes(b"not an image" * 100)
         result = await thumbs.get_thumb("video", 7)
         self.assertEqual(result, str(cached))
@@ -187,7 +210,12 @@ class ThumbnailFlowTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(thumbs.is_valid_image(result))
         self.assertEqual(list(self.cache.glob("player_avatar_*")), [])
 
-    async def test_profile_timeout_preserves_new_card_with_artwork_avatar(self):
+    async def test_missing_profile_uses_dp_avatar(self):
+        self.assertIsNone(await thumbs._player_profile(7))
+        result = await thumbs.get_thumb("no-profile", 7)
+        self.assertTrue(thumbs.is_valid_image(result))
+
+    async def test_profile_timeout_preserves_new_card_with_dp_avatar(self):
         with patch.object(thumbs, "_player_profile", new=AsyncMock(side_effect=asyncio.TimeoutError)), \
              patch.object(thumbs, "_get_legacy_thumb", new=AsyncMock()) as legacy:
             result = await thumbs.get_thumb("slow-avatar", 7)
@@ -269,7 +297,7 @@ class ThumbnailFlowTest(unittest.IsolatedAsyncioTestCase):
         args, kwargs = send.call_args
         self.assertEqual(args, (456,))
         self.assertEqual(kwargs["caption"], "Existing song caption")
-        self.assertIn("vivaan_cinematic_v1", kwargs["photo"])
+        self.assertIn("vivaan_cinematic_v2", kwargs["photo"])
         self.assertTrue(thumbs.is_valid_image(kwargs["photo"]))
         self.assertEqual(kwargs["reply_markup"].inline_keyboard[0][0].callback_data, "ADMIN Pause|123")
         self.assertIs(queue[123][0]["mystic"], send.return_value)

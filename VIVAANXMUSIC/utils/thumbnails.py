@@ -35,7 +35,7 @@ THUMBNAIL_FETCH_HEADERS = {
 }
 MAX_THUMBNAIL_BYTES = 8 * 1024 * 1024
 USE_NEON_THUMBNAILS = True  # False restores the previous renderer.
-PLAYER_THUMB_CACHE_VERSION = "vivaan_cinematic_v1"
+PLAYER_THUMB_CACHE_VERSION = "vivaan_cinematic_v2"
 _player_thumbnail_tasks = {}
 _player_artwork_tasks = {}
 _player_render_semaphore = asyncio.Semaphore(2)
@@ -916,7 +916,7 @@ async def _player_artwork(videoid, result, user_id, title, channel):
             return None, "missing"
 
 
-async def _player_profile(user_id, artwork):
+async def _player_profile(user_id):
     ids = list(dict.fromkeys(value for value in (user_id, getattr(app, "id", None)) if value is not None))
     for profile_id in ids:
         downloaded = None
@@ -938,7 +938,7 @@ async def _player_profile(user_id, artwork):
                         os.remove(path)
                 except OSError:
                     pass
-    return artwork.copy()
+    return None
 
 
 def _player_metadata(value, fallback):
@@ -981,9 +981,9 @@ async def _build_player_thumbnail(videoid, user_id, output_path):
             image.load()
             artwork = ImageOps.exif_transpose(image).convert("RGB")
         try:
-            profile = await asyncio.wait_for(_player_profile(user_id, artwork), timeout=10)
+            profile = await asyncio.wait_for(_player_profile(user_id), timeout=10)
         except asyncio.TimeoutError:
-            profile = artwork.copy()
+            profile = None
 
         # Bound Pillow memory use when several groups start tracks together.
         async with _player_render_semaphore:
