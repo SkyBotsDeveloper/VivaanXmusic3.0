@@ -35,7 +35,7 @@ THUMBNAIL_FETCH_HEADERS = {
 }
 MAX_THUMBNAIL_BYTES = 8 * 1024 * 1024
 USE_NEON_THUMBNAILS = True  # False restores the previous renderer.
-PLAYER_THUMB_CACHE_VERSION = "vivaan_cinematic_v2"
+PLAYER_THUMB_CACHE_VERSION = "vivaan_cinematic_v3"
 _player_thumbnail_tasks = {}
 _player_artwork_tasks = {}
 _player_render_semaphore = asyncio.Semaphore(2)
@@ -918,19 +918,18 @@ async def _player_artwork(videoid, result, user_id, title, channel):
 
 async def _player_profile(user_id):
     ids = list(dict.fromkeys(value for value in (user_id, getattr(app, "id", None)) if value is not None))
-    for profile_id in ids:
-        downloaded = None
+
+    async def download_profile(file_id):
         temporary_path = os.path.join(CACHE_DIR, f"player_avatar_{uuid4().hex}.jpg")
+        downloaded = None
         try:
-            async for photo in app.get_chat_photos(profile_id, limit=1):
-                downloaded = await app.download_media(photo.file_id,
-                    file_name=temporary_path)
-                if downloaded:
-                    with Image.open(downloaded) as image:
-                        image.load()
-                        return ImageOps.exif_transpose(image).convert("RGB")
+            downloaded = await app.download_media(file_id, file_name=temporary_path)
+            if downloaded:
+                with Image.open(downloaded) as image:
+                    image.load()
+                    return ImageOps.exif_transpose(image).convert("RGB")
         except Exception:
-            continue
+            return None
         finally:
             for path in {temporary_path, downloaded} - {None}:
                 try:
@@ -938,6 +937,31 @@ async def _player_profile(user_id):
                         os.remove(path)
                 except OSError:
                     pass
+        return None
+
+    for profile_id in ids:
+        try:
+            user = await app.get_users(profile_id)
+            # Telegram returns personal/public photos on User, but excludes them
+            # from get_chat_photos history.
+            for field in ("personal_photo", "photo", "public_photo"):
+                photo = getattr(user, field, None)
+                file_id = getattr(photo, "big_file_id", None) or getattr(photo, "file_id", None)
+                if file_id:
+                    profile = await download_profile(file_id)
+                    if profile is not None:
+                        return profile
+        except Exception:
+            pass
+
+        try:
+            async for photo in app.get_chat_photos(profile_id, limit=1):
+                file_id = getattr(photo, "big_file_id", None) or photo.file_id
+                profile = await download_profile(file_id)
+                if profile is not None:
+                    return profile
+        except Exception:
+            pass
     return None
 
 

@@ -135,7 +135,10 @@ class ThumbnailFlowTest(unittest.IsolatedAsyncioTestCase):
         async def no_photos(*args, **kwargs):
             if False:
                 yield
-        self.bot = SimpleNamespace(name="VivaanXMusic", id=99, get_chat_photos=no_photos, download_media=AsyncMock())
+        self.bot = SimpleNamespace(name="VivaanXMusic", id=99, get_chat_photos=no_photos,
+                                   get_users=AsyncMock(return_value=SimpleNamespace(
+                                       personal_photo=None, photo=None, public_photo=None)),
+                                   download_media=AsyncMock())
         thumbs._player_thumbnail_tasks.clear()
         thumbs._player_artwork_tasks.clear()
         thumbs._player_render_semaphore = asyncio.Semaphore(2)
@@ -174,11 +177,11 @@ class ThumbnailFlowTest(unittest.IsolatedAsyncioTestCase):
             result = await thumbs.get_thumb("offline", None)
         with Image.open(result) as image:
             self.assertEqual(image.size, (1280, 720))
-        self.assertIn("vivaan_cinematic_v2", result)
+        self.assertIn("vivaan_cinematic_v3", result)
         legacy.assert_not_awaited()
 
     async def test_corrupt_cached_card_is_regenerated(self):
-        cached = self.cache / "video_7_vivaan_cinematic_v2.png"
+        cached = self.cache / "video_7_vivaan_cinematic_v3.png"
         cached.write_bytes(b"not an image" * 100)
         result = await thumbs.get_thumb("video", 7)
         self.assertEqual(result, str(cached))
@@ -197,6 +200,48 @@ class ThumbnailFlowTest(unittest.IsolatedAsyncioTestCase):
         paths = [call.kwargs["file_name"] for call in self.bot.download_media.call_args_list]
         self.assertEqual(len(set(paths)), 2)
         self.assertTrue(all(not os.path.exists(path) for path in paths))
+
+    async def test_requester_current_profile_photo_is_used_before_photo_history(self):
+        source = SimpleNamespace(big_file_id="requester-current-photo")
+        self.bot.get_users.return_value = SimpleNamespace(
+            personal_photo=None, photo=source, public_photo=None)
+        history_checks = []
+
+        async def history(chat_id, **kwargs):
+            history_checks.append(chat_id)
+            if False:
+                yield None
+
+        async def download(file_id, file_name):
+            self.assertEqual(file_id, "requester-current-photo")
+            Image.new("RGB", (80, 80), "blue").save(file_name)
+            return file_name
+
+        self.bot.get_chat_photos = history
+        self.bot.download_media.side_effect = download
+        profile = await thumbs._player_profile(7)
+        self.assertGreater(profile.getpixel((40, 40))[2], 245)
+        self.bot.get_users.assert_awaited_once_with(7)
+        self.assertEqual(history_checks, [])
+        self.assertEqual(list(self.cache.glob("player_avatar_*")), [])
+        profile.close()
+
+    async def test_personal_photo_is_used_when_no_regular_profile_photo(self):
+        source = SimpleNamespace(big_file_id="requester-personal-photo")
+        self.bot.get_users.return_value = SimpleNamespace(
+            personal_photo=source, photo=None, public_photo=None)
+
+        async def download(file_id, file_name):
+            self.assertEqual(file_id, "requester-personal-photo")
+            Image.new("RGB", (80, 80), "green").save(file_name)
+            return file_name
+
+        self.bot.download_media.side_effect = download
+        profile = await thumbs._player_profile(7)
+        pixel = profile.getpixel((40, 40))
+        self.assertGreater(pixel[1], 120)
+        self.assertLess(pixel[0], 5)
+        profile.close()
 
     async def test_failed_partial_profile_downloads_are_cleaned(self):
         async def photos(chat_id, **kwargs):
@@ -297,7 +342,7 @@ class ThumbnailFlowTest(unittest.IsolatedAsyncioTestCase):
         args, kwargs = send.call_args
         self.assertEqual(args, (456,))
         self.assertEqual(kwargs["caption"], "Existing song caption")
-        self.assertIn("vivaan_cinematic_v2", kwargs["photo"])
+        self.assertIn("vivaan_cinematic_v3", kwargs["photo"])
         self.assertTrue(thumbs.is_valid_image(kwargs["photo"]))
         self.assertEqual(kwargs["reply_markup"].inline_keyboard[0][0].callback_data, "ADMIN Pause|123")
         self.assertIs(queue[123][0]["mystic"], send.return_value)
