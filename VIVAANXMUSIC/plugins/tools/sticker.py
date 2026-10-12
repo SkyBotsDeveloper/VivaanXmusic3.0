@@ -12,8 +12,10 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from VIVAANXMUSIC import app
 from VIVAANXMUSIC.utils.rich_buttons import rich_call
 from VIVAANXMUSIC.utils.sticker_packs import (
+    StickerOwnerUnavailable,
     create_sticker_set_for_user,
     get_sticker_bot_username,
+    prompt_sticker_owner_start,
 )
 
 
@@ -145,6 +147,8 @@ async def pack_clone(client, message):
             f"cloned {len(items)} stickers!\nPack: {title}",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("view pack", url=f"https://t.me/addstickers/{short}")]]),
         )
+    except StickerOwnerUnavailable:
+        await prompt_sticker_owner_start(proc, bot_username)
     except StickersetInvalid:
         await rich_call(proc.edit, "invalid sticker set")
     except Exception as e:

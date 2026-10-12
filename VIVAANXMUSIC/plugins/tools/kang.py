@@ -22,8 +22,10 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from VIVAANXMUSIC import app
 from VIVAANXMUSIC.utils.files import resize_file_to_sticker_size
 from VIVAANXMUSIC.utils.sticker_packs import (
+    StickerOwnerUnavailable,
     create_sticker_set_for_user,
     get_sticker_bot_username,
+    prompt_sticker_owner_start,
 )
 from VIVAANXMUSIC.security import build_subprocess_env
 from VIVAANXMUSIC.utils.rich_buttons import rich_call
@@ -267,6 +269,8 @@ async def kang(client, message):
             )
         )
 
+    except StickerOwnerUnavailable:
+        await prompt_sticker_owner_start(notify, bot_username)
     except FloodWait as e:
         await rich_call(notify.edit, f"flood wait – retry in {e.x}s")
     except (StickerEmojiInvalid, PeerIdInvalid, FileReferenceExpired, RPCError) as err:
