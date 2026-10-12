@@ -130,9 +130,13 @@ async def pack_clone(client, message):
         if "text_color" in params and st.needs_repainting:
             create_kwargs["text_color"] = True
 
+        owner_peer = await client.resolve_peer(message.from_user.id)
+        owner_user = raw.types.InputUser(
+            user_id=owner_peer.user_id, access_hash=owner_peer.access_hash
+        )
         await client.invoke(
             raw.functions.stickers.CreateStickerSet(
-                user_id=await client.resolve_peer(message.from_user.id),
+                user_id=owner_user,
                 title=title,
                 short_name=short,
                 stickers=items,

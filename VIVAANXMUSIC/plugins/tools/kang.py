@@ -164,6 +164,10 @@ async def kang(client, message):
         kind, path, is_anim, is_vid = await _prepare_media(message, tmp_dir, notify)
         uid = message.from_user.id
         uname = message.from_user.first_name
+        owner_peer = await client.resolve_peer(uid)
+        owner_user = raw.types.InputUser(
+            user_id=owner_peer.user_id, access_hash=owner_peer.access_hash
+        )
         video_metadata = _video_metadata(path) if is_vid else None
         limit = 50 if is_anim or is_vid else 120
 
@@ -188,7 +192,7 @@ async def kang(client, message):
 
         upload = await client.invoke(
             raw.functions.messages.UploadMedia(
-                peer=await client.resolve_peer(uid),
+                peer=owner_peer,
                 media=raw.types.InputMediaUploadedDocument(
                     file=await client.save_file(path),
                     mime_type=(
@@ -227,7 +231,7 @@ async def kang(client, message):
         except StickersetInvalid:
             await client.invoke(
                 raw.functions.stickers.CreateStickerSet(
-                    user_id=await client.resolve_peer(uid),
+                    user_id=owner_user,
                     title=title,
                     short_name=short,
                     stickers=[raw.types.InputStickerSetItem(document=_to_input_doc(doc), emoji=emoji)],
@@ -241,7 +245,7 @@ async def kang(client, message):
             title = _pack_title(uname, animated=is_anim, video=is_vid, index=idx)
             await client.invoke(
                 raw.functions.stickers.CreateStickerSet(
-                    user_id=await client.resolve_peer(uid),
+                    user_id=owner_user,
                     title=title,
                     short_name=short,
                     stickers=[raw.types.InputStickerSetItem(document=_to_input_doc(doc), emoji=emoji)],
