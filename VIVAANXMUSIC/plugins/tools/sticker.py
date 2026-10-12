@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from PIL import Image
 from pyrogram import raw, filters
+from pyrogram.enums import StickerType
 from pyrogram.errors import StickersetInvalid
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -21,6 +22,18 @@ def _cs_kwargs(is_anim: bool, is_vid: bool) -> dict:
     if is_vid and "videos" in params:
         kw["videos"] = True
     return kw
+
+
+def _pack_title(message) -> str:
+    title = " ".join(message.command[1:]).strip()
+    if title:
+        return title[:64]
+
+    user = message.from_user
+    creator = f"@{user.username}" if user.username else " ".join(
+        part for part in (user.first_name, user.last_name) if part
+    )
+    return f"Crafted by {creator or user.id}"[:64]
 
 
 @app.on_message(filters.command("st") & ~filters.reply)
@@ -82,30 +95,52 @@ async def pack_clone(client, message):
                 stickerset=raw.types.InputStickerSetShortName(short_name=st.set_name), hash=0
             )
         )
-        title = message.command[1] if len(message.command) > 1 else f"{message.from_user.first_name}'s pack"
-        short = f"pack_{uuid4().hex[:8]}_by_{BOT_USERNAME}"
+        title = _pack_title(message)
+        short = f"pack_{uuid4().hex[:12]}_by_{BOT_USERNAME.lstrip('@').lower()}"
         items = []
         for doc in sset.documents:
-            emoji = next((a.alt for a in doc.attributes if isinstance(a, raw.types.DocumentAttributeSticker)), "🤔")
+            attribute = next(
+                (
+                    item for item in doc.attributes
+                    if isinstance(
+                        item,
+                        (raw.types.DocumentAttributeSticker, raw.types.DocumentAttributeCustomEmoji),
+                    )
+                ),
+                None,
+            )
             items.append(
                 raw.types.InputStickerSetItem(
                     document=raw.types.InputDocument(
                         id=doc.id, access_hash=doc.access_hash, file_reference=doc.file_reference
                     ),
-                    emoji=emoji
+                    emoji=getattr(attribute, "alt", None) or st.emoji or "\U0001f914",
+                    mask_coords=getattr(attribute, "mask_coords", None),
                 )
             )
+        if not items:
+            return await rich_call(proc.edit, "the source sticker pack is empty")
+
+        create_kwargs = _cs_kwargs(st.is_animated, st.is_video)
+        params = inspect.signature(raw.functions.stickers.CreateStickerSet).parameters
+        if "masks" in params and st.type == StickerType.MASK:
+            create_kwargs["masks"] = True
+        if "emojis" in params and st.type == StickerType.CUSTOM_EMOJI:
+            create_kwargs["emojis"] = True
+        if "text_color" in params and st.needs_repainting:
+            create_kwargs["text_color"] = True
+
         await client.invoke(
             raw.functions.stickers.CreateStickerSet(
                 user_id=await client.resolve_peer(message.from_user.id),
                 title=title,
                 short_name=short,
                 stickers=items,
-                **_cs_kwargs(st.is_animated, st.is_video)
+                **create_kwargs,
             )
         )
         await rich_call(proc.edit,
-            f"cloned {len(items)} stickers!",
+            f"cloned {len(items)} stickers!\nPack: {title}",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("view pack", url=f"https://t.me/addstickers/{short}")]]),
         )
     except StickersetInvalid:

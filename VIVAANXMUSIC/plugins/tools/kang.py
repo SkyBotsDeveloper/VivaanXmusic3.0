@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import subprocess
@@ -25,6 +26,30 @@ from config import BOT_USERNAME
 from VIVAANXMUSIC.utils.rich_buttons import rich_call
 
 BOT = BOT_USERNAME.lstrip("@").lower()
+
+
+def _video_metadata(path: str) -> Tuple[float, int, int]:
+    result = subprocess.run(
+        [
+            "ffprobe", "-v", "error", "-select_streams", "v:0",
+            "-show_entries", "stream=width,height:format=duration",
+            "-of", "json", path,
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=build_subprocess_env(),
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr or "could not inspect converted video")
+
+    data = json.loads(result.stdout)
+    stream = data["streams"][0]
+    duration = float(data["format"]["duration"])
+    width, height = int(stream["width"]), int(stream["height"])
+    if not 0 < duration <= 3.1 or max(width, height) > 512:
+        raise ValueError("video sticker must be 1–3 seconds and no larger than 512px")
+    return duration, width, height
 
 
 def _cs_kwargs(is_anim: bool, is_vid: bool) -> dict:
@@ -84,29 +109,25 @@ async def _prepare_media(message, tmp_dir: str, notify) -> Tuple[str, str, bool,
             return "sticker", await r.download(os.path.join(tmp_dir, "sticker.tgs")), True, False
         if s.is_video:
             return "sticker", await r.download(os.path.join(tmp_dir, "sticker.webm")), False, True
-        return "sticker", await r.download(os.path.join(tmp_dir, "sticker.png")), False, False
+        path = await r.download(os.path.join(tmp_dir, "sticker"))
+        return "sticker", await resize_file_to_sticker_size(path), False, False
 
-    if r.photo or (r.document and r.document.mime_type and r.document.mime_type.startswith("image/")):
-        await rich_call(notify.edit, "➣ ᴄᴏɴᴠᴇʀᴛɪɴɢ ɪᴍᴀɢᴇ…")
-        p = await r.download(os.path.join(tmp_dir, "image"))
-        p = await resize_file_to_sticker_size(p)
-        return "image", p, False, False
-
+    document_mime = (r.document.mime_type or "").lower() if r.document else ""
+    document_name = (r.document.file_name or "").lower() if r.document else ""
     if (
-        r.video or r.animation or
-        (r.document and (
-            r.document.mime_type in ["video/mp4", "video/x-matroska", "image/gif"] or
-            (r.document.file_name and r.document.file_name.endswith(".gif"))
-        ))
+        r.video or r.video_note or r.animation or
+        document_mime.startswith("video/") or
+        document_mime == "image/gif" or
+        document_name.endswith((".mp4", ".m4v", ".mov", ".mkv", ".webm", ".gif"))
     ):
         await rich_call(notify.edit, "➣ ᴘʀᴏᴄᴇssɪɴɢ ɢɪꜰ/ᴠɪᴅᴇᴏ…")
         raw_v = await r.download(os.path.join(tmp_dir, "raw.mp4"))
         out_v = os.path.join(tmp_dir, "sticker.webm")
         cmd = [
             "ffmpeg", "-y", "-i", raw_v,
-            "-vf", "scale=512:512:flags=lanczos:force_original_aspect_ratio=decrease",
+            "-vf", "scale=512:512:flags=lanczos:force_original_aspect_ratio=decrease:force_divisible_by=2",
             "-ss", "0", "-t", "3",
-            "-c:v", "libvpx-vp9", "-b:v", "500k", "-crf", "30",
+            "-c:v", "libvpx-vp9", "-pix_fmt", "yuv420p", "-b:v", "500k", "-crf", "30",
             "-an", "-r", "30",
             out_v
         ]
@@ -120,6 +141,17 @@ async def _prepare_media(message, tmp_dir: str, notify) -> Tuple[str, str, bool,
             raise RuntimeError(res.stderr.decode())
         return "video", out_v, False, True
 
+    if r.photo or (
+        r.document and (
+            document_mime.startswith("image/") or
+            document_name.endswith((".png", ".jpg", ".jpeg", ".webp", ".bmp"))
+        )
+    ):
+        await rich_call(notify.edit, "➣ ᴄᴏɴᴠᴇʀᴛɪɴɢ ɪᴍᴀɢᴇ…")
+        p = await r.download(os.path.join(tmp_dir, "image"))
+        p = await resize_file_to_sticker_size(p)
+        return "image", p, False, False
+
     raise ValueError("unsupported media type")
 
 
@@ -132,6 +164,7 @@ async def kang(client, message):
         kind, path, is_anim, is_vid = await _prepare_media(message, tmp_dir, notify)
         uid = message.from_user.id
         uname = message.from_user.first_name
+        video_metadata = _video_metadata(path) if is_vid else None
         limit = 50 if is_anim or is_vid else 120
 
         idx = 0
@@ -167,7 +200,13 @@ async def kang(client, message):
                         raw.types.DocumentAttributeFilename(file_name=os.path.basename(path)),
                         raw.types.DocumentAttributeSticker(alt="", stickerset=raw.types.InputStickerSetEmpty(), mask=False)
                     ] + (
-                        [raw.types.DocumentAttributeVideo(duration=0, w=512, h=512, round_message=False, supports_streaming=False)]
+                        [raw.types.DocumentAttributeVideo(
+                            duration=video_metadata[0],
+                            w=video_metadata[1],
+                            h=video_metadata[2],
+                            round_message=False,
+                            supports_streaming=False,
+                        )]
                         if is_vid else []
                     )
                 )
