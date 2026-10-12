@@ -16,16 +16,9 @@ async def create_sticker_set_for_user(client, message, **kwargs):
         raise ValueError("run this command from your own Telegram account")
 
     user_id = message.from_user.id
-    if message.chat.id < 0:
-        # A group sender can have only a 'min' user/hash in the peer cache.
-        reference = raw.types.InputUserFromMessage(
-            peer=await client.resolve_peer(message.chat.id),
-            msg_id=message.id,
-            user_id=user_id,
-        )
-    else:
-        # Bots can resolve a known user by ID without a cached access hash.
-        reference = raw.types.InputUser(user_id=user_id, access_hash=0)
+    # Bot sessions can use the user ID with a zero hash, including in groups.
+    # Telegram forbids all fromMessage min constructors for bots.
+    reference = raw.types.InputUser(user_id=user_id, access_hash=0)
 
     users = await client.invoke(raw.functions.users.GetUsers(id=[reference]))
     user = next((user for user in users if isinstance(user, raw.types.User)
@@ -40,7 +33,7 @@ async def create_sticker_set_for_user(client, message, **kwargs):
     try:
         return await client.invoke(raw.functions.stickers.CreateStickerSet(user_id=owner, **kwargs))
     except PeerIdInvalid:
-        # Retry once with the original message/bot reference, preserving owner.
+        # Retry once with the bot's ID/zero-hash reference, preserving owner.
         if owner.write() == reference.write():
             raise
         return await client.invoke(raw.functions.stickers.CreateStickerSet(user_id=reference, **kwargs))

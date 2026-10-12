@@ -14,7 +14,7 @@ from uuid import uuid4
 from pyrogram import raw
 from pyrogram.enums import StickerType
 from pyrogram.errors import (
-    FileReferenceExpired, FloodWait, PeerIdInvalid, RPCError,
+    FileReferenceExpired, FloodWait, FromMessageBotDisabled, PeerIdInvalid, RPCError,
     StickerEmojiInvalid, StickersetInvalid, StickersTooMuch,
 )
 from pyrogram.raw.core import TLObject
@@ -80,6 +80,13 @@ class StickerPackOwnerTest(unittest.IsolatedAsyncioTestCase):
         async def invoke(request):
             nonlocal created
             if isinstance(request, raw.functions.users.GetUsers):
+                for owner in request.id:
+                    if isinstance(owner, raw.types.InputUserFromMessage):
+                        raise FromMessageBotDisabled()
+                    if not isinstance(owner, raw.types.InputUser) or owner.user_id != 123:
+                        raise PeerIdInvalid()
+                    if owner.access_hash not in (0, 654):
+                        raise PeerIdInvalid()
                 return [self.full_user]
             if isinstance(request, raw.functions.messages.GetStickerSet):
                 if add_error is StickersetInvalid and not created:
@@ -90,6 +97,12 @@ class StickerPackOwnerTest(unittest.IsolatedAsyncioTestCase):
             if isinstance(request, raw.functions.stickers.AddStickerToSet):
                 raise add_error()
             if isinstance(request, raw.functions.stickers.CreateStickerSet):
+                if isinstance(request.user_id, raw.types.InputUserFromMessage):
+                    raise FromMessageBotDisabled()
+                if not isinstance(request.user_id, raw.types.InputUser) or request.user_id.user_id != 123:
+                    raise PeerIdInvalid()
+                if request.user_id.access_hash not in (0, 654):
+                    raise PeerIdInvalid()
                 if reject_all or (reject_owner and getattr(request.user_id, "access_hash", None) == 654):
                     raise PeerIdInvalid()
                 created = True
@@ -110,20 +123,15 @@ class StickerPackOwnerTest(unittest.IsolatedAsyncioTestCase):
             )),
         )
 
-    def assert_owner(self, client, *, contextual=False, owner_hash=654, count=1):
+    def assert_owner(self, client, *, owner_hash=654, count=1):
         requests = [call.args[0] for call in client.invoke.await_args_list]
         creates = [request for request in requests
                    if isinstance(request, raw.functions.stickers.CreateStickerSet)]
         self.assertEqual(len(creates), count)
         owner = TLObject.read(BytesIO(creates[-1].user_id.write()))
         self.assertEqual(owner.user_id, 123)
-        if contextual:
-            self.assertIsInstance(owner, raw.types.InputUserFromMessage)
-            self.assertEqual(owner.msg_id, self.message.id)
-            self.assertEqual(owner.peer.channel_id, self.chat_peer.channel_id)
-        else:
-            self.assertIsInstance(owner, raw.types.InputUser)
-            self.assertEqual(owner.access_hash, owner_hash)
+        self.assertIsInstance(owner, raw.types.InputUser)
+        self.assertEqual(owner.access_hash, owner_hash)
         self.assertTrue(creates[-1].short_name.endswith("_by_actual_bot"))
         client.get_me.assert_awaited_once()
         self.notify.edit.assert_awaited_once()
@@ -134,13 +142,13 @@ class StickerPackOwnerTest(unittest.IsolatedAsyncioTestCase):
             self.assertIs(creates[0].stickers, creates[1].stickers)
         return creates[-1]
 
-    async def kang_creates_pack(self, add_error, *, reject_owner=False, contextual=False, count=1):
+    async def kang_creates_pack(self, add_error, *, reject_owner=False, owner_hash=654, count=1):
         namespace = load_handler("kang.py", "_cs_kwargs", "_pack_name", "_pack_title",
                                  "_to_input_doc", "kang")
         namespace["_prepare_media"] = AsyncMock(return_value=("image", "image.png", False, False))
         client = self.client(add_error, reject_owner=reject_owner)
         await namespace["kang"](client, self.message)
-        self.assert_owner(client, contextual=contextual, count=count)
+        self.assert_owner(client, owner_hash=owner_hash, count=count)
         upload = next(call.args[0] for call in client.invoke.await_args_list
                       if isinstance(call.args[0], raw.functions.messages.UploadMedia))
         self.assertIs(upload.peer, self.chat_peer)
@@ -160,20 +168,25 @@ class StickerPackOwnerTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request.title, "Favourite Stickers")
         self.assertEqual(request.stickers[0].document.id, self.document.id)
 
-    async def test_kang_rejected_owner_uses_command_message(self):
-        await self.kang_creates_pack(StickersetInvalid, reject_owner=True, contextual=True, count=2)
+    async def test_kang_group_rejected_owner_uses_bot_user_id_reference(self):
+        await self.kang_creates_pack(StickersetInvalid, reject_owner=True, owner_hash=0, count=2)
 
-    async def test_packkang_rejected_owner_uses_command_message(self):
+    async def test_packkang_group_rejected_owner_uses_bot_user_id_reference(self):
         namespace = load_handler("sticker.py", "_cs_kwargs", "_pack_title", "pack_clone")
         self.message.command = ["packkang"]
         client = self.client(reject_owner=True)
         await namespace["pack_clone"](client, self.message)
-        request = self.assert_owner(client, contextual=True, count=2)
+        request = self.assert_owner(client, owner_hash=0, count=2)
         self.assertEqual(request.title, "Crafted by @alice")
 
     async def test_min_user_hash_is_not_reused(self):
         self.full_user = raw.types.User(id=123, access_hash=456, min=True)
-        await self.kang_creates_pack(StickersetInvalid, contextual=True)
+        await self.kang_creates_pack(StickersetInvalid, owner_hash=0)
+
+    async def test_basic_group_uses_bot_compatible_owner(self):
+        self.message.chat.id = -555
+        self.chat_peer = raw.types.InputPeerChat(chat_id=555)
+        await self.kang_creates_pack(StickersetInvalid)
 
     async def test_private_chat_can_retry_bot_user_id_reference(self):
         namespace = load_handler("sticker.py", "_cs_kwargs", "_pack_title", "pack_clone")
