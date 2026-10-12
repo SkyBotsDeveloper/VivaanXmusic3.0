@@ -21,11 +21,12 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from VIVAANXMUSIC import app
 from VIVAANXMUSIC.utils.files import resize_file_to_sticker_size
+from VIVAANXMUSIC.utils.sticker_packs import (
+    create_sticker_set_for_user,
+    get_sticker_bot_username,
+)
 from VIVAANXMUSIC.security import build_subprocess_env
-from config import BOT_USERNAME
 from VIVAANXMUSIC.utils.rich_buttons import rich_call
-
-BOT = BOT_USERNAME.lstrip("@").lower()
 
 
 def _video_metadata(path: str) -> Tuple[float, int, int]:
@@ -65,7 +66,7 @@ def _cs_kwargs(is_anim: bool, is_vid: bool) -> dict:
     return kw
 
 
-def _pack_name(user_id: int, *, animated=False, video=False, index=0) -> str:
+def _pack_name(user_id: int, bot_username: str, *, animated=False, video=False, index=0) -> str:
     """
     Build a valid short_name:
       user<id>_<type>[ _pack<index> ]_by_<bot>
@@ -74,7 +75,7 @@ def _pack_name(user_id: int, *, animated=False, video=False, index=0) -> str:
     parts.append("animated" if animated else "video" if video else "regular")
     if index:
         parts.append(f"pack{index}")
-    parts += ["by", BOT]
+    parts += ["by", bot_username]
     return "_".join(parts)
 
 
@@ -164,16 +165,13 @@ async def kang(client, message):
         kind, path, is_anim, is_vid = await _prepare_media(message, tmp_dir, notify)
         uid = message.from_user.id
         uname = message.from_user.first_name
-        owner_peer = await client.resolve_peer(uid)
-        owner_user = raw.types.InputUser(
-            user_id=owner_peer.user_id, access_hash=owner_peer.access_hash
-        )
+        bot_username = await get_sticker_bot_username(client)
         video_metadata = _video_metadata(path) if is_vid else None
         limit = 50 if is_anim or is_vid else 120
 
         idx = 0
         while True:
-            short = _pack_name(uid, animated=is_anim, video=is_vid, index=idx)
+            short = _pack_name(uid, bot_username, animated=is_anim, video=is_vid, index=idx)
             try:
                 sset = await client.invoke(
                     raw.functions.messages.GetStickerSet(
@@ -192,7 +190,7 @@ async def kang(client, message):
 
         upload = await client.invoke(
             raw.functions.messages.UploadMedia(
-                peer=owner_peer,
+                peer=await client.resolve_peer(message.chat.id),
                 media=raw.types.InputMediaUploadedDocument(
                     file=await client.save_file(path),
                     mime_type=(
@@ -229,28 +227,24 @@ async def kang(client, message):
             )
             created = False
         except StickersetInvalid:
-            await client.invoke(
-                raw.functions.stickers.CreateStickerSet(
-                    user_id=owner_user,
-                    title=title,
-                    short_name=short,
-                    stickers=[raw.types.InputStickerSetItem(document=_to_input_doc(doc), emoji=emoji)],
-                    **_cs_kwargs(is_anim, is_vid)
-                )
+            await create_sticker_set_for_user(
+                client, message,
+                title=title,
+                short_name=short,
+                stickers=[raw.types.InputStickerSetItem(document=_to_input_doc(doc), emoji=emoji)],
+                **_cs_kwargs(is_anim, is_vid),
             )
             created = True
         except StickersTooMuch:
             idx += 1
-            short = _pack_name(uid, animated=is_anim, video=is_vid, index=idx)
+            short = _pack_name(uid, bot_username, animated=is_anim, video=is_vid, index=idx)
             title = _pack_title(uname, animated=is_anim, video=is_vid, index=idx)
-            await client.invoke(
-                raw.functions.stickers.CreateStickerSet(
-                    user_id=owner_user,
-                    title=title,
-                    short_name=short,
-                    stickers=[raw.types.InputStickerSetItem(document=_to_input_doc(doc), emoji=emoji)],
-                    **_cs_kwargs(is_anim, is_vid)
-                )
+            await create_sticker_set_for_user(
+                client, message,
+                title=title,
+                short_name=short,
+                stickers=[raw.types.InputStickerSetItem(document=_to_input_doc(doc), emoji=emoji)],
+                **_cs_kwargs(is_anim, is_vid),
             )
             created = True
 

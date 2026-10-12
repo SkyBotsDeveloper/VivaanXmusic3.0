@@ -10,8 +10,11 @@ from pyrogram.errors import StickersetInvalid
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from VIVAANXMUSIC import app
-from config import BOT_USERNAME
 from VIVAANXMUSIC.utils.rich_buttons import rich_call
+from VIVAANXMUSIC.utils.sticker_packs import (
+    create_sticker_set_for_user,
+    get_sticker_bot_username,
+)
 
 
 def _cs_kwargs(is_anim: bool, is_vid: bool) -> dict:
@@ -96,7 +99,8 @@ async def pack_clone(client, message):
             )
         )
         title = _pack_title(message)
-        short = f"pack_{uuid4().hex[:12]}_by_{BOT_USERNAME.lstrip('@').lower()}"
+        bot_username = await get_sticker_bot_username(client)
+        short = f"pack_{uuid4().hex[:12]}_by_{bot_username}"
         items = []
         for doc in sset.documents:
             attribute = next(
@@ -130,18 +134,12 @@ async def pack_clone(client, message):
         if "text_color" in params and st.needs_repainting:
             create_kwargs["text_color"] = True
 
-        owner_peer = await client.resolve_peer(message.from_user.id)
-        owner_user = raw.types.InputUser(
-            user_id=owner_peer.user_id, access_hash=owner_peer.access_hash
-        )
-        await client.invoke(
-            raw.functions.stickers.CreateStickerSet(
-                user_id=owner_user,
-                title=title,
-                short_name=short,
-                stickers=items,
-                **create_kwargs,
-            )
+        await create_sticker_set_for_user(
+            client, message,
+            title=title,
+            short_name=short,
+            stickers=items,
+            **create_kwargs,
         )
         await rich_call(proc.edit,
             f"cloned {len(items)} stickers!\nPack: {title}",
