@@ -69,5 +69,7 @@ class VcIdentityResolver:
 def vc_join_text(source_chat_id, user_id, name, username=None, *, external=False):
     heading = f"Joined VC\nGroup ID: <code>{source_chat_id}</code>\n" if external else "Joined VC\n"
     username_text = f"\nUsername: @{escape(username)}" if username else ""
-    return (heading + f"Name: <a href='tg://user?id={user_id}'>{escape(name or str(user_id))}</a>"
+    # tg://user mentions require the sending bot to know the peer access hash.
+    # Assistant-only identities must still render when the bot lacks that peer.
+    return (heading + f"Name: <b>{escape(name or str(user_id))}</b>"
             + username_text + f"\nUser ID: <code>{user_id}</code>")

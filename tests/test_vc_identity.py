@@ -48,4 +48,5 @@ class VcIdentityTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("@skyuser", text)
         self.assertIn("User ID: <code>77</code>", text)
         self.assertIn("Group ID: <code>-10</code>", text)
+        self.assertNotIn("tg://user", text)
         self.assertNotIn("Unknown", identity.vc_join_text(-10, 77, None))
