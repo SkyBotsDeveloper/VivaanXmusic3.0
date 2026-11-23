@@ -13,4 +13,4 @@ RUN pip install --no-cache-dir -U pip && \
 
 COPY . .
 
-CMD ["python3", "-m", "VIVAANXMUSIC"]
+CMD ["bash", "start"]

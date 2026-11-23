@@ -3,4 +3,4 @@ set -e
 
 ulimit -n 65535 2>/dev/null || ulimit -n 4096 2>/dev/null || true
 
-exec python3 -m VIVAANXMUSIC
+exec python3 scripts/dyno_supervisor.py
