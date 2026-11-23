@@ -25,9 +25,12 @@ def load_call_methods():
                GroupCallConfig=GroupCallConfig, GetGroupParticipants=GetGroupParticipants,
                LOGGER=Mock(), EMPTY_VC_GRACE_SECONDS=300, EMPTY_VC_CHECK_INTERVAL=30,
                empty_vc_since={}, empty_vc_watchdogs={}, vc_join_targets={},
-               vc_join_call_map={}, vc_join_snapshots={}, db={})
-    for name in ("get_vcnotify", "get_assistant", "group_assistant", "get_autoplay", "is_music_enabled", "_clear_"):
+               vc_join_call_map={}, vc_join_snapshots={}, vc_join_event_cache={}, vc_join_notice_cache={}, db={})
+    for name in ("get_vcnotify", "get_vc_logger", "get_assistant", "group_assistant", "get_autoplay", "is_music_enabled", "_clear_"):
         env[name] = AsyncMock()
+    env["get_vc_logger"].return_value = None
+    from pyrogram.errors import ChatWriteForbidden, ChatSendPlainForbidden, Forbidden
+    env.update(ChatWriteForbidden=ChatWriteForbidden, ChatSendPlainForbidden=ChatSendPlainForbidden, Forbidden=Forbidden)
     exec(compile(ast.fix_missing_locations(module), str(ROOT / "VIVAANXMUSIC/core/call.py"), "exec"), env)
     call = env["Call"]()
     call.active_calls = set()
@@ -198,6 +201,34 @@ class VcLifecycleTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(asyncio.CancelledError):
             await self.call._play_stream(self.assistant, -10, None, queue_generation=0)
         self.assistant.leave_call.assert_awaited_once_with(-10)
+
+    async def test_external_logger_receives_notifications_without_posting_to_source(self):
+        self.env["get_vc_logger"].return_value = -99
+        self.assertTrue(await self.call.send_vc_notification(-10, "notification"))
+        self.app.send_message.assert_awaited_once_with(-99, "notification")
+        self.env["get_vcnotify"].return_value = False
+        self.assertFalse(await self.call.send_vc_notification(-10, "not sent"))
+        self.app.send_message.assert_awaited_once()
+
+    async def test_inaccessible_logger_never_spills_logs_into_main_group(self):
+        from pyrogram.errors import ChatWriteForbidden
+        self.env["get_vc_logger"].return_value = -99
+        self.app.send_message.side_effect = ChatWriteForbidden()
+        self.assertFalse(await self.call.send_vc_notification(-10, "notification"))
+        self.app.send_message.assert_awaited_once_with(-99, "notification")
+        self.assertTrue(self.env["get_vcnotify"].return_value)
+
+    async def test_raw_participant_event_passes_real_source_client_to_identity_lookup(self):
+        from pyrogram.raw.types import PeerUser
+        self.env["PeerUser"] = PeerUser
+        self.env["vc_join_call_map"][500] = {"chat_id": -20, "notify_chat_id": -10}
+        self.call._send_vc_join_notice = AsyncMock()
+        update = NS(call=NS(id=500), participants=[NS(peer=PeerUser(user_id=77),
+                   just_joined=True, left=False, date=1, source=2)])
+        event_client = Mock()
+        await self.call._handle_group_call_participants_update(update, event_client=event_client)
+        self.call._send_vc_join_notice.assert_awaited_once_with(
+            -10, 77, 1, 2, vc_chat_id=-20, event_client=event_client)
 
 
 if __name__ == "__main__":

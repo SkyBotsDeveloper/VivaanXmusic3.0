@@ -31,7 +31,7 @@ async def autodelete_control(_, message: Message, strings):
         await set_autodelete(chat_id, True)
         return await rich_call(message.reply_text,
             f"Auto-delete has been <code>enabled</code> by : {message.from_user.mention}.\n\n"
-            "Queued-track notices will be deleted when that track starts, and stream cards will be deleted after the track leaves the queue.",
+            "All messages sent by this bot in this group will be cleaned after 5 minutes. Song cards also disappear when the track ends. Other members' messages are never included.",
             reply_markup=close_markup(strings),
         )
 

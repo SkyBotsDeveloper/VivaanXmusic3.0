@@ -10,7 +10,8 @@ from VIVAANXMUSIC import LOGGER, app, userbot
 from VIVAANXMUSIC.core.call import JARVIS
 from VIVAANXMUSIC.misc import sudo
 from VIVAANXMUSIC.plugins import ALL_MODULES
-from VIVAANXMUSIC.utils.database import get_banned_users, get_gbanned
+from VIVAANXMUSIC.utils.database import get_banned_users, get_gbanned, get_autodelete_chats
+from VIVAANXMUSIC.core.mongo import mongodb
 from VIVAANXMUSIC.utils.lyrics import close_lyrics_http_client
 from config import BANNED_USERS
 
@@ -27,8 +28,9 @@ BOT_COMMANDS = [
     BotCommand("player", "Open player controls"),
     BotCommand("autoplay", "Toggle similar-song autoplay"),
     BotCommand("music", "Allow or block group play requests"),
-    BotCommand("autodelete", "Auto-delete player and queue notices"),
+    BotCommand("autodelete", "Clean bot messages after 5 minutes"),
     BotCommand("vcnotify", "Toggle VC join notifications"),
+    BotCommand("setlogger", "Choose this group's VC logging chat"),
     BotCommand("voiceplay", "Control spoken song requests"),
     BotCommand("gpt", "Ask the AI assistant"),
     BotCommand("claude", "Ask Claude-style AI"),
@@ -79,6 +81,7 @@ async def init():
     except Exception:
         pass
 
+    await app.message_cleanup.start(app, mongodb.outgoing_cleanup, get_autodelete_chats)
     await app.start()
     await app.set_bot_commands(BOT_COMMANDS)
     await userbot.start()
@@ -117,6 +120,7 @@ async def init():
     except Exception:
         pass
     await close_lyrics_http_client()
+    await app.message_cleanup.stop()
     await app.stop()
     await userbot.stop()
     LOGGER("VIVAANXMUSIC").info("Stopping music bot...")

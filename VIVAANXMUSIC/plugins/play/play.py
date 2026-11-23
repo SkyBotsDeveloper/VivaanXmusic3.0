@@ -759,16 +759,7 @@ async def play_music(client, CallbackQuery, _):
 @app.on_callback_query(filters.regex("AnonymousAdmin") & ~BANNED_USERS)
 @capture_callback_err
 async def anonymous_check(client, CallbackQuery):
-    try:
-        await CallbackQuery.answer(
-            "» ʀᴇᴠᴇʀᴛ ʙᴀᴄᴋ ᴛᴏ ᴜsᴇʀ ᴀᴄᴄᴏᴜɴᴛ :\n\n"
-            "ᴏᴘᴇɴ ʏᴏᴜʀ ɢʀᴏᴜᴘ sᴇᴛᴛɪɴɢs.\n"
-            "-> ᴀᴅᴍɪɴɪsᴛʀᴀᴛᴏʀs\n-> ᴄʟɪᴄᴋ ᴏɴ ʏᴏᴜʀ ɴᴀᴍᴇ\n"
-            "-> ᴜɴᴄʜᴇᴄᴋ ᴀɴᴏɴʏᴍᴏᴜs ᴀᴅᴍɪɴ ᴘᴇʀᴍɪssɪᴏɴs.",
-            show_alert=True,
-        )
-    except Exception:
-        pass
+    await CallbackQuery.answer("Send your command again and use Verify admin and run.", show_alert=True)
 
 
 @app.on_callback_query(filters.regex("VivaanPlaylists") & ~BANNED_USERS)

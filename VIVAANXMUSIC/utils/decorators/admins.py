@@ -1,4 +1,4 @@
-from pyrogram.enums import ChatType
+from pyrogram.enums import ChatType, ChatMemberStatus
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from VIVAANXMUSIC import app
@@ -18,6 +18,7 @@ from strings import get_string
 
 from ..formatters import int_to_alpha
 from VIVAANXMUSIC.utils.rich_buttons import rich_call
+from VIVAANXMUSIC.core.anonymous_admin import verified_admin_member
 
 
 def AdminRightsCheck(mystic):
@@ -40,17 +41,7 @@ def AdminRightsCheck(mystic):
         except:
             _ = get_string("en")
         if message.sender_chat:
-            upl = InlineKeyboardMarkup(
-                [
-                    [
-                        InlineKeyboardButton(
-                            text="ʜᴏᴡ ᴛᴏ ғɪx ?",
-                            callback_data="AnonymousAdmin",
-                        ),
-                    ]
-                ]
-            )
-            return await rich_call(message.reply_text, _["general_3"], reply_markup=upl)
+            return await message.reply_text("Send the command again and use Verify admin and run.")
         if message.command[0][0] == "c":
             chat_id = await get_cmode(message.chat.id)
             if chat_id is None:
@@ -65,7 +56,7 @@ def AdminRightsCheck(mystic):
             return await message.reply_text(_["general_5"])
         is_non_admin = await is_nonadmin_chat(message.chat.id)
         if not is_non_admin:
-            if message.from_user.id not in SUDOERS:
+            if message.from_user.id not in SUDOERS and verified_admin_member(message) is None:
                 admins = adminlist.get(message.chat.id)
                 if not admins:
                     return await message.reply_text(_["admin_13"])
@@ -136,28 +127,16 @@ def AdminActual(mystic):
         except:
             _ = get_string("en")
         if message.sender_chat:
-            upl = InlineKeyboardMarkup(
-                [
-                    [
-                        InlineKeyboardButton(
-                            text="ʜᴏᴡ ᴛᴏ ғɪx ?",
-                            callback_data="AnonymousAdmin",
-                        ),
-                    ]
-                ]
-            )
-            return await rich_call(message.reply_text, _["general_3"], reply_markup=upl)
+            return await message.reply_text("Send the command again and use Verify admin and run.")
         if message.from_user.id not in SUDOERS:
             try:
-                member = (
-                    await app.get_chat_member(message.chat.id, message.from_user.id)
-                ).privileges
-                if not member:
-                    return await message.reply_text(_["general_4"])
+                member = verified_admin_member(message) or await app.get_chat_member(message.chat.id, message.from_user.id)
             except:
                 return
-            if not member.can_manage_video_chats:
-                return await message.reply(_["general_4"])
+            if member.status != ChatMemberStatus.OWNER:
+                if (member.status != ChatMemberStatus.ADMINISTRATOR
+                        or not getattr(member.privileges, "can_manage_video_chats", False)):
+                    return await message.reply_text(_["general_4"])
         return await mystic(client, message, _)
 
     return wrapper

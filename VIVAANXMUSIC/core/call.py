@@ -45,6 +45,7 @@ from VIVAANXMUSIC.utils.database import (
     get_loop,
     get_voiceplay,
     get_vcnotify,
+    get_vc_logger,
     group_assistant,
     is_autoend,
     is_music_playing,
@@ -54,7 +55,6 @@ from VIVAANXMUSIC.utils.database import (
     remove_active_video_chat,
     set_autoplay,
     set_loop,
-    set_vcnotify,
 )
 from VIVAANXMUSIC.utils.exceptions import AssistantErr
 from VIVAANXMUSIC.utils.formatters import check_duration, seconds_to_min, speed_converter
@@ -71,6 +71,7 @@ from VIVAANXMUSIC.utils.errors import capture_internal_err, send_large_error
 from VIVAANXMUSIC.utils.voiceplay_policy import should_prompt_after_track
 from VIVAANXMUSIC.utils.rich_buttons import rich_call
 from VIVAANXMUSIC.utils.music_gate import assert_music_stream_allowed
+from VIVAANXMUSIC.core.vc_identity import VcIdentityResolver, vc_join_text
 
 autoend = {}
 counter = {}
@@ -238,6 +239,7 @@ class Call:
         self._vc_ban_notices: dict[int, int] = {}
         self._vc_presence_task = None
         self._queue_generations: dict[int, int] = {}
+        self.vc_identities = VcIdentityResolver()
 
 
     def _get_stream_lock(self, chat_id: int) -> asyncio.Lock:
@@ -620,8 +622,10 @@ class Call:
             if now - stamp > 60:
                 vc_join_notice_cache.pop(key, None)
 
-        notice_key = (notify_chat_id, user_id, date, source)
-        if notice_key in vc_join_notice_cache:
+        # Raw updates and the polling fallback describe the same join with
+        # different date/source values. Coalesce only that short overlap.
+        notice_key = (notify_chat_id, user_id)
+        if now - vc_join_notice_cache.get(notice_key, -60) < 5:
             return False
 
         vc_join_notice_cache[notice_key] = now
@@ -644,40 +648,39 @@ class Call:
         user_id: int,
         date: int = 0,
         source: int = 0,
+        vc_chat_id: int = None,
+        event_client=None,
     ) -> None:
         if user_id in self._ignored_vc_user_ids():
             return
         if not self._remember_join_notice(notify_chat_id, user_id, date, source):
             return
 
-        try:
-            user = await app.get_users(user_id)
-            name = " ".join(
-                part for part in [user.first_name, user.last_name] if part
-            ).strip() or user.username or "Unknown User"
-            username = f" (@{user.username})" if user.username else ""
-        except Exception:
-            name = "Unknown User"
-            username = ""
+        identity = self.vc_identities.cached(user_id)
+        if identity is None:
+            assistant_client = await get_assistant(vc_chat_id or notify_chat_id)
+            identity = await self.vc_identities.resolve(user_id, [event_client, assistant_client, app])
+        destination = await get_vc_logger(notify_chat_id) or notify_chat_id
+        text = vc_join_text(notify_chat_id, user_id, *identity, external=destination != notify_chat_id)
+        await self.send_vc_notification(notify_chat_id, text)
 
+    async def send_vc_notification(self, source_chat_id, text):
+        if not await get_vcnotify(source_chat_id):
+            return False
+        destination = await get_vc_logger(source_chat_id) or source_chat_id
         try:
-            await app.send_message(
-                notify_chat_id,
-                f"Joined VC\nName: {name}{username}\nUser ID: <code>{user_id}</code>",
-            )
+            await app.send_message(destination, text)
+            return True
         except (ChatWriteForbidden, ChatSendPlainForbidden, Forbidden):
-            LOGGER(__name__).warning(
-                "Disabling VC join notifications for chat %s because the bot cannot send messages there.",
-                notify_chat_id,
-            )
-            try:
-                await set_vcnotify(notify_chat_id, False)
-            except Exception:
-                pass
+            # Keep the saved setting and destination; never spill private logs
+            # back into the source group when a logger loses permissions.
+            LOGGER(__name__).warning("Cannot send VC notification | source=%s | logger=%s", source_chat_id, destination)
+            return False
 
     async def _handle_group_call_participants_update(
         self,
         update: UpdateGroupCallParticipants,
+        event_client=None,
     ) -> None:
         call_id = int(update.call.id)
         mapping = vc_join_call_map.get(call_id)
@@ -719,6 +722,8 @@ class Call:
                 user_id,
                 int(getattr(participant, "date", 0) or 0),
                 int(getattr(participant, "source", 0) or 0),
+                vc_chat_id=mapping["chat_id"],
+                event_client=event_client,
             )
 
     async def _vc_join_monitor_loop(
@@ -763,6 +768,7 @@ class Call:
                         await self._send_vc_join_notice(
                             notify_chat_id,
                             user_id,
+                            vc_chat_id=chat_id,
                         )
                     except Exception:
                         continue
@@ -829,11 +835,14 @@ class Call:
                     # observe the same banned assistant concurrently.
                     self._vc_ban_notices[chat_id] = call_id
                     try:
-                        await app.send_message(
+                        delivered = await self.send_vc_notification(
                             notify_chat_id,
                             "Unban my assistant for VC notifications.\n"
+                            f"Group ID: <code>{notify_chat_id}</code>\n"
                             f"Assistant: <a href='tg://user?id={user.id}'>{user.id}</a>",
                         )
+                        if not delivered:
+                            self._vc_ban_notices.pop(chat_id, None)
                     except Exception:
                         if self._vc_ban_notices.get(chat_id) == call_id:
                             self._vc_ban_notices.pop(chat_id, None)
@@ -1845,8 +1854,9 @@ class Call:
 
         async def raw_group_call_handler(client, update, users, chats) -> None:
             try:
+                self.vc_identities.remember(users)
                 if isinstance(update, UpdateGroupCallParticipants):
-                    await self._handle_group_call_participants_update(update)
+                    await self._handle_group_call_participants_update(update, event_client=client)
             except (ChatWriteForbidden, ChatSendPlainForbidden, Forbidden) as err:
                 LOGGER(__name__).warning(
                     "VC notify update ignored because the bot cannot write to the target chat: %s",

@@ -37,17 +37,7 @@ def PlayWrapper(command):
         _ = get_string(language)
 
         if message.sender_chat:
-            upl = InlineKeyboardMarkup(
-                [
-                    [
-                        InlineKeyboardButton(
-                            text="ʜᴏᴡ ᴛᴏ ғɪx ?",
-                            callback_data="AnonymousAdmin",
-                        ),
-                    ]
-                ]
-            )
-            return await rich_call(message.reply_text, _["general_3"], reply_markup=upl)
+            return await message.reply_text("Send the command again and use Verify admin and run.")
 
         if await is_maintenance() is False:
             if message.from_user.id not in SUDOERS:

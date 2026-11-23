@@ -6,10 +6,14 @@ import config
 from ..logging import LOGGER
 from .bot_start_retry import select_bot_login_dc, start_with_telegram_retry
 from .owner_profile import resolve_owner_profile_url
+from .anonymous_admin import AnonymousAdminVerification
+from .message_cleanup import OutgoingMessageCleanup
 
 
 class JARVIS(Client):
     def __init__(self):
+        self.anonymous_admins = AnonymousAdminVerification(LOGGER(__name__))
+        self.message_cleanup = OutgoingMessageCleanup(LOGGER(__name__))
         super().__init__(
             name="VivaanXMusic",
             api_id=config.API_ID,
@@ -20,6 +24,17 @@ class JARVIS(Client):
             max_concurrent_transmissions=7,
         )
         LOGGER(__name__).info("Bot client initialized.")
+
+    async def invoke(self, query, *args, **kwargs):
+        result = await super().invoke(query, *args, **kwargs)
+        try:
+            self.message_cleanup.capture(query, result, getattr(self, "id", None))
+        except Exception:
+            LOGGER(__name__).exception("Could not record an outgoing message for cleanup")
+        return result
+
+    def add_handler(self, handler, group=0):
+        return super().add_handler(self.anonymous_admins.wrap(handler), group)
 
     async def sign_in_bot(self, bot_token):
         if await select_bot_login_dc(self, config.BOT_LOGIN_DC):

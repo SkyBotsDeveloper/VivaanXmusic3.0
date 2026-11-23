@@ -27,6 +27,7 @@ skipdb = mongodb.skipmode
 sudoersdb = mongodb.sudoers
 usersdb = mongodb.tgusersdb
 vcnotifydb = mongodb.vcnotify
+vcloggerdb = mongodb.vclogger
 voiceplaydb = mongodb.voiceplay
 
 
@@ -50,6 +51,7 @@ mute = {}
 music_enabled = {}
 music_revisions = {}
 vcnotify = {}
+vcloggers = {}
 voiceplay = {}
 playback_mode_locks = {}
 
@@ -266,10 +268,12 @@ async def get_autodelete(chat_id: int) -> bool:
 
 async def set_autodelete(chat_id: int, mode: bool):
     enabled = bool(mode)
-    autodelete[chat_id] = enabled
     await autodeletedb.update_one(
         {"chat_id": chat_id}, {"$set": {"mode": enabled}}, upsert=True
     )
+    autodelete[chat_id] = enabled
+    from VIVAANXMUSIC import app
+    app.message_cleanup.set_enabled(chat_id, enabled)
 
 
 async def get_vcnotify(chat_id: int) -> bool:
@@ -302,6 +306,25 @@ async def set_music_enabled(chat_id: int, enabled: bool):
 
 async def get_vcnotify_chats():
     async for row in vcnotifydb.find({"mode": True}, {"chat_id": 1}):
+        yield int(row["chat_id"])
+
+
+async def get_vc_logger(chat_id: int):
+    if chat_id not in vcloggers:
+        row = await vcloggerdb.find_one({"chat_id": chat_id})
+        vcloggers[chat_id] = row.get("logger_id") if row else None
+    return vcloggers[chat_id]
+
+
+async def set_vc_logger(chat_id: int, logger_id):
+    await vcloggerdb.update_one(
+        {"chat_id": chat_id}, {"$set": {"logger_id": logger_id}}, upsert=True
+    )
+    vcloggers[chat_id] = logger_id
+
+
+async def get_autodelete_chats():
+    async for row in autodeletedb.find({"mode": True}, {"chat_id": 1}):
         yield int(row["chat_id"])
 
 
