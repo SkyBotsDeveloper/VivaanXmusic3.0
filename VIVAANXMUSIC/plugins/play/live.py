@@ -8,9 +8,11 @@ from VIVAANXMUSIC.utils.decorators.language import languageCB
 from VIVAANXMUSIC.utils.errors import capture_callback_err
 from VIVAANXMUSIC.utils.stream.stream import stream
 from config import AYU, BANNED_USERS
+from VIVAANXMUSIC.utils.music_gate import music_callback
 
 
 @app.on_callback_query(filters.regex("LiveStream") & ~BANNED_USERS)
+@music_callback
 @languageCB
 @capture_callback_err
 async def play_live_stream(client, CallbackQuery, _):

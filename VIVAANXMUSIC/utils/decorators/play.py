@@ -25,6 +25,7 @@ from VIVAANXMUSIC.utils.database import (
 )
 from VIVAANXMUSIC.utils.inline import botplaylist_markup
 from VIVAANXMUSIC.utils.rich_buttons import rich_call
+from VIVAANXMUSIC.utils.music_gate import check_music_request, has_music_approval
 
 # Cache for invite links per chat
 links = {}
@@ -54,6 +55,11 @@ def PlayWrapper(command):
                     text=f"{app.mention} ɪs ᴜɴᴅᴇʀ ᴍᴀɪɴᴛᴇɴᴀɴᴄᴇ, ᴠɪsɪᴛ <a href={SUPPORT_CHAT}>sᴜᴘᴘᴏʀᴛ ᴄʜᴀᴛ</a> ғᴏʀ ᴋɴᴏᴡɪɴɢ ᴛʜᴇ ʀᴇᴀsᴏɴ.",
                     disable_web_page_preview=True,
                 )
+
+        if not await check_music_request(
+            message, message.from_user.id, lambda: wrapper(client, message)
+        ):
+            return
 
         try:
             await message.delete()
@@ -96,8 +102,11 @@ def PlayWrapper(command):
             channel = None
 
         playmode = await get_playmode(message.chat.id)
+        approved = has_music_approval(message.chat.id, message.from_user.id)
+        if approved:
+            playmode = "Direct"
         playty = await get_playtype(message.chat.id)
-        if playty != "Everyone":
+        if playty != "Everyone" and not approved:
             if message.from_user.id not in SUDOERS:
                 admins = adminlist.get(message.chat.id)
                 if not admins:
@@ -105,7 +114,7 @@ def PlayWrapper(command):
                 elif message.from_user.id not in admins:
                     return await message.reply_text(_["play_4"])
 
-        if message.command[0][0] == "v":
+        if message.command[0][0] == "v" or message.command[0] == "fvplay":
             video = True
         else:
             if "-v" in message.text:
@@ -113,8 +122,8 @@ def PlayWrapper(command):
             else:
                 video = True if message.command[0][1] == "v" else None
 
-        if message.command[0][-1] == "e":
-            if not await is_active_chat(chat_id):
+        if message.command[0].endswith("force") or message.command[0] in {"fplay", "fvplay"}:
+            if not await is_active_chat(chat_id) and not approved:
                 return await message.reply_text(_["play_16"])
             fplay = True
         else:

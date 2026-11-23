@@ -6,17 +6,19 @@ from typing import Union
 
 from ntgcalls import TelegramServerError
 from pyrogram import Client
-from pyrogram.enums import ChatType
-from pyrogram.errors import ChatAdminRequired, ChatSendPlainForbidden, ChatWriteForbidden, Forbidden
+from pyrogram.enums import ChatType, ChatMemberStatus
+from pyrogram.errors import ChatAdminRequired, ChatSendPlainForbidden, ChatWriteForbidden, Forbidden, UserNotParticipant, UserAlreadyParticipant, InviteRequestSent
 from pyrogram.handlers import RawUpdateHandler
 from pyrogram.raw.functions.channels import GetFullChannel
 from pyrogram.raw.functions.messages import GetFullChat
+from pyrogram.raw.functions.phone import GetGroupParticipants
 from pyrogram.raw.types import PeerUser, UpdateGroupCallParticipants
 from pyrogram.types import InlineKeyboardMarkup
 from pytgcalls import PyTgCalls
 from pytgcalls.exceptions import NoActiveGroupCall
 from pytgcalls.types import (
     AudioQuality,
+    GroupCallConfig,
     ChatUpdate,
     Device,
     Direction,
@@ -35,6 +37,10 @@ from VIVAANXMUSIC.utils.database import (
     add_active_chat,
     add_active_video_chat,
     get_autoplay,
+    get_assistant,
+    get_cmode,
+    get_vcnotify_chats,
+    is_music_enabled,
     get_lang,
     get_loop,
     get_voiceplay,
@@ -64,6 +70,7 @@ from VIVAANXMUSIC.utils.stream.precache import schedule_youtube_precache_for_cha
 from VIVAANXMUSIC.utils.errors import capture_internal_err, send_large_error
 from VIVAANXMUSIC.utils.voiceplay_policy import should_prompt_after_track
 from VIVAANXMUSIC.utils.rich_buttons import rich_call
+from VIVAANXMUSIC.utils.music_gate import assert_music_stream_allowed
 
 autoend = {}
 counter = {}
@@ -226,6 +233,11 @@ class Call:
         self._stream_locks: dict[int, asyncio.Lock] = {}
         self._active_stream_specs: dict[int, dict] = {}
         self._stream_generations: dict[int, int] = {}
+        self.idle_notify_calls: set[int] = set()
+        self._vc_presence_suppressed: dict[int, int] = {}
+        self._vc_ban_notices: dict[int, int] = {}
+        self._vc_presence_task = None
+        self._queue_generations: dict[int, int] = {}
 
 
     def _get_stream_lock(self, chat_id: int) -> asyncio.Lock:
@@ -250,17 +262,33 @@ class Call:
         return ignored
 
     async def _real_vc_listener_ids(self, assistant: PyTgCalls, chat_id: int) -> set[int]:
-        participants = await assistant.get_participants(chat_id)
+        # PyTgCalls' participant cache can retain departed listeners. Fetch a
+        # fresh Telegram snapshot instead; muted people still count as listeners.
+        client = await get_assistant(chat_id)
+        call = await self._resolve_vc_call(chat_id, client)
+        if not call:
+            raise NoActiveGroupCall()
         ignored = self._ignored_vc_user_ids()
         listeners = set()
-        for participant in participants or []:
-            user_id = getattr(participant, "user_id", None)
-            if not user_id:
-                continue
-            user_id = int(user_id)
-            if user_id in ignored:
-                continue
-            listeners.add(user_id)
+        offset = ""
+        while True:
+            result = await client.invoke(GetGroupParticipants(
+                call=call, ids=[], sources=[], offset=offset, limit=100,
+            ))
+            bots = {user.id for user in result.users if getattr(user, "bot", False)}
+            for participant in result.participants:
+                if getattr(participant, "self", False) or getattr(participant, "left", False):
+                    continue
+                peer = participant.peer
+                user_id = getattr(peer, "user_id", None)
+                if user_id is None:
+                    user_id = -int(getattr(peer, "channel_id", None) or getattr(peer, "chat_id", 0))
+                if user_id and user_id not in ignored and user_id not in bots:
+                    listeners.add(int(user_id))
+            # One human listener is enough to reset the inactivity timer.
+            if listeners or not result.next_offset or result.next_offset == offset:
+                break
+            offset = result.next_offset
         return listeners
 
     async def _empty_vc_elapsed(self, assistant: PyTgCalls, chat_id: int) -> tuple[bool, float]:
@@ -276,7 +304,9 @@ class Call:
     async def _allow_autoplay_for_vc_state(self, chat_id: int) -> bool:
         try:
             assistant = await group_assistant(self, chat_id)
-            is_empty, elapsed = await self._empty_vc_elapsed(assistant, chat_id)
+            is_empty, elapsed = await asyncio.wait_for(
+                self._empty_vc_elapsed(assistant, chat_id), timeout=20
+            )
         except Exception as err:
             LOGGER(__name__).warning(
                 "Autoplay listener check skipped | chat_id=%s | reason=%s",
@@ -298,7 +328,7 @@ class Call:
         try:
             await app.send_message(
                 int(notify_chat_id),
-                "Playback stopped because no listeners were in the voice chat for 5 minutes.",
+                "No one was listening for 5 minutes, so I stopped the music, cleared the queue and left the VC.",
             )
         except Exception:
             pass
@@ -306,14 +336,17 @@ class Call:
     async def _empty_vc_watchdog_loop(self, chat_id: int) -> None:
         try:
             while True:
-                if chat_id not in self.active_calls or not db.get(chat_id):
+                if chat_id not in self.active_calls or chat_id in self.idle_notify_calls:
                     empty_vc_since.pop(chat_id, None)
                     return
 
                 try:
                     assistant = await group_assistant(self, chat_id)
-                    is_empty, elapsed = await self._empty_vc_elapsed(assistant, chat_id)
+                    is_empty, elapsed = await asyncio.wait_for(
+                        self._empty_vc_elapsed(assistant, chat_id), timeout=20
+                    )
                 except Exception as err:
+                    empty_vc_since.pop(chat_id, None)
                     LOGGER(__name__).warning(
                         "Empty VC watchdog check failed | chat_id=%s | reason=%s",
                         chat_id,
@@ -336,7 +369,7 @@ class Call:
                     chat_id,
                     int(elapsed),
                 )
-                await self.stop_stream(chat_id)
+                await self.stop_stream(chat_id, leave=True, suppress_notifications=True)
                 await self._send_empty_vc_stop_notice(notify_chat_id)
                 return
         except asyncio.CancelledError:
@@ -532,26 +565,28 @@ class Call:
         )
         return True
 
-    async def _resolve_vc_call_id(self, chat_id: int) -> int | None:
+    async def _resolve_vc_call(self, chat_id: int, client=None):
+        client = client or app
         try:
-            chat = await app.get_chat(chat_id)
+            chat = await client.get_chat(chat_id)
         except Exception:
             return None
 
         try:
             if chat.type in {ChatType.SUPERGROUP, ChatType.CHANNEL, ChatType.FORUM}:
-                full = await app.invoke(
-                    GetFullChannel(channel=await app.resolve_peer(chat_id))
+                full = await client.invoke(
+                    GetFullChannel(channel=await client.resolve_peer(chat_id))
                 )
             else:
-                full = await app.invoke(GetFullChat(chat_id=abs(int(chat_id))))
+                full = await client.invoke(GetFullChat(chat_id=abs(int(chat_id))))
         except Exception:
             return None
 
-        call = getattr(getattr(full, "full_chat", None), "call", None)
-        if not call:
-            return None
-        return int(call.id)
+        return getattr(getattr(full, "full_chat", None), "call", None)
+
+    async def _resolve_vc_call_id(self, chat_id: int) -> int | None:
+        call = await self._resolve_vc_call(chat_id)
+        return int(call.id) if call else None
 
     @staticmethod
     def _extract_user_id_from_peer(peer) -> int | None:
@@ -610,6 +645,8 @@ class Call:
         date: int = 0,
         source: int = 0,
     ) -> None:
+        if user_id in self._ignored_vc_user_ids():
+            return
         if not self._remember_join_notice(notify_chat_id, user_id, date, source):
             return
 
@@ -690,22 +727,34 @@ class Call:
         notify_chat_id: int,
     ) -> None:
         try:
+            presence_check = 0.0
             while True:
                 if not await get_vcnotify(notify_chat_id):
-                    vc_join_snapshots.pop(chat_id, None)
-                    await asyncio.sleep(1)
+                    return
+
+                if time.monotonic() >= presence_check:
+                    presence_check = time.monotonic() + 30
+                    try:
+                        await asyncio.wait_for(
+                            self.ensure_vc_notify_presence(chat_id, notify_chat_id), timeout=25
+                        )
+                    except Exception as err:
+                        LOGGER(__name__).warning("VC notification presence check failed | chat_id=%s | %s", chat_id, type(err).__name__)
+
+                if chat_id not in self.active_calls:
+                    await asyncio.sleep(5)
                     continue
 
                 try:
                     current_ids = await self._fetch_vc_participant_ids(chat_id)
                 except Exception:
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(5)
                     continue
 
                 previous_ids = vc_join_snapshots.get(chat_id)
                 if previous_ids is None:
                     vc_join_snapshots[chat_id] = current_ids
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(5)
                     continue
 
                 joined_ids = current_ids - previous_ids
@@ -719,7 +768,7 @@ class Call:
                         continue
 
                 vc_join_snapshots[chat_id] = current_ids
-                await asyncio.sleep(1)
+                await asyncio.sleep(5)
         except asyncio.CancelledError:
             raise
         finally:
@@ -735,8 +784,8 @@ class Call:
         if not await get_vcnotify(notify_chat_id):
             return False
 
-        call_id = await self._resolve_vc_call_id(chat_id)
         vc_join_targets[chat_id] = notify_chat_id
+        call_id = await self._resolve_vc_call_id(chat_id)
         if call_id:
             vc_join_call_map[call_id] = {
                 "chat_id": chat_id,
@@ -756,6 +805,79 @@ class Call:
             )
         return True
 
+    async def ensure_vc_notify_presence(self, chat_id: int, notify_chat_id: int) -> bool:
+        if not await get_vcnotify(notify_chat_id):
+            return False
+        call_id = await self._resolve_vc_call_id(chat_id)
+        if not call_id:
+            return False
+        if self._vc_presence_suppressed.get(chat_id) == call_id:
+            return False
+        self._vc_presence_suppressed.pop(chat_id, None)
+        for old_id, info in list(vc_join_call_map.items()):
+            if info["chat_id"] == chat_id and old_id != call_id:
+                vc_join_call_map.pop(old_id, None)
+        vc_join_call_map[call_id] = {"chat_id": chat_id, "notify_chat_id": notify_chat_id}
+        user = await get_assistant(chat_id)
+        try:
+            member = await app.get_chat_member(chat_id, user.id)
+            if member.status in {ChatMemberStatus.BANNED, ChatMemberStatus.RESTRICTED}:
+                if not await get_vcnotify(notify_chat_id):
+                    return False
+                if self._vc_ban_notices.get(chat_id) != call_id:
+                    # Claim before awaiting: the service event and monitor can
+                    # observe the same banned assistant concurrently.
+                    self._vc_ban_notices[chat_id] = call_id
+                    try:
+                        await app.send_message(
+                            notify_chat_id,
+                            "Unban my assistant for VC notifications.\n"
+                            f"Assistant: <a href='tg://user?id={user.id}'>{user.id}</a>",
+                        )
+                    except Exception:
+                        if self._vc_ban_notices.get(chat_id) == call_id:
+                            self._vc_ban_notices.pop(chat_id, None)
+                        raise
+                return False
+            missing = member.status == ChatMemberStatus.LEFT
+        except UserNotParticipant:
+            missing = True
+        if missing:
+            chat = await app.get_chat(chat_id)
+            invite = chat.username or await app.export_chat_invite_link(chat_id)
+            try:
+                await user.join_chat(invite)
+            except UserAlreadyParticipant:
+                pass
+            except InviteRequestSent:
+                await app.approve_chat_join_request(chat_id, user.id)
+                return False
+        async with self._get_stream_lock(chat_id):
+            if not await get_vcnotify(notify_chat_id):
+                return False
+            if chat_id in self.active_calls:
+                return True
+            assistant = await group_assistant(self, chat_id)
+            # Native listen-only call: no FFmpeg process or silence loop.
+            await assistant.play(chat_id, None, config=GroupCallConfig(auto_start=False))
+            self.active_calls.add(chat_id)
+            self.idle_notify_calls.add(chat_id)
+            vc_join_snapshots.pop(chat_id, None)
+        return True
+
+    async def restore_vc_notify_presence(self) -> None:
+        try:
+            async for chat_id in get_vcnotify_chats():
+                try:
+                    await self.maybe_start_vc_join_notifier(chat_id, chat_id)
+                    linked_chat_id = await get_cmode(chat_id)
+                    if linked_chat_id:
+                        await self.maybe_start_vc_join_notifier(linked_chat_id, chat_id)
+                except Exception as err:
+                    LOGGER(__name__).warning("Could not restore VC notifications | chat_id=%s | %s", chat_id, type(err).__name__)
+        except Exception as err:
+            LOGGER(__name__).warning("Could not load VC notification settings: %s", type(err).__name__)
+
     async def stop_vc_join_notifier(self, chat_id: int) -> None:
         task = vc_join_monitors.pop(chat_id, None)
         if task and not task.done():
@@ -766,11 +888,23 @@ class Call:
             if info.get("chat_id") == chat_id:
                 vc_join_call_map.pop(call_id, None)
 
-    async def _play_stream(self, assistant: PyTgCalls, chat_id: int, stream: MediaStream) -> None:
+    async def _play_stream(self, assistant: PyTgCalls, chat_id: int, stream: MediaStream, *, queue_generation=None) -> None:
         async with self._get_stream_lock(chat_id):
             for attempt in range(2):
                 try:
+                    if queue_generation is not None and queue_generation != self._queue_generations.get(chat_id, 0):
+                        raise asyncio.CancelledError("Queue was stopped while preparing its next track")
+                    await assert_music_stream_allowed()
                     await assistant.play(chat_id, stream)
+                    if queue_generation is not None and queue_generation != self._queue_generations.get(chat_id, 0):
+                        await assistant.leave_call(chat_id)
+                        raise asyncio.CancelledError("Queue was stopped while starting its next track")
+                    try:
+                        await assert_music_stream_allowed()
+                    except AssistantErr:
+                        await assistant.leave_call(chat_id)
+                        self.active_calls.discard(chat_id)
+                        raise
                     source_path = getattr(stream, "_vivaan_source_path", None)
                     if source_path:
                         self._active_stream_specs[chat_id] = {
@@ -944,22 +1078,42 @@ class Call:
         await assistant.unmute(chat_id)
 
     @capture_internal_err
-    async def stop_stream(self, chat_id: int) -> None:
+    async def stop_stream(self, chat_id: int, *, leave=False, suppress_notifications=False) -> None:
         assistant = await group_assistant(self, chat_id)
+        notify_chat_id = vc_join_targets.get(chat_id, chat_id)
+        if suppress_notifications:
+            call_id = await self._resolve_vc_call_id(chat_id)
+            if call_id:
+                self._vc_presence_suppressed[chat_id] = call_id
+        self._queue_generations[chat_id] = self._queue_generations.get(chat_id, 0) + 1
+        self.idle_notify_calls.discard(chat_id)
         await self.stop_vc_join_notifier(chat_id)
         await _clear_(chat_id)
-        if chat_id not in self.active_calls:
-            return
         try:
-            await assistant.leave_call(chat_id)
+            if not leave and await get_vcnotify(notify_chat_id) and chat_id in self.active_calls:
+                async with self._get_stream_lock(chat_id):
+                    self.idle_notify_calls.add(chat_id)
+                    await assistant.play(chat_id, None, config=GroupCallConfig(auto_start=False))
+                return
+            if chat_id in self.active_calls:
+                await assistant.leave_call(chat_id)
         except Exception:
-            pass
+            self.idle_notify_calls.discard(chat_id)
+            try:
+                await assistant.leave_call(chat_id)
+            except Exception:
+                pass
         finally:
-            self.active_calls.discard(chat_id)
+            if chat_id not in self.idle_notify_calls:
+                self.active_calls.discard(chat_id)
+            if await get_vcnotify(notify_chat_id):
+                await self.maybe_start_vc_join_notifier(chat_id, notify_chat_id)
 
 
     @capture_internal_err
     async def force_stop_stream(self, chat_id: int) -> None:
+        self._queue_generations[chat_id] = self._queue_generations.get(chat_id, 0) + 1
+        self.idle_notify_calls.discard(chat_id)
         assistant = await group_assistant(self, chat_id)
         await self.stop_vc_join_notifier(chat_id)
         try:
@@ -1102,6 +1256,8 @@ class Call:
             raise AssistantErr(
                 f"ᴜɴᴀʙʟᴇ ᴛᴏ ᴊᴏɪɴ ᴛʜᴇ ɢʀᴏᴜᴘ ᴄᴀʟʟ.\nRᴇᴀsᴏɴ: {e}"
             )
+        self.idle_notify_calls.discard(chat_id)
+        self._vc_presence_suppressed.pop(chat_id, None)
         self.active_calls.add(chat_id)
         await add_active_chat(chat_id)
         await music_on(chat_id)
@@ -1111,7 +1267,7 @@ class Call:
         self._schedule_empty_vc_watchdog(chat_id)
         self._schedule_playback_watchdog(assistant, chat_id, initial_delay=2)
 
-        if await is_autoend():
+        if await is_autoend() and not await get_autoplay(chat_id):
             counter[chat_id] = {}
             users = len(await assistant.get_participants(chat_id))
             if users == 1:
@@ -1120,14 +1276,16 @@ class Call:
     async def _enqueue_autoplay_track(self, chat_id: int, finished_track: dict) -> bool:
         if not finished_track or not await get_autoplay(chat_id):
             return False
+        if not await is_music_enabled(finished_track.get("chat_id", chat_id)):
+            return False
+        generation = self._queue_generations.get(chat_id, 0)
         if not await self._allow_autoplay_for_vc_state(chat_id):
             LOGGER(__name__).info(
                 "Autoplay blocked because VC has no listeners | chat_id=%s",
                 chat_id,
             )
-            await self._send_empty_vc_stop_notice(
-                finished_track.get("chat_id", chat_id)
-            )
+            await self.stop_stream(chat_id, leave=True, suppress_notifications=True)
+            await self._send_empty_vc_stop_notice(finished_track.get("chat_id", chat_id))
             return False
 
         queued_file = str(finished_track.get("file") or "")
@@ -1161,6 +1319,11 @@ class Call:
         if not recommendation:
             return False
 
+        if (generation != self._queue_generations.get(chat_id, 0)
+                or chat_id not in self.active_calls
+                or not await is_music_enabled(finished_track.get("chat_id", chat_id))):
+            return False
+
         db.setdefault(chat_id, []).append(
             {
                 "title": recommendation["title"].title(),
@@ -1187,6 +1350,8 @@ class Call:
         if db.get(chat_id):
             return False
 
+        if chat_id not in self.active_calls:
+            return True
         voiceplay = await get_voiceplay(chat_id)
         if should_prompt_after_track(
             enabled=voiceplay["enabled"],
@@ -1222,16 +1387,7 @@ class Call:
         ):
             return False
 
-        await _clear_(chat_id)
-        if chat_id in self.active_calls:
-            try:
-                await client.leave_call(chat_id)
-            except NoActiveGroupCall:
-                pass
-            except Exception:
-                pass
-            finally:
-                self.active_calls.discard(chat_id)
+        await self.stop_stream(chat_id)
         return True
 
     async def _discard_unplayable_queue_head(
@@ -1316,6 +1472,7 @@ class Call:
 
     @capture_internal_err
     async def play(self, client, chat_id: int) -> None:
+        generation = self._queue_generations.get(chat_id, 0)
         _cancel_playback_watchdog(chat_id)
         check = db.get(chat_id)
         popped = None
@@ -1329,13 +1486,15 @@ class Call:
             await auto_clean(popped)
             if await self._stop_if_queue_empty(client, chat_id, popped):
                 return
-        except:
+        except Exception:
             try:
                 await _clear_(chat_id)
                 return await client.leave_call(chat_id)
-            except:
+            except Exception:
                 return
         while True:
+            if generation != self._queue_generations.get(chat_id, 0):
+                return
             check = db.get(chat_id)
             if not check:
                 await self._stop_if_queue_empty(
@@ -1400,7 +1559,7 @@ class Call:
 
                 stream = dynamic_media_stream(path=link, video=video)
                 try:
-                    await self._play_stream(client, chat_id, stream)
+                    await self._play_stream(client, chat_id, stream, queue_generation=generation)
                 except Exception:
                     return await app.send_message(original_chat_id, text=_["call_6"])
                 self._schedule_playback_watchdog(client, chat_id)
@@ -1446,8 +1605,8 @@ class Call:
 
                 stream = dynamic_media_stream(path=file_path, video=video)
                 try:
-                    await self._play_stream(client, chat_id, stream)
-                except:
+                    await self._play_stream(client, chat_id, stream, queue_generation=generation)
+                except Exception:
                     fallback_modes = ("local",) if not direct else ("stream",)
                     fallback_path, fallback_direct, fallback_mode = await self._download_youtube_queue_source(
                         videoid,
@@ -1475,8 +1634,8 @@ class Call:
                     )
                     stream = dynamic_media_stream(path=file_path, video=video)
                     try:
-                        await self._play_stream(client, chat_id, stream)
-                    except:
+                        await self._play_stream(client, chat_id, stream, queue_generation=generation)
+                    except Exception:
                         return await app.send_message(original_chat_id, text=_["call_6"])
                 self._schedule_playback_watchdog(client, chat_id)
 
@@ -1510,8 +1669,8 @@ class Call:
                     continue
                 stream = dynamic_media_stream(path=videoid, video=video)
                 try:
-                    await self._play_stream(client, chat_id, stream)
-                except:
+                    await self._play_stream(client, chat_id, stream, queue_generation=generation)
+                except Exception:
                     return await app.send_message(original_chat_id, text=_["call_6"])
                 self._schedule_playback_watchdog(client, chat_id)
 
@@ -1530,8 +1689,8 @@ class Call:
             else:
                 stream = dynamic_media_stream(path=queued, video=video)
                 try:
-                    await self._play_stream(client, chat_id, stream)
-                except:
+                    await self._play_stream(client, chat_id, stream, queue_generation=generation)
+                except Exception:
                     return await app.send_message(original_chat_id, text=_["call_6"])
                 self._schedule_playback_watchdog(client, chat_id)
 
@@ -1637,10 +1796,12 @@ class Call:
                 if isinstance(update, ChatUpdate):
                     status = update.status
                     if (status & ChatUpdate.Status.LEFT_CALL) or (status & CRITICAL):
-                        await self.stop_stream(update.chat_id)
+                        await self.stop_stream(update.chat_id, leave=True)
                         return
 
                 elif isinstance(update, StreamEnded):
+                    if update.chat_id in self.idle_notify_calls:
+                        return
                     if (
                         update.stream_type == StreamEnded.Type.AUDIO
                         and update.device == Device.MICROPHONE

@@ -7,6 +7,7 @@ from VIVAANXMUSIC.misc import db
 from VIVAANXMUSIC.utils.exceptions import AssistantErr
 from VIVAANXMUSIC.utils.formatters import check_duration, seconds_to_min
 from config import autoclean, time_to_seconds
+from VIVAANXMUSIC.utils.music_gate import assert_music_stream_allowed
 
 QUEUE_LIMIT = int(getattr(config, "QUEUE_LIMIT", getenv("QUEUE_LIMIT", "10")))
 
@@ -32,12 +33,14 @@ async def put_queue(
     stream,
     forceplay: Union[bool, str] = None,
 ):
+    await assert_music_stream_allowed()
     _ensure_queue_slot(chat_id)
     title = title.title()
     try:
         duration_in_seconds = time_to_seconds(duration) - 3
     except:
         duration_in_seconds = 0
+    await assert_music_stream_allowed()
     put = {
         "title": title,
         "dur": duration,
@@ -91,6 +94,7 @@ async def put_queue_index(
             dur = 0
     else:
         dur = 0
+    await assert_music_stream_allowed()
     put = {
         "title": title,
         "dur": duration,

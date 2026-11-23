@@ -6,7 +6,8 @@ from pyrogram.enums import ChatType
 import config
 from VIVAANXMUSIC import app
 from VIVAANXMUSIC.core.call import JARVIS, autoend
-from VIVAANXMUSIC.utils.database import get_client, is_active_chat, is_autoend
+from VIVAANXMUSIC.utils.database import get_client, is_active_chat, is_autoend, get_vcnotify
+from VIVAANXMUSIC.core.call import vc_join_targets
 
 
 async def auto_leave():
@@ -31,7 +32,8 @@ async def auto_leave():
                             ):
                                 if left == 20:
                                     continue
-                                if not await is_active_chat(i.chat.id):
+                                notify_chat = vc_join_targets.get(i.chat.id, i.chat.id)
+                                if not await is_active_chat(i.chat.id) and not await get_vcnotify(notify_chat):
                                     try:
                                         await client.leave_chat(i.chat.id)
                                         left += 1

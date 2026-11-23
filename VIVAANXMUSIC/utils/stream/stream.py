@@ -20,6 +20,7 @@ from VIVAANXMUSIC.utils.stream.cards import schedule_stream_card
 from VIVAANXMUSIC.utils.stream.queue import put_queue, put_queue_index
 from VIVAANXMUSIC.utils.errors import capture_internal_err
 from VIVAANXMUSIC.utils.rich_buttons import rich_call
+from VIVAANXMUSIC.utils.music_gate import music_request_allowed, OFF_TEXT, guard_music_stream
 
 QUEUE_LIMIT = int(getattr(config, "QUEUE_LIMIT", os.getenv("QUEUE_LIMIT", "10")))
 PLAYLIST_FETCH_LIMIT = int(
@@ -75,6 +76,7 @@ async def _join_youtube_with_fallback(
 
 
 @capture_internal_err
+@guard_music_stream
 async def stream(
     _,
     mystic,
@@ -89,6 +91,10 @@ async def stream(
     forceplay: Union[bool, str] = None,
 ) -> None:
     if not result:
+        return
+
+    if not await music_request_allowed(original_chat_id, user_id):
+        await mystic.edit_text(OFF_TEXT)
         return
 
     forceplay = bool(forceplay)

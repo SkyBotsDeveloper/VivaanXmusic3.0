@@ -30,6 +30,7 @@ from VIVAANXMUSIC.utils.stream.source_status import get_youtube_source_status
 from VIVAANXMUSIC.utils.stream.stream import stream
 from VIVAANXMUSIC.utils.url_guard import is_safe_media_url
 from VIVAANXMUSIC.utils.rich_buttons import rich_call
+from VIVAANXMUSIC.utils.music_gate import music_callback
 
 PLAYLIST_FETCH_LIMIT = int(
     getattr(
@@ -51,6 +52,8 @@ PLAYLIST_FETCH_LIMIT = int(
             "vplayforce",
             "cplayforce",
             "cvplayforce",
+            "fplay",
+            "fvplay",
         ]
     )
     & filters.group
@@ -624,6 +627,7 @@ async def play_command(
 
 
 @app.on_callback_query(filters.regex("MusicStream") & ~BANNED_USERS)
+@music_callback
 @languageCB
 @capture_callback_err
 async def play_music(client, CallbackQuery, _):
@@ -768,6 +772,7 @@ async def anonymous_check(client, CallbackQuery):
 
 
 @app.on_callback_query(filters.regex("VivaanPlaylists") & ~BANNED_USERS)
+@music_callback
 @languageCB
 @capture_callback_err
 async def play_playlists_command(client, CallbackQuery, _):

@@ -19,6 +19,7 @@ countdb = mongodb.upcount
 gbansdb = mongodb.gban
 langdb = mongodb.language
 messagevaultdb = mongodb.messagevault
+musicsettingsdb = mongodb.musicsettings
 onoffdb = mongodb.onoffper
 playmodedb = mongodb.playmode
 playtypedb = mongodb.playtypedb
@@ -46,6 +47,8 @@ playmode = {}
 playtype = {}
 skipmode = {}
 mute = {}
+music_enabled = {}
+music_revisions = {}
 vcnotify = {}
 voiceplay = {}
 playback_mode_locks = {}
@@ -280,6 +283,26 @@ async def get_vcnotify(chat_id: int) -> bool:
         vcnotify[chat_id] = mode
         return mode
     return bool(mode)
+
+
+async def is_music_enabled(chat_id: int) -> bool:
+    if chat_id not in music_enabled:
+        data = await musicsettingsdb.find_one({"chat_id": chat_id})
+        music_enabled[chat_id] = bool(data.get("enabled", True)) if data else True
+    return music_enabled[chat_id]
+
+
+async def set_music_enabled(chat_id: int, enabled: bool):
+    await musicsettingsdb.update_one(
+        {"chat_id": chat_id}, {"$set": {"enabled": bool(enabled)}}, upsert=True
+    )
+    music_enabled[chat_id] = bool(enabled)
+    music_revisions[chat_id] = music_revisions.get(chat_id, 0) + 1
+
+
+async def get_vcnotify_chats():
+    async for row in vcnotifydb.find({"mode": True}, {"chat_id": 1}):
+        yield int(row["chat_id"])
 
 
 async def set_vcnotify(chat_id: int, mode: bool):

@@ -32,8 +32,10 @@ async def vcnotify_control(_, message: Message, strings):
 
     if state in {"on", "enable", "enabled", "yes"}:
         await set_vcnotify(group_chat_id, True)
+        JARVIS._vc_presence_suppressed.pop(group_chat_id, None)
         await JARVIS.maybe_start_vc_join_notifier(group_chat_id, group_chat_id)
         if linked_chat_id:
+            JARVIS._vc_presence_suppressed.pop(linked_chat_id, None)
             await JARVIS.maybe_start_vc_join_notifier(linked_chat_id, group_chat_id)
         return await rich_call(message.reply_text,
             f"» VC join notifications have been <code>enabled</code> by : {message.from_user.mention}.",
@@ -43,8 +45,12 @@ async def vcnotify_control(_, message: Message, strings):
     if state in {"off", "disable", "disabled", "no"}:
         await set_vcnotify(group_chat_id, False)
         await JARVIS.stop_vc_join_notifier(group_chat_id)
+        if group_chat_id in JARVIS.idle_notify_calls:
+            await JARVIS.stop_stream(group_chat_id, leave=True)
         if linked_chat_id:
             await JARVIS.stop_vc_join_notifier(linked_chat_id)
+            if linked_chat_id in JARVIS.idle_notify_calls:
+                await JARVIS.stop_stream(linked_chat_id, leave=True)
         return await rich_call(message.reply_text,
             f"» VC join notifications have been <code>disabled</code> by : {message.from_user.mention}.",
             reply_markup=close_markup(strings),
