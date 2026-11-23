@@ -28,6 +28,9 @@ for lib, level in [
 ]:
     logging.getLogger(lib).setLevel(level)
 
+# Surface Telegram request retry causes; the final timeout alone hides them.
+logging.getLogger("pyrogram.session.session").setLevel(logging.WARNING)
+
 
 class SecretRedactionFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
