@@ -4,6 +4,7 @@ from pyrogram.enums import ChatMemberStatus
 
 import config
 from ..logging import LOGGER
+from .bot_start_retry import start_with_telegram_retry
 
 
 class JARVIS(Client):
@@ -20,7 +21,7 @@ class JARVIS(Client):
         LOGGER(__name__).info("Bot client initialized.")
 
     async def start(self):
-        await super().start()
+        await start_with_telegram_retry(super().start, LOGGER(__name__))
         me = await self.get_me()
         self.username, self.id = me.username, me.id
         self.name = f"{me.first_name} {me.last_name or ''}".strip()
