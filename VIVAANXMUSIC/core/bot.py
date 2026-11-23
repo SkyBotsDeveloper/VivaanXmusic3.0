@@ -4,7 +4,7 @@ from pyrogram.enums import ChatMemberStatus
 
 import config
 from ..logging import LOGGER
-from .bot_start_retry import start_with_telegram_retry
+from .bot_start_retry import select_bot_login_dc, start_with_telegram_retry
 
 
 class JARVIS(Client):
@@ -19,6 +19,11 @@ class JARVIS(Client):
             max_concurrent_transmissions=7,
         )
         LOGGER(__name__).info("Bot client initialized.")
+
+    async def sign_in_bot(self, bot_token):
+        if await select_bot_login_dc(self, config.BOT_LOGIN_DC):
+            LOGGER(__name__).info("Using Telegram DC %s for fresh bot authorization.", config.BOT_LOGIN_DC)
+        return await super().sign_in_bot(bot_token)
 
     async def start(self):
         await start_with_telegram_retry(super().start, LOGGER(__name__))

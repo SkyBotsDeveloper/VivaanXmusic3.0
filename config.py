@@ -10,6 +10,9 @@ load_dotenv()
 API_ID = int(getenv("API_ID", 27798659))
 API_HASH = getenv("API_HASH", "26100c77cee02e5e34b2bbee58440f86")
 BOT_TOKEN = getenv("BOT_TOKEN")
+BOT_LOGIN_DC = int(getenv("BOT_LOGIN_DC", "0"))
+if BOT_LOGIN_DC not in range(6):
+    raise ValueError("BOT_LOGIN_DC must be 0 (automatic) or a Telegram DC from 1 to 5")
 
 OWNER_ID = int(getenv("OWNER_ID", 8088623806))
 OWNER_USERNAME = getenv("OWNER_USERNAME", "EliteSid")
