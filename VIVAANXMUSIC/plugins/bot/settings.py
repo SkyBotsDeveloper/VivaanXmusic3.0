@@ -31,7 +31,7 @@ from VIVAANXMUSIC.utils.inline.settings import (
     vote_mode_markup,
 )
 from VIVAANXMUSIC.utils.inline.start import private_panel
-from config import BANNED_USERS, OWNER_ID, START_VIDS
+from config import BANNED_USERS, START_VIDS
 from VIVAANXMUSIC.utils.rich_buttons import rich_call, restore_welcome
 
 # ─── SETTINGS MESSAGE ──────────────────────────────────────────────
@@ -71,7 +71,6 @@ async def settings_back_markup(client, callback: CallbackQuery, _):
         pass
 
     if callback.message.chat.type == ChatType.PRIVATE:
-        await app.resolve_peer(OWNER_ID)
         buttons = private_panel(_)
         return await restore_welcome(callback.message,
             _["start_2"].format(callback.from_user.mention, app.mention),

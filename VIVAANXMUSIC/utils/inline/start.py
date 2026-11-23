@@ -24,7 +24,10 @@ def private_panel(_):
             )
         ],
         [
-            primary_button(text=_["S_B_7"], user_id=config.OWNER_ID),
+            primary_button(
+                text=_["S_B_7"],
+                url=getattr(app, "owner_profile_url", None) or f"tg://user?id={config.OWNER_ID}",
+            ),
             success_button(text=_["S_B_4"], url=config.SUPPORT_CHAT),
         ],
         [

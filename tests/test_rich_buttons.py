@@ -81,6 +81,17 @@ def builder_namespace(filename, names=None):
 
 
 class LayoutTest(unittest.TestCase):
+    def test_dev_button_keeps_resolved_owner_profile_in_native_rich_message(self):
+        start = builder_namespace("utils/inline/start.py")
+        start["app"].owner_profile_url = "https://t.me/configured_owner?profile"
+        for path in (ROOT / "strings/langs").glob("*.yml"):
+            strings = yaml.safe_load(path.read_text(encoding="utf-8"))
+            markup = start["private_panel"](strings)
+            parsed = self.assert_preserved(markup)
+            button = parsed.rows[1][0]
+            self.assertEqual(button["label"], "Dev")
+            self.assertEqual(button["attrs"]["url"], "https://t.me/configured_owner?profile")
+
     def assert_preserved(self, markup):
         markup = keyboard(markup)
         before = [[copy.copy(button.__dict__) for button in row] for row in markup.inline_keyboard]

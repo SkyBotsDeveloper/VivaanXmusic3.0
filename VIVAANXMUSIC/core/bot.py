@@ -5,6 +5,7 @@ from pyrogram.enums import ChatMemberStatus
 import config
 from ..logging import LOGGER
 from .bot_start_retry import select_bot_login_dc, start_with_telegram_retry
+from .owner_profile import resolve_owner_profile_url
 
 
 class JARVIS(Client):
@@ -58,4 +59,5 @@ class JARVIS(Client):
             LOGGER(__name__).error(f"❌ Could not check admin status: {e}")
             sys.exit()
 
+        self.owner_profile_url = await resolve_owner_profile_url(self, config.OWNER_ID, LOGGER(__name__))
         LOGGER(__name__).info(f"✅ Music Bot started as {self.name} (@{self.username})")
