@@ -213,7 +213,7 @@ sudo apt update && sudo apt upgrade -y
 sudo apt install git curl ffmpeg tmux software-properties-common -y
 sudo add-apt-repository -y ppa:deadsnakes/ppa
 sudo apt update
-sudo apt install -y python3.12 python3.12-venv
+sudo apt install -y python3.12 python3.12-venv python3.12-dev build-essential
 curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
 sudo apt install -y nodejs
 npm install -g npm
