@@ -5,7 +5,6 @@ from datetime import datetime, timedelta
 from typing import Union
 
 from ntgcalls import TelegramServerError
-from pyrogram import Client
 from pyrogram.enums import ChatType, ChatMemberStatus
 from pyrogram.errors import ChatAdminRequired, ChatSendPlainForbidden, ChatWriteForbidden, Forbidden, UserNotParticipant, UserAlreadyParticipant, InviteRequestSent
 from pyrogram.handlers import RawUpdateHandler
@@ -31,7 +30,7 @@ from pytgcalls.types import (
 
 import config
 from strings import get_string
-from VIVAANXMUSIC import LOGGER, YouTube, app
+from VIVAANXMUSIC import LOGGER, YouTube, app, userbot
 from VIVAANXMUSIC.misc import db
 from VIVAANXMUSIC.utils.database import (
     add_active_chat,
@@ -209,29 +208,22 @@ async def _clear_(chat_id: int) -> None:
 
 class Call:
     def __init__(self):
-        self.userbot1 = Client(
-            "VivaanXAssis1", config.API_ID, config.API_HASH, session_string=config.STRING1
-        ) if config.STRING1 else None
+        # PyTgCalls must use the already-authenticated Pyrogram client. Creating
+        # another Client from the same session string can invalidate Telegram
+        # authorizations and also causes unnecessary concurrent connections.
+        self.userbot1 = userbot.one if config.STRING1 else None
         self.one = PyTgCalls(self.userbot1) if self.userbot1 else None
 
-        self.userbot2 = Client(
-            "VivaanXAssis2", config.API_ID, config.API_HASH, session_string=config.STRING2
-        ) if config.STRING2 else None
+        self.userbot2 = userbot.two if config.STRING2 else None
         self.two = PyTgCalls(self.userbot2) if self.userbot2 else None
 
-        self.userbot3 = Client(
-            "VivaanXAssis3", config.API_ID, config.API_HASH, session_string=config.STRING3
-        ) if config.STRING3 else None
+        self.userbot3 = userbot.three if config.STRING3 else None
         self.three = PyTgCalls(self.userbot3) if self.userbot3 else None
 
-        self.userbot4 = Client(
-            "VivaanXAssis4", config.API_ID, config.API_HASH, session_string=config.STRING4
-        ) if config.STRING4 else None
+        self.userbot4 = userbot.four if config.STRING4 else None
         self.four = PyTgCalls(self.userbot4) if self.userbot4 else None
 
-        self.userbot5 = Client(
-            "VivaanXAssis5", config.API_ID, config.API_HASH, session_string=config.STRING5
-        ) if config.STRING5 else None
+        self.userbot5 = userbot.five if config.STRING5 else None
         self.five = PyTgCalls(self.userbot5) if self.userbot5 else None
 
         self.active_calls: set[int] = set()

@@ -1,11 +1,8 @@
 import asyncio
 from datetime import datetime
 from pyrogram import filters
-from VIVAANXMUSIC import app
-from VIVAANXMUSIC.core.userbot import Userbot
+from VIVAANXMUSIC import app, userbot
 from config import OWNER_ID
-
-userbot = Userbot()
 
 BOT_LIST = [
     "Bloody_musicbot",
@@ -49,6 +46,3 @@ async def check_bots_command(client, message):
     
     last_checked_time = start_time.strftime("%Y-%m-%d")
     await processing_msg.edit_caption(f"{response}⏲️ ʟᴀsᴛ ᴄʜᴇᴄᴋ: {last_checked_time}")
-
-    if userbot.one.is_connected:
-        await userbot.one.stop()

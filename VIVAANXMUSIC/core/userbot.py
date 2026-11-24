@@ -33,6 +33,29 @@ def _has_session(value) -> bool:
     return bool(session and session.lower() not in {"none", "null"})
 
 
+def _duplicate_session_slots() -> list[tuple[int, int]]:
+    """Find assistant slots configured with the exact same Telegram session."""
+    sessions = [
+        config.STRING1,
+        config.STRING2,
+        config.STRING3,
+        config.STRING4,
+        config.STRING5,
+    ]
+    seen: dict[str, int] = {}
+    duplicates = []
+    for index, value in enumerate(sessions, start=1):
+        if not _has_session(value):
+            continue
+        session = str(value).strip()
+        previous = seen.get(session)
+        if previous is not None:
+            duplicates.append((previous, index))
+        else:
+            seen[session] = index
+    return duplicates
+
+
 # Initialize userbots
 class Userbot:
     def __init__(self):
@@ -41,35 +64,30 @@ class Userbot:
             config.API_ID,
             config.API_HASH,
             session_string=str(config.STRING1),
-            no_updates=True,
         )
         self.two = Client(
             "VivaanAssis2",
             config.API_ID,
             config.API_HASH,
             session_string=str(config.STRING2),
-            no_updates=True,
         )
         self.three = Client(
             "VivaanAssis3",
             config.API_ID,
             config.API_HASH,
             session_string=str(config.STRING3),
-            no_updates=True,
         )
         self.four = Client(
             "VivaanAssis4",
             config.API_ID,
             config.API_HASH,
             session_string=str(config.STRING4),
-            no_updates=True,
         )
         self.five = Client(
             "VivaanAssis5",
             config.API_ID,
             config.API_HASH,
             session_string=str(config.STRING5),
-            no_updates=True,
         )
 
     async def start_assistant(self, client: Client, index: int):
@@ -147,6 +165,23 @@ class Userbot:
 
     async def start(self):
         LOGGER(__name__).info("Starting Vivaan's Assistants...")
+        duplicates = _duplicate_session_slots()
+        if duplicates:
+            env_names = {
+                1: "STRING_SESSION",
+                2: "STRING_SESSION2",
+                3: "STRING_SESSION3",
+                4: "STRING_SESSION4",
+                5: "STRING_SESSION5",
+            }
+            slots = ", ".join(
+                f"{env_names[a]} and {env_names[b]}" for a, b in duplicates
+            )
+            LOGGER(__name__).error(
+                "Duplicate Telegram session configured for %s. Each assistant must use a distinct session.",
+                slots,
+            )
+            raise ValueError("Duplicate Telegram assistant sessions configured")
         await self.start_assistant(self.one, 1)
         await self.start_assistant(self.two, 2)
         await self.start_assistant(self.three, 3)
