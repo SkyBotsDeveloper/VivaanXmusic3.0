@@ -210,8 +210,10 @@ ESSE_TIMEOUT=20               # Optional - ESSE autoplay timeout in seconds; no 
 
 ### Step 1: Update & Install Packages
 sudo apt update && sudo apt upgrade -y
-sudo apt install git curl ffmpeg tmux -y
-# Python 3.12 and its venv module must be installed on the VPS
+sudo apt install git curl ffmpeg tmux software-properties-common -y
+sudo add-apt-repository -y ppa:deadsnakes/ppa
+sudo apt update
+sudo apt install -y python3.12 python3.12-venv
 curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
 sudo apt install -y nodejs
 npm install -g npm
