@@ -210,7 +210,8 @@ ESSE_TIMEOUT=20               # Optional - ESSE autoplay timeout in seconds; no 
 
 ### Step 1: Update & Install Packages
 sudo apt update && sudo apt upgrade -y
-sudo apt install git curl python3-pip python3-venv ffmpeg -y
+sudo apt install git curl ffmpeg tmux -y
+# Python 3.12 and its venv module must be installed on the VPS
 curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
 sudo apt install -y nodejs
 npm install -g npm
@@ -218,14 +219,16 @@ npm install -g npm
 ### Step 2: Clone Repo
 git clone https://github.com/SkyBotsDeveloper/VivaanXmusic3.0
 cd VivaanXmusic3.0
-tmux new -s Vivaan
 
 ### Step 3: Setup & Run
-python3 -m venv venv
+python3.12 --version  # Confirm this prints Python 3.12.x
+python3.12 -m venv venv
 source venv/bin/activate
-pip install -U pip && pip install -r requirements.txt
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 bash setup   # Fill environment variables
-bash start   # Start bot
+tmux new -s Vivaan
+bash start   # Start bot inside tmux
 
 ### Useful Commands
 tmux detach         # Use Ctrl+B, then D
