@@ -12,6 +12,15 @@ from VIVAANXMUSIC.utils.music_gate import assert_music_stream_allowed
 QUEUE_LIMIT = int(getattr(config, "QUEUE_LIMIT", getenv("QUEUE_LIMIT", "10")))
 
 
+def _schedule_playback_checkpoint(chat_id):
+    try:
+        from VIVAANXMUSIC.core.call import JARVIS
+
+        JARVIS.playback_recovery.schedule(chat_id)
+    except Exception:
+        pass
+
+
 def _queue_limit_error() -> AssistantErr:
     return AssistantErr(f"Queue limit reached. Only {QUEUE_LIMIT} tracks are allowed per chat.")
 
@@ -63,6 +72,7 @@ async def put_queue(
     else:
         db[chat_id].append(put)
     autoclean.append(file)
+    _schedule_playback_checkpoint(chat_id)
     try:
         from VIVAANXMUSIC.utils.stream.precache import schedule_youtube_precache_for_chat
 
@@ -115,3 +125,4 @@ async def put_queue_index(
             db[chat_id].append(put)
     else:
         db[chat_id].append(put)
+    _schedule_playback_checkpoint(chat_id)

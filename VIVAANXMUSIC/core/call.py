@@ -67,6 +67,7 @@ from VIVAANXMUSIC.utils.stream.autodelete import (
 )
 from VIVAANXMUSIC.utils.stream.cards import schedule_stream_card
 from VIVAANXMUSIC.utils.stream.precache import schedule_youtube_precache_for_chat
+from VIVAANXMUSIC.utils.stream.playback_recovery import PlaybackRecovery
 from VIVAANXMUSIC.utils.errors import capture_internal_err, send_large_error
 from VIVAANXMUSIC.utils.voiceplay_policy import should_prompt_after_track
 from VIVAANXMUSIC.utils.rich_buttons import rich_call
@@ -196,6 +197,9 @@ async def _clear_(chat_id: int) -> None:
     if controller is not None:
         controller._active_stream_specs.pop(chat_id, None)
         controller._stream_generations.pop(chat_id, None)
+        recovery = getattr(controller, "playback_recovery", None)
+        if recovery is not None:
+            await recovery.clear(chat_id)
     try:
         from VIVAANXMUSIC.utils.voiceplay import voiceplay_manager
 
@@ -240,6 +244,7 @@ class Call:
         self._vc_presence_task = None
         self._queue_generations: dict[int, int] = {}
         self.vc_identities = VcIdentityResolver()
+        self.playback_recovery = PlaybackRecovery(self)
 
 
     def _get_stream_lock(self, chat_id: int) -> asyncio.Lock:
@@ -924,6 +929,8 @@ class Call:
                         self._stream_generations[chat_id] = (
                             self._stream_generations.get(chat_id, 0) + 1
                         )
+                    if chat_id in self.active_calls:
+                        self.playback_recovery.schedule(chat_id)
                     return
                 except OSError as err:
                     if err.errno != 24 or attempt == 1:
@@ -1068,12 +1075,14 @@ class Call:
     async def pause_stream(self, chat_id: int) -> None:
         assistant = await group_assistant(self, chat_id)
         await assistant.pause(chat_id)
+        self.playback_recovery.schedule(chat_id)
         _cancel_playback_watchdog(chat_id)
 
     @capture_internal_err
     async def resume_stream(self, chat_id: int) -> None:
         assistant = await group_assistant(self, chat_id)
         await assistant.resume(chat_id)
+        self.playback_recovery.schedule(chat_id)
         self._schedule_playback_watchdog(assistant, chat_id)
 
     @capture_internal_err
@@ -1270,6 +1279,7 @@ class Call:
         self.active_calls.add(chat_id)
         await add_active_chat(chat_id)
         await music_on(chat_id)
+        self.playback_recovery.schedule(chat_id)
         if video:
             await add_active_video_chat(chat_id)
         await self.maybe_start_vc_join_notifier(chat_id, original_chat_id)
@@ -1281,6 +1291,101 @@ class Call:
             users = len(await assistant.get_participants(chat_id))
             if users == 1:
                 autoend[chat_id] = datetime.now() + timedelta(minutes=1)
+
+    def start_playback_recovery(self):
+        task = self.playback_recovery.start_task
+        if task is None or task.done():
+            self.playback_recovery.start_task = asyncio.create_task(
+                self.playback_recovery.start()
+            )
+
+    async def resume_saved_playback(self, chat_id: int, *, paused: bool = False):
+        queue = db.get(chat_id) or []
+        if not queue or not isinstance(queue[0], dict):
+            raise AssistantErr("Saved playback queue is unavailable.")
+
+        track = queue[0]
+        video_id = str(track.get("vidid") or "")
+        title = str(track.get("title") or "Unknown Title")
+        streamtype = track.get("streamtype") or "audio"
+        video = str(streamtype) == "video"
+        seconds = max(0, _safe_int(track.get("seconds"), 0))
+        played = min(max(0, _safe_int(track.get("played"), 0)), seconds)
+        is_live = bool(track.get("live")) or str(track.get("file") or "").startswith("live_")
+        if not video_id or (not is_live and seconds <= played):
+            raise AssistantErr("Saved track is no longer resumable.")
+
+        if is_live:
+            result, source_path = await YouTube.video(video_id, True)
+            if not result:
+                source_path = None
+        else:
+            source_path, _, _ = await self._download_youtube_queue_source(
+                video_id,
+                title,
+                _SilentMystic(),
+                streamtype,
+                modes=("stream", "local"),
+            )
+        if not source_path:
+            raise AssistantErr("Could not refresh the saved track source.")
+
+        assistant = await group_assistant(self, chat_id)
+        self.idle_notify_calls.discard(chat_id)
+        self._vc_presence_suppressed.pop(chat_id, None)
+        if paused:
+            await music_off(chat_id)
+        else:
+            await music_on(chat_id)
+
+        stream = dynamic_media_stream(
+            path=source_path,
+            video=video,
+            ffmpeg_params=(
+                None
+                if is_live
+                else f"-ss {seconds_to_min(played) if played else '00:00'} -to {track.get('dur')}"
+            ),
+        )
+        await self._play_stream(
+            assistant,
+            chat_id,
+            stream,
+            queue_generation=self._queue_generations.get(chat_id, 0),
+        )
+        self.active_calls.add(chat_id)
+        await add_active_chat(chat_id)
+        if video:
+            await add_active_video_chat(chat_id)
+        if paused:
+            try:
+                await assistant.pause(chat_id)
+            except Exception:
+                await assistant.leave_call(chat_id)
+                self.active_calls.discard(chat_id)
+                await remove_active_chat(chat_id)
+                await remove_active_video_chat(chat_id)
+                raise
+
+        original_chat_id = _safe_int(track.get("chat_id"), chat_id) or chat_id
+        try:
+            await self.maybe_start_vc_join_notifier(chat_id, original_chat_id)
+        except Exception:
+            pass
+        self._schedule_empty_vc_watchdog(chat_id)
+        self._schedule_playback_watchdog(assistant, chat_id, initial_delay=2)
+        self.playback_recovery.schedule(chat_id)
+        try:
+            await app.send_message(
+                original_chat_id,
+                (
+                    f"▶️ Rejoined live stream after bot restart: {title}"
+                    if is_live
+                    else f"▶️ Resumed after bot restart: {title} ({seconds_to_min(played) if played else '00:00'})"
+                ),
+            )
+        except Exception:
+            pass
 
     async def _enqueue_autoplay_track(self, chat_id: int, finished_track: dict) -> bool:
         if not finished_track or not await get_autoplay(chat_id):
@@ -1379,6 +1484,7 @@ class Call:
             await remove_active_video_chat(chat_id)
             await remove_active_chat(chat_id)
             await music_off(chat_id)
+            await self.playback_recovery.clear(chat_id)
             self._active_stream_specs.pop(chat_id, None)
             self._stream_generations.pop(chat_id, None)
             original_chat_id = (
